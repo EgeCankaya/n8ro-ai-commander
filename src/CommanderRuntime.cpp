@@ -19,9 +19,6 @@ std::string CommanderRuntime::statsJson() const {
     (void)probe.setString("result", toString(probeReport_.result));
     (void)probe.setString("detail", probeReport_.detail);
     (void)probe.setString("entityId", probeReport_.probedEntityId);
-    (void)probe.setBool("dotPathResolved", probeReport_.dotPathResolved);
-    (void)probe.setBool("slashPathResolved", probeReport_.slashPathResolved);
-    (void)probe.setBool("bogusPathResolved", probeReport_.bogusPathResolved);
     (void)root.set("runtimeColumnProbe", probe);
 
     // Order-pipeline counters land here as the pipeline is built out (AIC-DET-1 / Observability).

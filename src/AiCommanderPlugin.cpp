@@ -109,22 +109,6 @@ void AiCommanderPlugin::runProbeIfPending() {
 
     probeAttemptedThisRun_ = true;
 
-    // OQ-9 evidence, logged whatever the verdict: whether readComponentFieldReal can address a
-    // runtime column at all, whether the schema's slash form also works, and — the load-bearing
-    // one — whether a path that is not a column returns a value (silent) or nullopt (loud).
-    {
-        const std::string line = std::string("ai-commander: [OQ-9] runtime-column probe on '")
-            + report.probedEntityId + "': dot-path 'velocityNed.x' "
-            + (report.dotPathResolved ? "RESOLVED" : "nullopt")
-            + ", slash-path 'velocityNed/x' "
-            + (report.slashPathResolved ? "RESOLVED" : "nullopt")
-            + ", bogus-path 'velocityNed.q' "
-            + (report.bogusPathResolved ? "RESOLVED (bad paths are SILENT)"
-                                        : "nullopt (bad paths are LOUD)")
-            + ".";
-        N8RO_LOG_INFO(line, kLogCategory);
-    }
-
     const std::string verdict = std::string("ai-commander: runtime-column probe ")
         + toString(report.result) + " - " + report.detail;
     if (report.result == ProbeResult::Pass) {
