@@ -10,8 +10,10 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 > **One-liner:** A `n8ro-sim` plugin that lets a language model issue tactical *intent* — posture, target, waypoint, rules of engagement — to entities in a running scenario, while every kinematic decision and every state mutation stays in the deterministic C++ and Lua tiers that already exist.
 
 **Date:** 2026-07-31 (revised 2026-08-01)
-**Status:** Draft v1.1
-**Revision history:** v1.1 — added §Source control and repository (standalone repo, layout, ignore rules, the single `open-solution.cmd` relocation edit, CI split, visibility); recorded the owner's decision that plugin source files carry no Arkheon per-file header; added the `prompt.doctrinePath` config field, which §Scope Authority requires be authorized here before design.
+**Status:** Draft v1.2
+**Revision history:**
+- v1.2 — closed the snapshot-reachability gap found in design: sensor tracks and weapon loadout have no public C++ read seam, so Tier 1 now reports them into the commander (`aiCommander.reportTrack` / `reportLoadout` in AIC-API-1; Stage-B B3, §Exactly what is transmitted, and AIC-ORD-2 restated accordingly). Folded in four mechanism corrections verified against the shipped headers (transport failure is `std::nullopt`, not `statusCode == 0`; detections arrive as triples; transform velocity/orientation/acceleration are runtime columns on dot-joined paths that read back `0` silently; Stage-B B1 uses `IEntityManager::getEntity`). Added AIC-ARCH-4 (runtime-column startup probe) and OQ-9.
+- v1.1 — added §Source control and repository (standalone repo, layout, ignore rules, the single `open-solution.cmd` relocation edit, CI split, visibility); recorded the owner's decision that plugin source files carry no Arkheon per-file header; added the `prompt.doctrinePath` config field, which §Scope Authority requires be authorized here before design.
 **Owner:** Arkheon Technologies — N8RO platform
 **Audience:** Platform owner (authorization + cost decisions), plugin implementer (build contract), QA
 **Tier:** Comprehensive
@@ -28,9 +30,11 @@ The boundary of this document is the plugin and its contracts: the order schema,
 **Authoritative (binding):**
 - `n8ro-ai-commander-prd-prompt.md` — owner's authoring brief: the decided three-tier architecture, the backend strategy, the measured latency budget, the verified SDK facts, and the enumerated risks and open questions. Its "Open questions" are carried into this PRD unresolved, by instruction.
 - `docs/modules/n8ro-sim/dev/extension-points.md:140` — *"Scripting is a decision layer — authoritative state mutation stays in C++."* This single line fixes the tier split.
-- `dev/ai-coding/schema-reference/schema-reference.json` — the sole authority for component type strings, field paths, units, and frames. Every unit in this PRD's order schema is read from a `unit` key in that file, not from memory.
+- `dev/ai-coding/schema-reference/schema-reference.json` — the sole authority for component type strings, **authored** field paths, units, and frames. Every unit in this PRD's order schema is read from a `unit` key in that file, not from memory. It does **not** cover runtime state: `componentTransform` exports only `positionGeodetic/{latitudeDeg,longitudeDeg,altitudeHaeM}`, `headingDeg`, and `speedMps` (v1.2).
+- `include/n8ro-sim/entity/TransformRuntimeColumns.h` — the single source of truth for the transform's **runtime** pose and motion columns (`velocityNed.*`, `accelerationNed.*`, `orientationBodyToNedQuat.*`). Paths are **dot**-joined, not slash-joined as in the schema, and the header warns that resolving a name that does not exist yields a handle reading back `0` *without* an error (v1.2 — drives AIC-ARCH-4).
 - `include/n8ro-core/plugin/IPlugin.h:36` — *"…is delivered on the host's single update thread, never concurrently with one another."*
-- `include/n8ro-core/core/net/IHttpClient.h` — `send()` is blocking; the class is documented single-thread-only; `https` requires the OpenSSL build.
+- `include/n8ro-core/core/net/IHttpClient.h` — `send()` is blocking and returns `std::optional<HttpResponse>`; the class is documented single-thread-only; `https` requires the OpenSSL build.
+- `include/n8ro-sim/component/ComponentFieldAccess.h` — the generic field-access seam. It exposes `…Real` / `…Int` / `…Text` readers only; there is no reader for a schema `list` node (v1.2 — why loadout is not reachable here).
 - `data/resources/missions/stubs/{navigation,weapon,sensor,entityControl,mission,simulation}.lua` — the generated stubs are the authority on verb arities and return shapes.
 
 **Contextual (informational, not binding):**
@@ -39,13 +43,19 @@ The boundary of this document is the plugin and its contracts: the order schema,
 - `dev/samples/sim/sim-scripting/` — the clone source and the registration idiom.
 - `docs/modules/n8ro-llm/` — describes a service that is **not installed**; read for intent, depended on for nothing.
 
-### Corrections to the brief, verified in-tree
+### Corrections verified in-tree
 
-Three items in the authoring brief needed adjustment against what is actually installed. Each is load-bearing:
+Items 1–3 corrected the authoring brief against what is actually installed. Items 4–7 were found in
+design (2026-08-01) by reading the shipped headers and generated stubs, and correct *this document*.
+Each is load-bearing.
 
 1. **HTTPS is available.** `IHttpClient.h` warns that `https` needs the OpenSSL build. `bin/libssl-3-x64.dll` and `bin/libcrypto-3-x64.dll` are both present, so the Phase 2 call to `api.anthropic.com` is not blocked on a missing TLS backend. This must still be asserted at runtime (see AIC-BE-4).
 2. **A sanctioned async mechanism exists.** `IThreadRunner::submitBackgroundTask` is declared in the SDK. The plugin does not need a hand-rolled `std::thread` — but `PluginContext::threadRunner` is documented nullable, so a fallback is still required (OQ-7).
 3. **The bot executables live in `bin/`, not `bin/ai/`.** `bin/ai/` contains only `.env`, `n8ro-mcp.exe`, and `run-full-stack.cmd`; `n8ro-data-bot.exe` and `n8ro-sim-bot.exe` are one level up in `bin/`, alongside the readiness flag `bin/n8ro-mcp-ready.tmp`. Relevant only to OQ-4.
+4. **Sensor tracks and weapon loadout have no public C++ read seam.** *(v1.2)* There is no track component in `schema-reference.json` (225 records) or `ComponentTypeNames.h` (15 components); `IEntityManager` exposes no track accessor; `SensorScriptingApi.h` is an opaque factory returning `unique_ptr<IScriptingApiModule>`. `sensor.getDetectionList` is documented as returning *"runtime detections"* and exists only in Lua. Separately, `componentWeaponStoreManagement/loadout` is a schema `list`, and `ComponentFieldAccess` has no list reader; live remaining ammo is available only through `weapon.getWeaponLoadout`, also Lua-only. **Consequence:** the plugin cannot build the `tracks[]` and `own.loadout[]` rows of §Exactly what is transmitted by itself, and Stage-B check B3 cannot query the engine. Resolved by Tier-1 ingress — see AIC-API-1 `reportTrack` / `reportLoadout`.
+5. **A transport failure is `std::nullopt`, not `statusCode == 0`.** *(v1.2)* `IHttpClient::send()` returns `std::optional<HttpResponse>` and yields `std::nullopt` on a transport / TLS failure or a malformed URL. A response that *is* returned always carries a real status-line code. The `HttpResponse::statusCode == 0` sentinel documented in the struct is therefore not what a caller observes on failure. Affects Stage-A check A1, AIC-BE-1, and AIC-BE-4.
+6. **Detections arrive as repeating triples, not a list.** *(v1.2)* `sensor.getDetectionList(sensorEntityId)` returns `targetEntityId, range_m, snr_DB` repeated as Lua multiple return values, and returns *no* values when there is no detection. The countable enumeration idiom is `sensor.getTrackNr(id)` followed by `sensor.getTrackById(id, i)` with `i` **1-based**. Affects the reference Tier-1 script and the snapshot.
+7. **Transform velocity, orientation, and acceleration are runtime columns, not schema leaves.** *(v1.2)* They are declared only in `TransformRuntimeColumns.h`, addressed by **dot**-joined paths (`velocityNed.x`), and — per that header — a path that does not resolve reads back `0` **silently, without an error**. That defeats this PRD's rule that a `std::nullopt` on a required snapshot field aborts the snapshot, because a mistyped path yields a plausible zero instead of a `nullopt`. Drives AIC-ARCH-4 and OQ-9. Stage-B B1's `entityControl.exists` is likewise a Lua verb; the C++ equivalent is `IEntityManager::getEntity(id) != nullptr`.
 
 ## Problem statement
 
@@ -103,6 +113,9 @@ The commander's job is to replace exactly that cascade — the posture selection
 | UI surface (`n8ro-ui` plugin) for order inspection | Deferred | Orders are observable via the order log and `aiCommander.getStats()`. A UI is presentation, not capability. | v1.1 | 2026-07-31 |
 | Streaming / partial order consumption | Out of scope | An order is atomic; a half-parsed order is a rejected order. Streaming adds failure modes and buys nothing at an 80-token output. | N/A | 2026-07-31 |
 | GPU provisioning or inference-server packaging | Out of scope | No inference server ships in this tree. Installing and running one on target machines is a deployment responsibility, recorded as a dependency and OQ-2. | N/A | 2026-07-31 |
+| Plugin-side (C++) reading of sensor tracks or weapon loadout | Out of scope | No public read seam exists: no track component in the schema or `ComponentTypeNames.h`, no `IEntityManager` accessor, and `ComponentFieldAccess` has no reader for the `list`-typed loadout (§Corrections, item 4). Tier 1 reports both instead (AIC-API-1). Revisit only if the SDK later exposes a track surface — the ingress verbs would then become an optional override rather than the only path. | N/A until the SDK exposes one | 2026-08-01 |
+| Plugin-side synthesis of a track list from the entity roster | Out of scope | Technically available via `IEntityManager::getAllEntities()`, and deliberately rejected: a roster is not a sensor picture. Substituting one would silently grant the model vision through terrain and beyond sensor range, and Stage-B B3 would then validate hallucinated targets against that fiction rather than catching them. | N/A — rejected, not deferred | 2026-08-01 |
+| Free-text track attributes (`team`, `kind`, `domain`) in the prompt | Deferred | The v1.2 ingress verbs carry scalars only. Adding attributes means widening `reportTrack`, which is a PRD revision, and each added string is a new injection surface to charset-filter. Revisit if order quality shows the model cannot discriminate targets without them. | v1.1 | 2026-08-01 |
 
 ## Key hypotheses
 
@@ -134,7 +147,7 @@ Decision tie-breakers for implementation, in priority order — *unless you know
 
 - **Fail-closed on the master switch.** `commander.enabled` defaults `false`. With it false the plugin loads, registers its namespace, and issues no orders. Every Lua getter returns the "no order" shape.
 - **Fail-closed on the hosted backend.** `claude.enabled` is a *second, independent* switch defaulting `false`. Setting `commander.backend = "claude"` without `claude.enabled = true` is a configuration error that leaves the commander disabled with a logged reason — it does not silently fall back to local, because a silent fallback teaches operators that the switch does not matter.
-- **Fail-closed on transport.** A `statusCode == 0` (transport/TLS failure), a non-2xx status, a timeout, or an unparseable body all resolve to "no new order". The last valid order is retained.
+- **Fail-closed on transport.** A `std::nullopt` from `IHttpClient::send()` (transport/TLS failure or malformed URL), a non-2xx status, a timeout, or an unparseable body all resolve to "no new order". The last valid order is retained.
 - **Credentials are never persisted.** `claude.apiKeyEnvVar` stores the *name* of an environment variable. The value is read via `std::getenv` at request time, held for the duration of the request, never logged, never written to the order record, and never returned from `getConfigFields()`.
 
 ### Exactly what is transmitted
@@ -151,15 +164,23 @@ This list is the contract. A unit test asserts the serialized volatile suffix co
 
 | Field | Source | Note |
 |---|---|---|
-| `simTimeS` | `simulation.getTimeS` | |
+| `simTimeS` | the `onTickFrame` simulation clock | |
 | `own.entityId` | roster | Scenario-local runtime id string |
-| `own.latitudeDeg`, `own.longitudeDeg`, `own.altitudeHaeM` | `componentTransform/positionGeodetic/*` | |
-| `own.velN`, `own.velE`, `own.velD` | `entityControl.getVelocityNed` | m/s, NED |
-| `own.headingDeg` | `entityControl.getOrientationEulerDeg` | body-to-NED |
-| `own.team` | `entityControl.getEntityInfo` | |
-| `own.loadout[]` | `weapon.getWeaponLoadout` | `hardpointName`, `weaponProfileName`, `ammoCount`, `ammoMax` |
-| `tracks[]` (≤ `commander.maxTracksInPrompt`) | `sensor.getDetectionList` + per-track `getEntityInfo` | `targetEntityId`, `rangeM`, `snrDb`, `team`, `kind`, `domain` |
+| `own.latitudeDeg`, `own.longitudeDeg`, `own.altitudeHaeM` | `componentTransform` schema leaves `positionGeodetic/*` | |
+| `own.velN`, `own.velE`, `own.velD` | `componentTransform` **runtime columns** `velocityNed.x/.y/.z` | m/s, NED. Dot-joined paths per `TransformRuntimeColumns.h`; probed at startup (AIC-ARCH-4) |
+| `own.headingDeg` | `componentTransform` schema leaf `headingDeg` | Degrees clockwise from true north |
+| `own.team` | `IEntity::getTeam()` | |
+| `own.loadout[]` | `aiCommander.reportLoadout`, called by Tier 1 from `weapon.getWeaponLoadout` | `hardpointName`, `weaponProfileName`, `ammoCount`, `ammoMax` |
+| `tracks[]` (≤ `commander.maxTracksInPrompt`) | `aiCommander.reportTrack`, called by Tier 1 from `sensor.getTrackNr` + `getTrackById` | `targetEntityId`, `rangeM`, `snrDb` |
 | `situationNote` | `aiCommander.setSituationNote` | ≤ 256 chars, sanitized |
+
+**On the two reported rows** *(v1.2)*. Tracks and loadout are **pushed in by Tier 1**, not pulled by
+the plugin, because neither has a public C++ read seam (§Corrections, item 4). This narrows the
+transmitted set rather than widening it, and it *strengthens* AIC-SEC-2 in three ways: the plugin can
+only transmit what a deterministic script explicitly handed it; `team`, `kind`, and `domain` are
+dropped from the track row because the reporting verb does not carry them and the plugin will not
+infer them; and the ingress verbs accept only scalars, so no free-text field can enter the prompt
+through this path at all.
 
 **Explicitly not transmitted:** file paths; scenario or mission file names; entity *profile* names; terrain or AI database contents; the `data/ai/context/` corpus; entitlement or license data; any config field value other than the model name and cadence; any `componentTrackIdentity` free-text field (see threat table).
 
@@ -185,7 +206,18 @@ These conventions govern every FR below. Drift between this table and the implem
 
 **Lua return-shape convention.** Follows the tree's existing idioms exactly: multi-valued reads return Lua multiple returns with a `nil` tuple on failure (`navigation.getPositionLatLonAlt`); structured reads return a JSON string with `"{}"` / `"[]"` on absence (`mission.getState`); commands return `boolean` (`navigation.requestGoTo`). No new convention is introduced.
 
-**Component access convention.** All entity state is read through `component/ComponentFieldAccess.h` — `readComponentFieldReal` / `Int` / `Text` — addressed by `(componentType, fieldPath)`, where the type string comes from `component/ComponentTypeNames.h` and the field path is the `schema-reference.json` leaf path with the `/datablocks/<componentType>/` prefix dropped (e.g. `"positionGeodetic/altitudeHaeM"`). Each reader returns `std::nullopt` on a missing entity, component, or field, or on a type mismatch; a `std::nullopt` on any required snapshot field aborts that entity's snapshot for the tick. The plugin calls **no** `writeComponentField*`.
+**Component access convention.** All entity state the plugin reads for itself goes through `component/ComponentFieldAccess.h` — `readComponentFieldReal` / `Int` / `Text` — addressed by `(componentType, fieldPath)`, where the type string comes from `component/ComponentTypeNames.h`. Each reader returns `std::nullopt` on a missing entity, component, or field, or on a type mismatch; a `std::nullopt` on any required snapshot field aborts that entity's snapshot for the tick. The plugin calls **no** `writeComponentField*`.
+
+There are **two distinct path forms**, and confusing them is silent *(v1.2)*:
+
+| Kind | Path form | Authority | Failure mode |
+|---|---|---|---|
+| Authored schema leaf | slash-joined, the `schema-reference.json` `path` with the `/datablocks/<componentType>/` prefix dropped — e.g. `"positionGeodetic/altitudeHaeM"` | `schema-reference.json` | `std::nullopt` — loud, and honoured by the abort rule above |
+| Transform runtime column | **dot**-joined — e.g. `"velocityNed.x"` | `entity/TransformRuntimeColumns.h` | reads back **`0` with no error** — silent, and *not* caught by the abort rule |
+
+Because a mistyped runtime-column path yields a plausible zero rather than a `nullopt`, the runtime columns the snapshot depends on are probed once at startup against a known-moving entity and the commander refuses to enable if the probe fails (AIC-ARCH-4).
+
+**State the plugin does not read.** Sensor tracks and weapon loadout have no public C++ read seam (§Corrections, item 4). Tier 1 reports them in through `aiCommander.reportTrack` / `reportLoadout` (AIC-API-1). The plugin SHALL NOT attempt to reconstruct a track list by other means — in particular, it SHALL NOT synthesize one by scanning `IEntityManager::getAllEntities()`, because an entity roster is not a sensor picture and substituting one for the other would silently give the model omniscient vision through terrain and beyond sensor range.
 
 **Config field naming.** `PluginConfigField` is a flat list of typed name/value descriptors (`PluginConfigFieldType::{Int,Real,Bool,Text}`), values carried as canonical strings. Names are dotted, grouped by concern: `commander.*`, `local.*`, `claude.*`, `safety.*`, `record.*`, `replay.*`. Rationale: the type tag drives editor rendering and parsing, so every field must pick the narrowest type that fits — no JSON-in-a-Text-field.
 
@@ -242,6 +274,22 @@ The system SHALL express every backend behind a single `ILlmClient` interface se
 - Validation, recording, and Lua publication are adapter-independent — identical code paths for all four.
 
 **Trace:** UAC-AIC-ARCH-3
+
+#### AIC-ARCH-4: Runtime-column startup probe
+*(Added v1.2)* The system SHALL verify at startup that every `componentTransform` runtime column the snapshot depends on resolves to a real column, and SHALL refuse to enable the commander if any does not.
+
+**Customer scenario:** An operator upgrades the release tree, a runtime column is renamed, and every subsequent order is computed from a snapshot whose velocity reads `0, 0, 0` — with no error anywhere.
+
+**Pain removed:** `TransformRuntimeColumns.h` states that resolving a name that does not exist yields a handle that *"reads back 0 WITHOUT an error, so a typo here is silent — an entity simply never moves."* Every other required snapshot field fails loudly as `std::nullopt` and aborts the snapshot; these three do not. Without a probe, the single most likely snapshot defect is also the least visible one, and it degrades order quality rather than producing a diagnosable failure.
+
+**Acceptance criteria:**
+- At `initialize()` the plugin SHALL probe `velocityNed.x`, `velocityNed.y`, and `velocityNed.z` on `componentTransform`.
+- The probe SHALL distinguish "column absent" from "column present and genuinely zero". A column that is present but reads zero on a stationary entity is a pass; a column that cannot be resolved is a fail. WHERE the SDK offers no direct existence check, the probe SHALL be run against an entity with non-zero authored `speedMps` and a non-zero `headingDeg`, for which an all-zero NED velocity is not a physically reachable reading (see OQ-9).
+- IF the probe fails, THEN the commander SHALL remain disabled, log which path failed, and report the failure through `aiCommander.getStats()` — it SHALL NOT fall back to a zero velocity.
+- The probe result SHALL be written to the startup log line alongside the backend, model, and cadence.
+- The probe SHALL run once per scenario load, not per frame.
+
+**Trace:** UAC-AIC-ARCH-4
 
 ### The order contract
 
@@ -315,10 +363,20 @@ The system SHALL define, for each posture, exactly which existing verbs Tier 1 i
 
 ROE is orthogonal to posture: `weaponsHold` obliges Tier 1 to call `weapon.requestCeaseFire` and suppress `requestFire` regardless of posture; `weaponsTight` permits fire only against the ordered `targetEntityId`; `weaponsFree` permits the script's own target selection within its ROE.
 
+**The reporting obligation** *(v1.2)*. Because the plugin cannot see tracks or loadout (§Corrections, item 4), a script that wants situation-aware orders SHALL report what it sees before reading an order:
+
+| Obligation | Verb(s), with arity from the generated stubs |
+|---|---|
+| Report the current track picture each cadence window | `sensor.getTrackNr(entityId) → number`, then for `i = 1..n` `sensor.getTrackById(entityId, i) → targetEntityId, range_m, snr_DB`, each forwarded as `aiCommander.reportTrack(entityId, targetEntityId, rangeM, snrDb) → boolean` |
+| Report remaining stores each cadence window | `weapon.getWeaponLoadout(entityId) → table` (array of `{hardpointName, weaponProfileName, ammoCount, ammoMax}`), each row forwarded as `aiCommander.reportLoadout(entityId, hardpointName, weaponProfileName, ammoCount, ammoMax) → boolean` |
+
+Reporting is **advisory, not required for correctness**: a script that reports nothing still receives orders, but the model sees no tracks, so Stage-B check B3 rejects any order naming a target and the entity is effectively limited to the waypoint postures. This is the intended degradation — an unreported track cannot be engaged on model initiative.
+
 **Acceptance criteria:**
-- The reference Tier-1 script shipped with the plugin implements every row.
-- No verb outside `navigation.*`, `weapon.*`, `sensor.*`, `entityControl.get*`, `mission.*`, and `simulation.*` appears in the reference script.
+- The reference Tier-1 script shipped with the plugin implements every posture row and both reporting obligations.
+- No verb outside `navigation.*`, `weapon.*`, `sensor.*`, `entityControl.get*`, `mission.*`, `simulation.*`, and `aiCommander.*` appears in the reference script.
 - `scenarioControl.*` is not called by the reference script or the plugin.
+- The reference script degrades correctly when `aiCommander` is `nil` — it falls back to `navigation.resumeWaypointFollowing` and calls no `aiCommander.*` verb.
 
 **Trace:** UAC-AIC-ORD-2
 
@@ -335,7 +393,7 @@ The system SHALL validate every order in two stages — syntactic checks on the 
 
 | # | Check | Reject reason |
 |---|---|---|
-| A1 | Transport completed (`statusCode != 0`) and status is 2xx | `transport` |
+| A1 | `IHttpClient::send()` returned a value (not `std::nullopt`) and its `statusCode` is 2xx | `transport` |
 | A2 | Backend-specific envelope parses and, for Claude, `stop_reason != "refusal"` | `refusal` / `envelope` |
 | A3 | Body is a single well-formed JSON object | `parse` |
 | A4 | Conforms to the AIC-ORD-1 schema, `additionalProperties: false` | `schema` |
@@ -347,10 +405,10 @@ The system SHALL validate every order in two stages — syntactic checks on the 
 
 | # | Check | Reject reason |
 |---|---|---|
-| B1 | `entityId` is on the commander roster and `entityControl.exists` is true | `roster` |
+| B1 | `entityId` is on the commander roster and `IEntityManager::getEntity(entityId) != nullptr` | `roster` |
 | B2 | Order is not stale: `simTimeNow - snapshotSimTimeS <= commander.maxOrderAgeS` | `stale` |
-| B3 | `targetEntityId` (when present) exists AND appears in the entity's current track list | `track` |
-| B4 | Target team differs from own team (`entityControl.getEntityInfo`) | `fratricide` |
+| B3 | `targetEntityId` (when present) resolves via `getEntity` AND appears in the entity's **Tier-1-reported** track list for the current cadence window (AIC-API-1 `reportTrack`). An empty reported list rejects every targeted order | `track` |
+| B4 | Target team differs from own team (`IEntity::getTeam()` on both) | `fratricide` |
 | B5 | Waypoint (when present) is within `safety.geofenceRadiusM` of the entity's current position | `geofence` |
 | B6 | Altitude within [`safety.minAltitudeHaeM`, `safety.maxAltitudeHaeM`]; speed within (0, `safety.maxSpeedMps`] | `clamp` |
 | B7 | Order serial is monotonically newer than the currently published order | `superseded` |
@@ -392,6 +450,8 @@ The system SHALL serialize into the prompt only the fields enumerated in §"Exac
 - A test renders a prompt from a snapshot whose every string field is set to a unique sentinel, then asserts that only allowlisted sentinels appear in the rendered bytes.
 - `trackSource`, `callsign`, and `originCountry` sentinels are absent.
 - The API key value is absent from the prompt, every log line, and every order record.
+- *(v1.2)* The two Tier-1-reported rows carry only the scalars their ingress verbs accept: a `reportTrack` sentinel appears only as `targetEntityId`, and no `team`, `kind`, or `domain` field is rendered for a track. A test asserts the plugin derives no additional track attribute from any source.
+- *(v1.2)* Strings arriving through `reportTrack` / `reportLoadout` / `setSituationNote` are charset-filtered and length-capped on ingress, before they can reach a prompt — Tier 1 is trusted to choose *which* tracks to report, not to have sanitized their ids.
 
 **Trace:** UAC-AIC-SEC-2
 
@@ -417,13 +477,21 @@ The system SHALL register the following functions under `aiCommander`, with the 
 | `aiCommander.getOrderAgeS(entityId)` | 1 | `number` — simulation seconds since the order was accepted; `-1` when none |
 | `aiCommander.getOrder(entityId)` | 1 | `string` — the full order document as JSON, or `"{}"`. For logging and debugging; scripts should prefer the typed getters |
 | `aiCommander.setSituationNote(entityId, text)` | 2 | `boolean` — attach ≤ 256 chars of deterministic Tier-1 context to the next prompt (e.g. `"winchester"`, `"2 shots in air"`). Truncated and sanitized; false on invalid args |
-| `aiCommander.getStats()` | 0 | `string` — JSON: `requested`, `accepted`, `rejected` (by reason), `timeouts`, `lastLatencyMs`, `p95LatencyMs`, `backend`, `enabled` |
+| `aiCommander.reportTrack(entityId, targetEntityId, rangeM, snrDb)` | 4 | `boolean` — *(v1.2)* append one detected track to `entityId`'s reported picture for the current cadence window. `rangeM` metres, `snrDb` decibels, matching the sensor stub's `range_m` / `snr_DB`. Idempotent per `targetEntityId` — a repeat replaces the earlier row rather than duplicating it. False when the entity is not on the roster, on invalid args, or when the list already holds `commander.maxTracksInPrompt` entries |
+| `aiCommander.reportLoadout(entityId, hardpointName, weaponProfileName, ammoCount, ammoMax)` | 5 | `boolean` — *(v1.2)* append one hardpoint's remaining stores for the current cadence window. Idempotent per `hardpointName`. False when the entity is not on the roster or on invalid args |
+| `aiCommander.getStats()` | 0 | `string` — JSON: `requested`, `accepted`, `rejected` (by reason), `timeouts`, `lastLatencyMs`, `p95LatencyMs`, `backend`, `enabled`, `runtimeColumnProbe` *(v1.2, per AIC-ARCH-4)* |
+
+Fourteen functions: eleven readers, one note setter, and two reporters *(v1.2 — `reportTrack` and `reportLoadout` added to close the gap in §Corrections, item 4)*. The namespace still extends no built-in namespace.
+
+**Reported-list lifecycle** *(v1.2)*. Each entity's reported track and loadout lists are cleared by the plugin when a snapshot is taken for that entity, so a window's report reflects exactly one Tier-1 pass and a script that stops reporting stops contributing tracks rather than leaving a stale picture in place. Stage-B check B3 validates against the list that accompanied the snapshot the order was derived from, not the list current at publication time — otherwise a target legitimately reported at request time could be rejected merely because the window rolled over during inference.
 
 **Acceptance criteria:**
 - Every function is registered with `LuaApiFunctionMeta` carrying a description and signature, so the generated stub in `data/resources/missions/stubs/aiCommander.lua` documents it after one engine run.
 - Every function returns the documented failure shape rather than raising, for: unknown entity id, wrong arity, wrong argument type, commander disabled.
-- No function performs I/O, allocation-heavy work, or blocking; each is O(1) against a pre-published order.
+- No function performs I/O, allocation-heavy work, or blocking. Each reader is O(1) against a pre-published order; each reporter is O(1) amortized against a list bounded by `commander.maxTracksInPrompt`.
 - `ScriptingApiContext` is captured **by value** in every callback, per `plugin-authoring.md` and the sample at `EntityStateApiModule.cpp:145`.
+- *(v1.2)* The reporters mutate only plugin-owned state. They call no `writeComponentField*` and no `entityControl.request*`, and they are the only functions in the namespace that are not pure reads.
+- *(v1.2)* WHILE `commander.enabled` is false, the reporters return `false` and retain nothing — reporting into a disabled commander accumulates no state.
 
 **Trace:** UAC-AIC-API-1
 
@@ -485,7 +553,7 @@ The system SHALL reach a local inference server over `IHttpClient` at `local.bas
 
 **Acceptance criteria:**
 - The request carries `commander.requestTimeoutS` as `HttpRequest::timeoutS`.
-- `statusCode == 0` is handled as a transport failure, distinct from a non-2xx status.
+- A `std::nullopt` return from `send()` is handled as a transport failure, distinct from a returned response carrying a non-2xx status. *(v1.2 — `send()` returns `std::optional<HttpResponse>`; the `statusCode == 0` sentinel in the struct is not what a caller observes on failure.)*
 - One `IHttpClient` instance per worker thread — never shared, per the header's single-thread-only contract.
 - The concrete endpoint path and payload shape are pinned once OQ-1 resolves; the adapter is written so that resolution is a single-file change.
 
@@ -527,18 +595,19 @@ The system SHALL render every prompt as a byte-stable prefix followed by a volat
 - A test renders the prefix 100 times across varying snapshots and asserts byte equality.
 - The prefix contains no timestamp, no entity id, no counter, and no floating-point formatting of live state.
 - The prefix's token count is recorded at startup and compared against the configured model's cache minimum — 4096 tokens for Haiku 4.5, 1024 for Sonnet 5, 512 for Opus 5 — with a warning logged when it falls short, because a prefix under the minimum silently does not cache.
+- *(v1.2)* The suffix's Tier-1-reported lists render in a **deterministic order** — tracks ascending by `targetEntityId`, loadout ascending by `hardpointName` — not in Lua call order. Two snapshots holding the same set of reports SHALL render byte-identically, so `snapshotHash` (AIC-DET-1) is a function of the picture rather than of the order the script happened to iterate in.
 
 **Trace:** UAC-AIC-BE-3
 
 #### AIC-BE-4: TLS availability assertion
 The system SHALL verify at first hosted request that the HTTPS transport is functional, and SHALL disable the hosted backend with a logged reason if it is not.
 
-**Customer scenario:** An operator enables the Claude backend on a machine whose runtime is missing the OpenSSL DLLs and needs a clear diagnosis rather than a stream of `statusCode == 0`.
+**Customer scenario:** An operator enables the Claude backend on a machine whose runtime is missing the OpenSSL DLLs and needs a clear diagnosis rather than a stream of unexplained transport failures.
 
 **Pain removed:** `IHttpClient.h` documents that `https` needs the OpenSSL build, and a missing TLS backend is indistinguishable from a network outage at the `HttpResponse` level. (`bin/libssl-3-x64.dll` and `bin/libcrypto-3-x64.dll` are present in this tree, so the expected result is pass.)
 
 **Acceptance criteria:**
-- IF the first `https` request returns `statusCode == 0` AND a plain-`http` control request to the same host also returns `statusCode == 0`, THEN the plugin SHALL log a TLS-availability diagnosis distinct from a generic transport failure.
+- IF the first `https` request returns `std::nullopt` AND a plain-`http` control request to the same host returns a value, THEN the plugin SHALL log a TLS-availability diagnosis distinct from a generic transport failure — the `http` control succeeding while `https` does not is what isolates the missing TLS backend from a network outage. *(v1.2 — restated against the `std::optional` return; the previous phrasing compared two `statusCode == 0` results, which cannot distinguish the two causes.)*
 - The commander falls back per AIC-VAL-2 rather than retrying in a tight loop.
 
 **Trace:** UAC-AIC-BE-4
@@ -654,9 +723,10 @@ The gating targets are the ones the plugin controls. Inference latency is a prop
 
 ### Interface changes
 
-- **New:** the `aiCommander` Lua namespace (AIC-API-1) — additive, no existing namespace modified.
+- **New:** the `aiCommander` Lua namespace, fourteen functions (AIC-API-1) — additive, no existing namespace modified.
 - **New:** the Order JSON contract between the plugin and the model (AIC-ORD-1) — an external contract with a third party, versioned by `schemaVersion`.
 - **New:** the JSONL order-record format (AIC-DET-1) — consumed by replay mode and by anything reading the logs.
+- **New** *(v1.2)*: a Tier-1 → plugin data-flow direction. Before v1.2 the Lua surface was read-only from the script's side; `reportTrack` / `reportLoadout` make Tier 1 a *supplier* to the commander as well as a consumer of it. Additive and opt-in — a script that does not call them is unaffected, and no existing signature changes.
 - **Unchanged:** every `navigation.*`, `weapon.*`, `sensor.*`, `entityControl.*`, `mission.*` signature.
 
 ### Deployment coordination
@@ -766,6 +836,8 @@ The `*.jsonl` rule is the one most likely to be missed: AIC-DET-1 recording is *
 | `aicmd.latency.p50Ms` / `.p95Ms` | Round-trip inference latency | p95 > 2× the configured cadence — the commander cannot keep up |
 | `aicmd.fallback.level` | 0 = live, 1 = retained, 2 = standing, 3 = released | Level ≥ 2 for > 60 s |
 | `aicmd.tokens.in` / `.out` | Cost accounting (Phase 2) | Cumulative spend > 80 % of budget |
+| `aicmd.tracks.reported` *(v1.2)* | Mean reported tracks per snapshot, per commanded entity | `0` for > 2 cadence windows on an entity whose script should be reporting — the Tier-1 reporting call has been dropped, and every targeted order will reject `track` |
+| `aicmd.probe.runtimeColumns` *(v1.2)* | AIC-ARCH-4 result: `pass` / `fail` / `notRun` | Any value other than `pass` — the commander is disabled |
 
 All are exposed through `aiCommander.getStats()` as JSON and written to the order log at run end.
 
@@ -773,7 +845,7 @@ All are exposed through `aiCommander.getStats()` as JSON and written to the orde
 
 | Event | When | Fields |
 |---|---|---|
-| `commander.startup` | `initialize()` | backend, model, cadence, roster cap, prefix token count, cache-minimum comparison, TLS availability |
+| `commander.startup` | `initialize()` | backend, model, cadence, roster cap, prefix token count, cache-minimum comparison, TLS availability, runtime-column probe result *(v1.2)*, `services` / `threadRunner` nullability |
 | `commander.egressWarning` | First hosted request in a run | destination host, model, field-count in the volatile suffix. **Always logged** — an egress must never be silent |
 | `order.rejected` | Every rejection | entityId, serial, reason, detail, truncated raw body |
 | `fallback.transition` | Ladder step change | entityId, from level, to level, seconds since last accepted order |
@@ -791,7 +863,8 @@ All are exposed through `aiCommander.getStats()` as JSON and written to the orde
 |---|---|---|---|
 | Inference server down | `aicmd.reject.transport` climbing; `fallback.level` ≥ 1 | Verify the server is listening on `local.baseUrl`; restart it. Entities continue under Tier 1 — no scenario abort needed | Owner, if a demo is running |
 | Orders rejected for `schema` | `aicmd.reject.schema` > 1 % | Confirm `local.grammarEnabled`; check the model name matches a chat-tuned instruct model; inspect `rawBody` in the order log | Implementer |
-| Orders rejected for `track` | `aicmd.reject.track` dominant | The model is hallucinating target ids; verify the snapshot's track list is non-empty and that `commander.maxTracksInPrompt` is not truncating the intended target | Implementer |
+| Orders rejected for `track` | `aicmd.reject.track` dominant | **First check `aicmd.tracks.reported`** *(v1.2)* — if it is 0, the Tier-1 script is not calling `aiCommander.reportTrack` and the model is being asked to pick targets it was never shown; this is a script bug, not a model failure. If it is non-zero, the model is hallucinating ids; verify `commander.maxTracksInPrompt` is not truncating the intended target | Implementer |
+| Commander refuses to enable at startup | `aicmd.probe.runtimeColumns` = `fail` *(v1.2)* | A `componentTransform` runtime column no longer resolves — the release tree changed under the plugin. Read the startup log for the failing path and reconcile against `include/n8ro-sim/entity/TransformRuntimeColumns.h`. Do **not** work around it by defaulting velocity to zero | Implementer, P1 |
 | Frame budget exceeded | `aicmd.frame.p95Ms` alert | Reduce `commander.maxCommandedEntities` and `maxTracksInPrompt`; confirm no worker is touching SDK state | Implementer, P1 |
 | Simulation slows with local backend on CPU | Frame rate drop with no plugin metric change | Expected — the inference server is competing for memory bandwidth. Move inference to GPU or a second host | Owner (capacity decision) |
 | Unexpected hosted egress | `commander.egressWarning` in a run that should be local | Set `commander.enabled = false` immediately; audit `claude.enabled` and `commander.backend`; review the order log for what was transmitted | **Owner, immediately** |
@@ -824,6 +897,8 @@ Per commanded entity, per cadence window: one HTTP request, ~1 KB up, ~1 KB down
 | `IThreadRunner` non-null at `initialize()` | **Unverified** — documented nullable | Fall back to an owned thread; if that fails, commander stays disabled | OQ-7 |
 | `n8ro-llm` | **Absent** | None — no dependency by design | OQ-3 |
 | Entitlement gate (`core/entitlement/AccessGate.h`, `LexActivator.dll` present) | Unknown applicability | Unknown | OQ-5 |
+| `componentTransform` runtime columns (`velocityNed.*`) *(v1.2)* | Present, declared in `entity/TransformRuntimeColumns.h` | Commander refuses to enable — it does **not** substitute a zero velocity | The one dependency whose absence is silent rather than loud, which is why AIC-ARCH-4 probes it. OQ-9 |
+| Tier-1 track / loadout reporting *(v1.2)* | N/A — a contract with the mission script, not the tree | Targeted orders reject `track`; waypoint postures still execute | Advisory by design. Watch `aicmd.tracks.reported` |
 
 ## Rollback strategy
 
@@ -917,6 +992,8 @@ Have the mission script call the model directly.
 | **Prompt injection via external track feeds** | Medium — model-chosen orders | Low, but the channel is real (`componentTrackIdentity` is ADS-B-sourced free text) | `componentTrackIdentity` excluded from prompts entirely; charset/length filtering on all remaining strings; the validator is the real defense |
 | **Cadence too slow to be useful** (H1 wrong) | Medium — feature delivers less than hoped | Medium on CPU with the 7B | Default to the 3B; GPU decision recorded as OQ-2; if H1 fails, narrow scope to mission-start intent rather than chasing latency |
 | **Entitlement gate blocks AI-using plugins** | Medium — plugin will not load on licensed machines | Unknown | OQ-5. Check `core/entitlement/AccessGate.h` behavior before Phase 1b deployment |
+| **Silent zero from a runtime column.** *(v1.2)* A mistyped or renamed `componentTransform` runtime column reads back `0` with no error, so the snapshot carries a fabricated stationary own-ship and every order is computed from it | High — degraded order quality with no failing test and no log line; the defect is invisible precisely because it looks like valid data | Medium — the path convention differs from the schema's (dot vs slash) and the header states the failure is silent | AIC-ARCH-4 startup probe against a known-moving entity; commander refuses to enable on probe failure; probe result in the startup log, `getStats()`, and the runbook; a negative test asserts a broken path disables rather than degrades. OQ-9 pins the actual observed behaviour |
+| **Tier-1 reporting silently not wired.** *(v1.2)* A script adopts the commander but never calls `reportTrack`, so the model sees no tracks and every targeted order rejects `track` | Medium — looks like model failure, is actually an integration gap | Medium — it is a new obligation and easy to omit | `aicmd.tracks.reported` metric with an alert threshold; the runbook's `track` row checks it *first*; reporting is advisory by design so the entity still flies waypoint postures rather than failing |
 
 ### Open questions
 
@@ -932,6 +1009,7 @@ Carried from the authoring brief unresolved, per instruction, plus questions thi
 | OQ-6 | Which scenario and entity for the first demo? | Open | Phase 1b start | Existing scenarios include `baltic_sentinel`, `kamikaze_swarm_outback`, `oppint_blue_cap`, `oppint_red_interceptor`, `oppint_red_sam`, `shahed_launcher_truck`, `paramotor_waypoint_mission`, `global_air_traffic_showcase`. Resolved by an owner pick. `oppint_red_interceptor` is the natural candidate because its Tier-1 logic is already the quality bar and its posture vocabulary is this PRD's enum |
 | OQ-7 | Does the host supply a non-null `IThreadRunner` to sim plugins at `initialize()`? | Open | Phase 1a start | `PluginContext` documents both `services` and `threadRunner` as nullable. Resolved by logging both pointers on first load. Determines whether the plugin uses `submitBackgroundTask` or owns a thread; the fallback is specified either way, so this is a simplification question, not a blocker |
 | OQ-8 | Should the doctrine prefix be padded to the configured model's cache minimum? | Open | Phase 2 start | Haiku 4.5's prompt-cache minimum is 4096 tokens; a 1–2 page doctrine block is roughly 800–1500 and will silently not cache. Padding to 4096 with genuine doctrine makes caching pay, but a *longer* uncached prompt costs more than a short one — see the Cost model. Resolved by measuring the actual prefix token count and comparing both regimes against the table below |
+| OQ-9 | Can `readComponentFieldReal` address the transform's **runtime** columns at all, and if so does a bad path really return `0` rather than `std::nullopt`? | Open | Phase 1a start | *(Added v1.2.)* `ComponentFieldAccess.h` documents its readers against a component's *"schema-config fields"*, while `TransformRuntimeColumns.h` describes runtime columns in the same store and warns that an unresolvable name reads back `0` silently. Which of the two behaviours a plugin actually observes is unverified, and it decides whether AIC-ARCH-4's probe can be a simple resolve-check or must be the moving-entity heuristic that FR specifies. Resolved by one experiment on a spawned entity with non-zero `speedMps`: read `velocityNed.x` and a deliberately misspelled `velocityNed.q`, and compare. If neither is reachable, the snapshot loses its velocity rows and §Exactly what is transmitted needs another revision |
 
 ### Rabbit holes
 
@@ -970,9 +1048,19 @@ Carried from the authoring brief unresolved, per instruction, plus questions thi
 - Staleness: orders at `maxOrderAgeS` ± ε.
 - Fallback ladder: assert each transition at its configured boundary, and that a retained order is never partially replaced.
 
+- *(v1.2)* Stage-B B3 against the reported list: an order naming a target that was never reported is rejected `track`; an order naming a reported target passes; an order naming a target reported in the *previous* window but not the current one is rejected `track`; and an order validated against the list that accompanied its own snapshot passes even when the window has since rolled over.
+
+**Unit — Tier-1 ingress** *(v1.2)*
+- `reportTrack` / `reportLoadout` reject: unknown entity, entity not on the roster, wrong arity, wrong argument types, `NaN`/`Infinity` in `rangeM` or `snrDb`, and reporting while `commander.enabled` is false.
+- Idempotence: reporting the same `targetEntityId` twice replaces rather than duplicates; the list never exceeds `commander.maxTracksInPrompt`, and the overflow report returns `false` rather than evicting an existing row.
+- Lifecycle: taking a snapshot clears the lists; a window with no reports yields an empty picture rather than a stale one.
+- Ingress sanitization: a `targetEntityId` carrying injection text or a control-character payload is charset-filtered and length-capped before it can reach a rendered prompt.
+
 **Unit — prompt renderer**
 - Prefix byte-stability across 100 renders with varying snapshots (AIC-BE-3).
 - Transmitted-field allowlist via unique sentinels, asserting `componentTrackIdentity` sentinels are absent (AIC-SEC-2).
+- *(v1.2)* Reported-list render determinism: the same set of reports delivered in different Lua call orders renders byte-identically and yields the same `snapshotHash`.
+- *(v1.2)* No track attribute beyond `targetEntityId`, `rangeM`, `snrDb` appears in the rendered suffix — no `team`, `kind`, or `domain`.
 - API-key redaction across prompt, logs, and order records.
 - Unit traceability: re-read `schema-reference.json` and assert every unit in the order schema matches the file's `unit` key for the corresponding record — this is the test that keeps "derive, don't guess" true over time.
 
@@ -981,6 +1069,7 @@ Carried from the authoring brief unresolved, per instruction, plus questions thi
 - Assert: N orders accepted, per-frame p95 within budget, no order log corruption, Lua getters return the published order, `getOrderSerial` strictly increases.
 - Run under TSAN; assert no data race between the sim thread and the worker.
 - Assert the worker never dereferences an SDK pointer (structurally, via a build-time assertion on the captured types where the language permits, and via review otherwise).
+- *(v1.2)* Runtime-column probe (AIC-ARCH-4): assert the probe passes on a healthy tree; assert that a deliberately misspelled column path makes the probe fail and leaves the commander disabled rather than producing a zero-velocity snapshot.
 
 **Replay determinism**
 - Record a `stub` run to a log; replay it twice; assert byte-identical published-order sequences and identical per-tick position hashes.
@@ -992,7 +1081,8 @@ Carried from the authoring brief unresolved, per instruction, plus questions thi
 - Repeat with `commander.enabled = false` and diff the behavior — the commander-off run must be identical to a run with the plugin absent.
 
 **Negative / resilience**
-- Server down (`statusCode == 0`), timeout, HTTP 429, HTTP 500, malformed JSON, `stop_reason == "refusal"`, oversized body, and TLS unavailable. Each must reject-and-retain, write exactly one record, and leave frame time untouched.
+- Server down (`send()` returns `std::nullopt`), timeout, HTTP 429, HTTP 500, malformed JSON, `stop_reason == "refusal"`, oversized body, and TLS unavailable. Each must reject-and-retain, write exactly one record, and leave frame time untouched.
+- *(v1.2)* A commanded entity whose Tier-1 script never calls the reporters: orders still arrive, targeted orders are rejected `track`, waypoint postures still execute, and the run completes with no error state.
 
 **CI requirement:** the unit, stubbed-integration, and replay-determinism suites SHALL run on every build and SHALL NOT require an inference server or network access. The live smoke is a manual gate at Phase 1b and Phase 2.
 
@@ -1012,14 +1102,16 @@ Carried from the authoring brief unresolved, per instruction, plus questions thi
 
 ### Phase 1a — Full pipeline on the stub backend
 
-**Deliverables:** order schema, two-stage validator, fallback ladder, order record/replay, the complete `aiCommander` Lua namespace, the full config set, snapshot→worker→slot threading, `stub` and `replay` adapters.
+**Deliverables:** order schema, two-stage validator, fallback ladder, order record/replay, the complete 14-function `aiCommander` Lua namespace *(including the v1.2 `reportTrack` / `reportLoadout` ingress)*, the full config set, snapshot→worker→slot threading, the AIC-ARCH-4 runtime-column probe, and the `stub` and `replay` adapters.
 
 **Validation gate:**
 - All unit, stubbed-integration, and replay-determinism tests green; suite runs with no inference server and no network.
 - Frame-cost p95/p99 within budget over a 200-tick run.
 - TSAN clean.
 - Adversarial corpus 40/40 rejected with correct reason codes.
-- The reference Tier-1 script implements every AIC-ORD-2 row and falls back correctly when `aiCommander` is nil.
+- The reference Tier-1 script implements every AIC-ORD-2 row **and both reporting obligations**, and falls back correctly when `aiCommander` is nil.
+- *(v1.2)* The runtime-column probe passes on the target tree, and a deliberately broken column path is shown to disable the commander rather than yield a zero-velocity snapshot.
+- *(v1.2)* OQ-9 resolved — the observed behaviour of `readComponentFieldReal` against a runtime column, and against a misspelled one, is recorded.
 
 ### Phase 1b — Local backend
 
@@ -1062,6 +1154,8 @@ Carried from the authoring brief unresolved, per instruction, plus questions thi
 - [x] Success metrics have baselines, targets, measurement methods, and gates
 - [x] Source-control home, repository layout, ignore rules, and CI split specified
 - [x] Per-file header convention for plugin sources decided and recorded
+- [x] *(v1.2)* Every snapshot field traced to a reachable source, verified against the shipped headers rather than assumed
+- [x] *(v1.2)* Both path conventions (schema slash-joined vs runtime dot-joined) documented, with the silent-failure mode called out and a probe requirement attached
 - [ ] Owner authorization for the hosted backend — **outstanding, Phase 2 gate**
 - [ ] Repository visibility confirmed — private assumed; publication needs the same authorization as the hosted backend
 - [ ] OQ-1 through OQ-8 — **outstanding**
@@ -1082,7 +1176,17 @@ Every quantity this PRD's order schema carries, with the `schema-reference.json`
 | Sensor detection radius | metres | Slant range | `/datablocks/componentSensor/detectionRangeM` | `M` |
 | Mission tick period | seconds | Simulation time | `/datablocks/componentMission/updateIntervalS` | `S` |
 
-From the generated stubs rather than the schema: velocity is NED (`velN`, `velE`, `velD`, m/s, `entityControl.getVelocityNed`); acceleration is NED (m/s², `getAccelerationNed`); orientation is body-to-NED Euler (`headingDeg`, `pitchDeg`, `rollDeg`, `getOrientationEulerDeg`); sensor tracks report `range_m` in metres and `snr_DB` in decibels. DIS entity kind follows SISO-REF-010: 1 = platform, 2 = munition.
+**Not in the schema** *(clarified v1.2)*. The schema export carries only what an author states, so the transform's live motion state has no record above. Two other sources own it, and which one applies depends on whether you are in Lua or C++:
+
+| Quantity | Unit / frame | Lua source (stubs) | C++ source (runtime columns) |
+|---|---|---|---|
+| Velocity | m/s, NED | `entityControl.getVelocityNed` → `velN, velE, velD` | `TransformRuntimeColumns.h` — `velocityNed.x` / `.y` / `.z` (x=North, y=East, z=Down) |
+| Acceleration | m/s², NED | `entityControl.getAccelerationNed` | `accelerationNed.x` / `.y` / `.z` |
+| Orientation | body-to-NED | `entityControl.getOrientationEulerDeg` → `headingDeg, pitchDeg, rollDeg` | `orientationBodyToNedQuat.w` / `.x` / `.y` / `.z` (unit quaternion, **not** Euler) |
+
+Note the two path conventions differ: the schema uses `/`, the runtime columns use `.`. The runtime columns fail *silently* on a bad path — see §Naming and path conventions and AIC-ARCH-4.
+
+Also from the generated stubs rather than the schema: sensor tracks report `range_m` in metres and `snr_DB` in decibels — the units carried by `aiCommander.reportTrack`'s `rangeM` and `snrDb` arguments (AIC-API-1). DIS entity kind follows SISO-REF-010: 1 = platform, 2 = munition; it is *not* transmitted in v1.2 (see §Out of scope).
 
 ## Appendix B: User acceptance criteria
 
@@ -1101,6 +1205,12 @@ From the generated stubs rather than the schema: velocity is NED (`velN`, `velE`
 **WHEN** the integration suite runs with `commander.backend = "stub"`
 **THEN** the full order pipeline — render, validate, record, publish, consume from Lua — executes with no I/O, and switching `commander.backend` at runtime changes the adapter without a restart.
 
+### UAC-AIC-ARCH-4: Runtime-column startup probe
+*(Added v1.2)*
+**GIVEN** a release tree in which a `componentTransform` runtime column has been renamed or is otherwise unresolvable
+**WHEN** the plugin initializes and probes `velocityNed.x` / `.y` / `.z`
+**THEN** the probe fails, the commander stays disabled, the failing path is named in the startup log and surfaced through `aiCommander.getStats()`, no order is requested, and at no point is a snapshot built carrying a fabricated `0, 0, 0` velocity.
+
 ### UAC-AIC-ORD-1: Order document schema
 **GIVEN** a tactics author reading the order contract
 **WHEN** the model returns a response carrying an unknown property, an out-of-enum posture, or an altitude outside the configured bounds
@@ -1109,11 +1219,11 @@ From the generated stubs rather than the schema: velocity is NED (`velN`, `velE`
 ### UAC-AIC-ORD-2: Posture → verb mapping
 **GIVEN** the reference Tier-1 script and an accepted order with `posture = "hold"`
 **WHEN** the script's `onTick` runs
-**THEN** it calls `navigation.requestHoldPosition(entityId, lat, lon, alt, orbitRadiusM, cruiseSpeedMps)` with the ordered values, and no verb outside the authorized set is invoked.
+**THEN** it calls `navigation.requestHoldPosition(entityId, lat, lon, alt, orbitRadiusM, cruiseSpeedMps)` with the ordered values, and no verb outside the authorized set is invoked — and in the same tick, before reading the order, it has reported its track picture via `sensor.getTrackNr` / `getTrackById` → `aiCommander.reportTrack` and its stores via `weapon.getWeaponLoadout` → `aiCommander.reportLoadout`.
 
 ### UAC-AIC-VAL-1: Two-stage validation
 **GIVEN** an operator concerned about hallucinated targets
-**WHEN** the model emits an order naming an entity id that is not in the entity's current track list
+**WHEN** the model emits an order naming an entity id that Tier 1 never reported through `aiCommander.reportTrack` for the window the order's snapshot came from
 **THEN** Stage B rejects it with reason `track`, one `order.rejected` record is written carrying the truncated raw body, the `aicmd.reject.track` counter increments, and no `navigation.*` or `weapon.*` verb is invoked with that id.
 
 ### UAC-AIC-VAL-2: Reject-and-retain fallback ladder
@@ -1124,12 +1234,18 @@ From the generated stubs rather than the schema: velocity is NED (`velN`, `velE`
 ### UAC-AIC-SEC-2: Transmitted-field allowlist
 **GIVEN** an owner who must state what proprietary data leaves the machine
 **WHEN** a prompt is rendered from a snapshot whose every string field carries a unique sentinel
-**THEN** only allowlisted sentinels appear in the rendered bytes, no `componentTrackIdentity` sentinel appears, and the API key value appears in no prompt, log, or order record.
+**THEN** only allowlisted sentinels appear in the rendered bytes, no `componentTrackIdentity` sentinel appears, no `team` / `kind` / `domain` attribute appears on any track row, and the API key value appears in no prompt, log, or order record.
 
 ### UAC-AIC-API-1: The `aiCommander` Lua namespace
 **GIVEN** a Tier-1 script author who has run the engine once to regenerate stubs
 **WHEN** they call `aiCommander.getPosture(entityId)` for an entity with no order, with a valid order, and with a malformed argument
-**THEN** they receive `nil, nil, nil`; the ordered posture/target/speed triple; and `nil, nil, nil` respectively — never a raised error — and `aiCommander.lua` in the stubs folder documents the signature.
+**THEN** they receive `nil, nil, nil`; the ordered posture/target/speed triple; and `nil, nil, nil` respectively — never a raised error — and `aiCommander.lua` in the stubs folder documents all fourteen signatures.
+
+### UAC-AIC-API-1b: Tier-1 track and loadout ingress
+*(Added v1.2)*
+**GIVEN** a commanded entity whose script reports three tracks and two hardpoints in one cadence window
+**WHEN** the next snapshot is taken and an order naming the second reported track comes back
+**THEN** the prompt carried exactly those three tracks in ascending `targetEntityId` order with only `targetEntityId` / `rangeM` / `snrDb` per row, Stage-B B3 accepts the order, the reported lists were cleared when the snapshot was taken — and an order naming a fourth, unreported id would have been rejected `track` instead.
 
 ### UAC-AIC-API-2: Plugin configuration surface
 **GIVEN** a platform owner configuring the plugin
@@ -1139,7 +1255,7 @@ From the generated stubs rather than the schema: velocity is NED (`velN`, `velE`
 ### UAC-AIC-BE-1: Local adapter
 **GIVEN** a local inference server on `local.baseUrl`
 **WHEN** the commander requests an order and the server is unreachable
-**THEN** the transport failure (`statusCode == 0`) is distinguished from a non-2xx status in the reject reason, the worker's `IHttpClient` instance is used by no other thread, and the configured timeout is honoured.
+**THEN** the transport failure (`send()` returning `std::nullopt`) is distinguished from a returned response carrying a non-2xx status in the reject reason, the worker's `IHttpClient` instance is used by no other thread, and the configured timeout is honoured.
 
 ### UAC-AIC-BE-2: Claude adapter
 **GIVEN** an authorized Phase 2 run against `claude-haiku-4-5`
@@ -1154,7 +1270,7 @@ From the generated stubs rather than the schema: velocity is NED (`velN`, `velE`
 ### UAC-AIC-BE-4: TLS availability
 **GIVEN** a target machine whose OpenSSL runtime is missing
 **WHEN** the first hosted request is issued
-**THEN** the plugin logs a TLS-availability diagnosis distinct from a generic transport failure, disables the hosted backend, and falls back per the ladder without retrying in a tight loop.
+**THEN** the `https` request returns `std::nullopt` while a plain-`http` control request to the same host returns a value, the plugin logs a TLS-availability diagnosis distinct from a generic transport failure, disables the hosted backend, and falls back per the ladder without retrying in a tight loop.
 
 ### UAC-AIC-DET-1: Order record format
 **GIVEN** an engineer investigating a break-off at t=412 s
@@ -1201,6 +1317,7 @@ From the generated stubs rather than the schema: velocity is NED (`velN`, `velE`
 - Semantic checks that need `IEntityManager` stay where they are legal, which is why validation is two-stage rather than one.
 - Stale snapshots are dropped rather than queued — correct, because a stale snapshot produces a stale order.
 - Cost: the validator is split across two locations and must be read as one pipeline.
+- *(v1.2)* The snapshot carries the Tier-1-reported track and loadout lists captured at snapshot time, and Stage-B B3 validates against *that* captured list rather than whatever is current at publication — otherwise a target legitimately visible when the order was requested could be rejected merely because inference outlived the cadence window.
 
 ### ADR-4: Record every order from day one; replay is a first-class backend
 
@@ -1223,6 +1340,18 @@ From the generated stubs rather than the schema: velocity is NED (`velN`, `velE`
 - Data egress requires two positive acts and is always visible in the log.
 - Cost: operators must set an environment variable before a run, which is friction — deliberate friction, on the one action in this design that cannot be undone.
 
+### ADR-6: Tier 1 reports the tactical picture; the plugin does not fetch it
+
+**Status:** Proposed *(added v1.2)*
+**Context:** Sensor tracks and weapon loadout are runtime state with no public C++ read seam — no track component in the schema or `ComponentTypeNames.h`, no `IEntityManager` accessor, and no `ComponentFieldAccess` reader for the `list`-typed loadout. Both are reachable only from Lua, via `sensor.getTrackNr` / `getTrackById` and `weapon.getWeaponLoadout`. Three options were considered: add Lua ingress verbs; drop tracks and loadout from the snapshot; or synthesize a track list by scanning the entity roster.
+**Decision:** Tier 1 pushes what it already sees, through `aiCommander.reportTrack` and `aiCommander.reportLoadout` (AIC-API-1). The plugin never reconstructs a tactical picture by other means, and roster-scanning is explicitly out of scope.
+**Consequences:**
+- The commander's view of the world is exactly the deterministic script's view. It cannot see further than the entity's own sensors, which is both correct and the honest reading of "the model issues intent, the script owns the facts".
+- AIC-SEC-2 tightens: nothing reaches a prompt that a script did not hand over, the ingress verbs carry scalars only, and `team` / `kind` / `domain` leave the transmitted set.
+- Stage-B B3 becomes a check against reported state rather than an engine query, so it validates the model against what the script actually observed — which is the comparison that matters for catching a hallucinated target.
+- Reporting is advisory: a script that reports nothing still gets orders, but cannot receive a targeted one. The degradation is legible rather than silent.
+- Cost: the Lua surface grows from 12 functions to 14, and the reference script carries an obligation it would not otherwise have. Accepted, because the alternative that needed no new verbs — roster synthesis — would have fed the validator a fiction and made B3 worse than useless.
+
 ## Quality gate notes
 
 Advisory. Gaps found while composing this PRD, not blockers.
@@ -1232,3 +1361,59 @@ Advisory. Gaps found while composing this PRD, not blockers.
 - **H1 is the load-bearing hypothesis and is the hardest to measure objectively.** "Posture transitions a reviewer marks appropriate" is a human judgment. If Phase 1b needs a harder signal, candidates are: time-to-first-valid-shot, shots per kill, and survival rate across paired runs — all computable from the existing entity logs. Worth deciding before the Phase 1b gate rather than during it.
 - **OQ-4 could invalidate the chosen architecture cheaply, so it should be answered early.** It is scheduled at the Phase 1a gate for that reason: a half-day investigation of `n8ro-sim-bot`'s tool surface, before Phase 1b spends effort on the local adapter. The order schema, validator, and replay format survive a "yes", so the exposure is bounded to the adapter layer.
 - **The doctrine text is unwritten and is on the critical path for order quality.** It is the one Phase 1 deliverable this PRD does not specify in detail, because its content is domain expertise rather than engineering. Flagged as a rabbit hole with a one-day timebox; if it needs more, that is a signal to reconsider the RAG deferral.
+- **v1.2 note — the snapshot was specified from the Lua surface, not the C++ one.** Every field in the original §Exactly what is transmitted named a Lua verb, and two of them turned out to have no C++ equivalent. The lesson generalizes: for a C++ plugin, "which verb returns this?" is the wrong traceability question — "which header or schema record exposes this to *the plugin*?" is the right one. Appendix A now carries the Lua/C++ split explicitly so the next field added is checked against both columns.
+
+## Changelog
+
+### v1.2 — 2026-08-01
+
+**Topics in this revision:**
+- Sensor tracks and weapon loadout have no public C++ read seam, so two rows of §Exactly what is transmitted and Stage-B check B3 were not implementable. Resolved by Tier-1 ingress (`aiCommander.reportTrack` / `reportLoadout`) per owner decision.
+- Four mechanism corrections verified against the shipped headers and generated stubs: `IHttpClient::send()` returns `std::optional<HttpResponse>`; detections arrive as repeating triples; transform velocity/orientation/acceleration are runtime columns on dot-joined paths that fail silently; Stage-B B1 uses `IEntityManager::getEntity`.
+
+**Sections updated:**
+- §Header — Status to Draft v1.2; revision history restructured as a list.
+- §Source inputs — schema-reference scoped to *authored* fields; added `TransformRuntimeColumns.h` and `ComponentFieldAccess.h`; `send()` return type corrected.
+- §Corrections verified in-tree — retitled; added items 4–7.
+- §Out of scope — 3 rows added (plugin-side track/loadout reads; roster-scan synthesis, rejected not deferred; free-text track attributes, deferred v1.1).
+- §Security posture → Enforcement model — transport failure restated as `std::nullopt`.
+- §Security posture → Exactly what is transmitted — `tracks[]` and `own.loadout[]` re-sourced to the ingress verbs; `team`/`kind`/`domain` dropped from the track row; own-ship rows re-sourced to schema leaves, runtime columns, and `IEntity::getTeam()`; rationale paragraph added.
+- §Naming and path conventions → Component access — two path forms tabulated with their differing failure modes; roster-synthesis prohibition added.
+- §FRs — **AIC-ARCH-4 added** (runtime-column startup probe).
+- §FRs — AIC-ORD-2: reporting obligation table + 2 acceptance criteria.
+- §FRs — AIC-VAL-1: A1, B1, B3, B4 restated.
+- §FRs — AIC-SEC-2: 2 acceptance criteria added (scalar-only track rows; ingress sanitization).
+- §FRs — AIC-API-1: `reportTrack` + `reportLoadout` added (12 → 14 functions); reported-list lifecycle defined; 2 acceptance criteria added; `getStats()` gains `runtimeColumnProbe`.
+- §FRs — AIC-BE-1, AIC-BE-3, AIC-BE-4: transport-failure mechanism corrected; deterministic reported-list render ordering added.
+- §Cross-service impact → Interface changes — new Tier-1 → plugin data-flow direction recorded.
+- §Observability — 2 metrics added (`aicmd.tracks.reported`, `aicmd.probe.runtimeColumns`); startup log fields extended.
+- §Operational readiness → Runbook — `track` row now checks reporting first; probe-failure row added.
+- §Operational readiness → Dependencies — 2 rows added.
+- §Risks — 2 rows added (silent zero from a runtime column; Tier-1 reporting not wired).
+- §Open questions — **OQ-9 added**.
+- §Validation and test plan — new "Unit — Tier-1 ingress" block; B3 cases; render-determinism and scalar-only prompt cases; probe cases; reporting-absent resilience case; `statusCode == 0` phrasing corrected.
+- §Milestones → Phase 1a — deliverables and gate extended (14-function namespace, probe, OQ-9).
+- §Review checklist — 2 items added.
+- §Appendix A — Lua-vs-C++ source split tabulated; `reportTrack` units traced; DIS kind marked not-transmitted.
+- §Appendix B — **UAC-AIC-ARCH-4 and UAC-AIC-API-1b added**; UAC-AIC-ORD-2, UAC-AIC-VAL-1, UAC-AIC-SEC-2, UAC-AIC-API-1, UAC-AIC-BE-1, UAC-AIC-BE-4 updated.
+- §Appendix C — **ADR-6 added**; ADR-3 consequence added.
+- §Quality gate notes — v1.2 lesson recorded.
+
+**Sections explicitly verified no-change:**
+- §Purpose and scope · §One-liner · §Problem statement · §Prior art · §Goals · §Success metrics · §Non-goals · §Key hypotheses · §Tenets · §Trust boundaries · §Threat model · AIC-ARCH-1 · AIC-ARCH-2 · AIC-ARCH-3 · AIC-ORD-1 · AIC-VAL-2 · AIC-API-2 (config set unchanged — `commander.maxTracksInPrompt` already bounds the reported lists) · AIC-BE-2 · AIC-DET-1 · AIC-DET-2 · §Scope authority · §Performance requirements · §Configuration and deployment · §Source control and repository · §Inference-server prerequisites · §Health · §Deployment checklist · §Capacity planning · §Rollback strategy · §Alternatives considered · §Rabbit holes · §Cost model · §Milestones Phase 0 / 1b / 2
+
+**New OQ entries:** OQ-9
+**Resolved OQ entries:** none
+**Out-of-Scope additions:** 3 rows — plugin-side C++ track/loadout reads; roster-scan track synthesis (rejected); free-text track attributes (deferred v1.1)
+**Out-of-Scope closures:** none
+**FR changes:** +1 added (AIC-ARCH-4), ~8 modified (AIC-ORD-2, AIC-VAL-1, AIC-SEC-2, AIC-API-1, AIC-BE-1, AIC-BE-3, AIC-BE-4, plus §Naming conventions), −0 removed
+**UAC changes:** +2 added (UAC-AIC-ARCH-4, UAC-AIC-API-1b), ~6 modified, −0 removed
+**Lua surface:** 12 → 14 functions
+
+### v1.1 — 2026-08-01
+
+Added §Source control and repository (standalone repo, layout, ignore rules, the single `open-solution.cmd` relocation edit, CI split, visibility); recorded the owner's decision that plugin source files carry no Arkheon per-file header; added the `prompt.doctrinePath` config field.
+
+### v1.0 — 2026-07-31
+
+Initial Comprehensive-tier draft.
