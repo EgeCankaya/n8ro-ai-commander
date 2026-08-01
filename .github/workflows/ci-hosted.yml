@@ -27,7 +27,7 @@ jobs:
     name: PRD structural lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Lint the PRD
         shell: pwsh
@@ -37,7 +37,7 @@ jobs:
     name: Tracked-artifact guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # The guard reads `git ls-files`, which needs the real index rather than a sparse one.
           fetch-depth: 1
@@ -62,7 +62,7 @@ jobs:
     # near-worthless, and pretending otherwise with a green check would be worse than this note.
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Check formatting
         run: |
@@ -92,7 +92,7 @@ jobs:
     name: Lua syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Lua
         run: sudo apt-get update -qq && sudo apt-get install -y -qq lua5.4
@@ -117,7 +117,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 

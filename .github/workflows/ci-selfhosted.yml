@@ -14,10 +14,19 @@ name: CI (self-hosted)
 # Runner setup: register a self-hosted runner with the labels below on a machine where
 # `C:\N8RO\setup.cmd` exists. Override N8RO_RELEASE_ROOT if the tree lives elsewhere.
 
+# TRIGGER IS workflow_dispatch ONLY UNTIL A RUNNER IS REGISTERED.
+#
+# With no runner carrying the labels below, a `pull_request` trigger queues a job that can never
+# start, and the PR shows a check that is pending forever — indistinguishable at a glance from a
+# slow build, and it blocks any branch protection that requires this check.
+#
+# Step 2 of registering the runner is to uncomment the two triggers below. Leaving them commented
+# is deliberate rather than an omission: it keeps the gap visible as "this never runs" instead of
+# hiding it behind a spinner.
 on:
-  pull_request:
-  push:
-    branches: [main]
+  # pull_request:
+  # push:
+  #   branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -36,7 +45,7 @@ jobs:
         shell: cmd
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Verify the release tree is present
         run: |
