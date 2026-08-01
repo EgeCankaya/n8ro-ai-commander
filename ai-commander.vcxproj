@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>18.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{fd825997-dcbc-49ab-9fbd-4b471380a691}</ProjectGuid>
+    <RootNamespace>simscripting</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="Shared" />
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(ProjectDir)bin\release\</OutDir>
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>ai-commander</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <PreBuildEvent>
+      <Command>if "$(N8RO_RELEASE)"=="" (
+  echo [Error] N8RO_RELEASE is not defined. Run dist\setup.cmd before opening/building.
+  exit /b 1
+)
+if not exist "$(N8RO_RELEASE)\include\n8ro-core\plugin\IPlugin.h" (
+  echo [Error] Missing SDK header: $(N8RO_RELEASE)\include\n8ro-core\plugin\IPlugin.h
+  exit /b 1
+)
+if not exist "$(N8RO_RELEASE)\include\n8ro-sim\plugin\IScriptingPluginService.h" (
+  echo [Error] Missing SDK header: $(N8RO_RELEASE)\include\n8ro-sim\plugin\IScriptingPluginService.h
+  exit /b 1
+)
+if not exist "$(N8RO_RELEASE)\lib\n8ro-core.lib" (
+  echo [Error] Missing SDK library: $(N8RO_RELEASE)\lib\n8ro-core.lib
+  exit /b 1
+)
+if not exist "$(N8RO_RELEASE)\lib\n8ro-sim.lib" (
+  echo [Error] Missing SDK library: $(N8RO_RELEASE)\lib\n8ro-sim.lib
+  exit /b 1
+)</Command>
+    </PreBuildEvent>
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <PreprocessorDefinitions>NDEBUG;WIN32_LEAN_AND_MEAN;NOMINMAX;N8RO_CORE_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)include;$(N8RO_RELEASE)\include\n8ro-core;$(N8RO_RELEASE)\include\n8ro-sim;$(N8RO_RELEASE)\include\n8ro-schema;$(N8RO_RELEASE)\include\n8ro-data;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(N8RO_RELEASE)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>n8ro-core.lib;n8ro-schema.lib;n8ro-data.lib;n8ro-sim.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PostBuildEvent>
+      <Command>if "$(N8RO_RELEASE_USER_SIM_PLUGINS)"=="" (
+  echo [Error] N8RO_RELEASE_USER_SIM_PLUGINS is not defined. Run dist\setup.cmd before building.
+  exit /b 1
+)
+if not exist "$(N8RO_RELEASE_USER_SIM_PLUGINS)" (
+  mkdir "$(N8RO_RELEASE_USER_SIM_PLUGINS)"
+)
+copy /Y "$(TargetPath)" "$(N8RO_RELEASE_USER_SIM_PLUGINS)\" >nul
+if errorlevel 1 (
+  echo [Error] Failed to deploy plugin DLL to $(N8RO_RELEASE_USER_SIM_PLUGINS)
+  exit /b 1
+)
+echo [Deploy] ai-commander.dll copied to $(N8RO_RELEASE_USER_SIM_PLUGINS)</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClInclude Include="include\SimScriptingPlugin.h" />
+    <ClInclude Include="include\ExistingNamespaceApiModule.h" />
+    <ClInclude Include="include\NewNamespaceApiModule.h" />
+    <ClInclude Include="include\EntityStateApiModule.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\SimScriptingPlugin.cpp" />
+    <ClCompile Include="src\ExistingNamespaceApiModule.cpp" />
+    <ClCompile Include="src\NewNamespaceApiModule.cpp" />
+    <ClCompile Include="src\EntityStateApiModule.cpp" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>

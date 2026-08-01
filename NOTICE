@@ -1,0 +1,19 @@
+N8RO AI Entity Commander
+========================
+
+A plugin for the N8RO simulation platform (Arkheon Technologies).
+
+This repository contains only plugin source authored against the N8RO SDK. It
+contains no Arkheon-shipped code: no SDK headers, no import libraries, no
+platform binaries, no runtime data. Those remain in the licensed release tree
+and are referenced at build time through the N8RO_RELEASE environment variable.
+
+Provenance is recorded here rather than as a per-file header. Files in this
+repository do not carry the Arkheon proprietary/confidential per-file banner;
+that convention governs files inside the release tree itself.
+
+Note on classification: this repository necessarily describes proprietary SDK
+surface -- component type strings, schema field paths, and Lua verb signatures --
+and docs/prd.md documents it in detail. Repository visibility is therefore the
+control that governs disclosure. Default to private. Publication requires
+explicit owner authorization.

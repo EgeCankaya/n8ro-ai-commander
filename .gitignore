@@ -1,0 +1,37 @@
+# ---- Build output -------------------------------------------------------
+bin/
+x64/
+Win32/
+*.dll
+*.pdb
+*.obj
+*.lib
+*.exp
+*.ilk
+*.idb
+*.tlog
+*.log
+
+# ---- Visual Studio ------------------------------------------------------
+.vs/
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+
+# ---- Security-relevant --------------------------------------------------
+# Order logs carry live scenario state (positions, ORBAT, team assignments,
+# loadouts), which inherits the release tree's proprietary classification.
+# See the PRD, "Security posture and trust boundaries".
+logs/
+*.jsonl
+
+# Secrets are read from the environment, never committed.
+.env
+.env.*
+*.key
+*.pem
+
+# Model weights are large and live in the release tree at data/ai/model/.
+*.gguf
+*.safetensors

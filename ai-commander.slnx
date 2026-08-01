@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <BuildType Name="Release" />
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="ai-commander.vcxproj" Id="fd825997-dcbc-49ab-9fbd-4b471380a691" />
+</Solution>
