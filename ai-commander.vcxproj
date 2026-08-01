@@ -90,16 +90,18 @@ echo [Deploy] ai-commander.dll copied to $(N8RO_RELEASE_USER_SIM_PLUGINS)</Comma
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="include\SimScriptingPlugin.h" />
-    <ClInclude Include="include\ExistingNamespaceApiModule.h" />
-    <ClInclude Include="include\NewNamespaceApiModule.h" />
-    <ClInclude Include="include\EntityStateApiModule.h" />
+    <ClInclude Include="include\AiCommanderPlugin.h" />
+    <ClInclude Include="include\AiCommanderApiModule.h" />
+    <ClInclude Include="include\CommanderConfig.h" />
+    <ClInclude Include="include\CommanderRuntime.h" />
+    <ClInclude Include="include\RuntimeColumnProbe.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\SimScriptingPlugin.cpp" />
-    <ClCompile Include="src\ExistingNamespaceApiModule.cpp" />
-    <ClCompile Include="src\NewNamespaceApiModule.cpp" />
-    <ClCompile Include="src\EntityStateApiModule.cpp" />
+    <ClCompile Include="src\AiCommanderPlugin.cpp" />
+    <ClCompile Include="src\AiCommanderApiModule.cpp" />
+    <ClCompile Include="src\CommanderConfig.cpp" />
+    <ClCompile Include="src\CommanderRuntime.cpp" />
+    <ClCompile Include="src\RuntimeColumnProbe.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
