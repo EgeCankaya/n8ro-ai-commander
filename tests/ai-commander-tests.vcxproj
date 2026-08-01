@@ -67,11 +67,15 @@ if not exist "$(N8RO_RELEASE)\lib\n8ro-core.lib" (
     <ClCompile Include="..\src\EnvVar.cpp" />
     <ClCompile Include="..\src\Order.cpp" />
     <ClCompile Include="..\src\OrderSchema.cpp" />
+    <ClCompile Include="..\src\OrderValidatorStageA.cpp" />
+    <ClCompile Include="..\src\OrderValidatorStageB.cpp" />
+    <ClCompile Include="..\src\RejectReason.cpp" />
   </ItemGroup>
   <ItemGroup Label="Test cases">
     <ClCompile Include="TestMain.cpp" />
     <ClCompile Include="ConfigTests.cpp" />
     <ClCompile Include="SchemaTests.cpp" />
+    <ClCompile Include="AdversarialCorpusTests.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

@@ -19,6 +19,9 @@ inline constexpr double kMaxLatitudeDeg = 90.0;
 inline constexpr double kMinLongitudeDeg = -180.0;
 inline constexpr double kMaxLongitudeDeg = 180.0;
 inline constexpr double kMaxOrbitRadiusM = 50000.0;
+// A static ceiling, not an airframe limit. The configured envelope is `safety.maxSpeedMps` and is
+// enforced in Stage B; this only catches values no configuration could mean.
+inline constexpr double kMaxCruiseSpeedMps = 1000.0;
 
 inline constexpr std::size_t kMinReasonChars = 1;
 inline constexpr std::size_t kMaxReasonChars = 200;
