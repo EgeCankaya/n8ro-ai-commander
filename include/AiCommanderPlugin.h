@@ -4,10 +4,16 @@
 
 #include "AiCommanderApiModule.h"
 #include "CommanderRuntime.h"
+#include "OrderValidatorStageB.h"
 
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
+namespace n8ro::core {
+class IThreadRunner;
+}
 namespace n8ro::sim {
 class IEntityManager;
 }
@@ -23,7 +29,7 @@ namespace arkheon::aicommander {
 class AiCommanderPlugin final : public n8ro::core::IPlugin {
 public:
     AiCommanderPlugin() : apiModule_(runtime_) {}
-    ~AiCommanderPlugin() override = default;
+    ~AiCommanderPlugin() override;
 
     [[nodiscard]] int getInterfaceVersion() const override;
     [[nodiscard]] n8ro::core::PluginMetadata getMetadata() const override;
@@ -36,21 +42,46 @@ public:
     bool applyConfigFields(const std::vector<n8ro::core::PluginConfigField>& fields) override;
 
 private:
-    // Runs the AIC-ARCH-4 probe once entities exist, and logs the verdict. Deferred out of
-    // initialize() because no scenario is loaded there — the entity manager is empty until a
-    // scenario spawns, so a probe at initialize() would always report "nothing to probe".
+    // Runs the AIC-ARCH-4 probe once entities exist. Deferred out of initialize() because no
+    // scenario is loaded there — the entity manager is empty until a scenario spawns.
     void runProbeIfPending();
+
+    // Constructs the adapter `commander.backend` names. Called at initialize() and whenever the
+    // backend changes, so switching takes effect without restarting the process (AIC-ARCH-3).
+    void rebuildBackend();
+
+    // The per-frame pipeline, in the order the design requires:
+    //   drain completed orders -> Stage B -> publish  (newest information first)
+    //   advance the fallback ladder
+    //   take snapshots and dispatch new requests
+    void drainCompletedOrders(double simTimeS, std::int64_t frame);
+    void advanceLadders(double simTimeS, std::int64_t frame);
+    void dispatchRequests(double simTimeS, std::int64_t frame);
+
+    // Builds a snapshot from live state, or returns false when a required field is unavailable —
+    // in which case this entity is skipped for the tick rather than snapshotted with a hole in it.
+    [[nodiscard]] bool buildSnapshot(
+        const std::string& entityId, double simTimeS, std::int64_t serial, OrderSnapshot& out) const;
+
+    [[nodiscard]] EntityPosition positionOf(const std::string& entityId) const;
 
     CommanderRuntime runtime_;
     AiCommanderApiModule apiModule_;
 
-    // Non-owning; supplied by the host and valid for the lifetime of the scripting service. Only
-    // ever dereferenced on the update thread.
+    // Non-owning, host-supplied, valid for the lifetime of the scripting service. Dereferenced on
+    // the update thread only, and never handed to a worker.
     const n8ro::sim::IEntityManager* entityManager_ = nullptr;
+    n8ro::core::IThreadRunner* threadRunner_ = nullptr;
 
+    // The Stage-B world view over entityManager_. Owned here so its lifetime matches the plugin's.
+    std::unique_ptr<StageBWorldView> world_;
+
+    std::int64_t frameCounter_ = 0;
+    double simTimeS_ = 0.0;
     bool scriptingApiRegistered_ = false;
     bool probeAttemptedThisRun_ = false;
     bool shutdown_ = false;
+    bool loggedNoThreadRunner_ = false;
 };
 
 } // namespace arkheon::aicommander

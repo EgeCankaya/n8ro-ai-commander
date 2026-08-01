@@ -90,18 +90,44 @@ echo [Deploy] ai-commander.dll copied to $(N8RO_RELEASE_USER_SIM_PLUGINS)</Comma
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="include\AiCommanderPlugin.h" />
     <ClInclude Include="include\AiCommanderApiModule.h" />
+    <ClInclude Include="include\AiCommanderPlugin.h" />
     <ClInclude Include="include\CommanderConfig.h" />
     <ClInclude Include="include\CommanderRuntime.h" />
+    <ClInclude Include="include\EnvVar.h" />
+    <ClInclude Include="include\FallbackLadder.h" />
+    <ClInclude Include="include\ILlmClient.h" />
+    <ClInclude Include="include\Order.h" />
+    <ClInclude Include="include\OrderRecorder.h" />
+    <ClInclude Include="include\OrderSchema.h" />
+    <ClInclude Include="include\OrderSlot.h" />
+    <ClInclude Include="include\OrderValidatorStageA.h" />
+    <ClInclude Include="include\OrderValidatorStageB.h" />
+    <ClInclude Include="include\PromptRenderer.h" />
+    <ClInclude Include="include\RejectReason.h" />
+    <ClInclude Include="include\ReplayLlmClient.h" />
     <ClInclude Include="include\RuntimeColumnProbe.h" />
+    <ClInclude Include="include\Snapshot.h" />
+    <ClInclude Include="include\StubLlmClient.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\AiCommanderPlugin.cpp" />
     <ClCompile Include="src\AiCommanderApiModule.cpp" />
+    <ClCompile Include="src\AiCommanderPlugin.cpp" />
     <ClCompile Include="src\CommanderConfig.cpp" />
     <ClCompile Include="src\CommanderRuntime.cpp" />
+    <ClCompile Include="src\EnvVar.cpp" />
+    <ClCompile Include="src\FallbackLadder.cpp" />
+    <ClCompile Include="src\Order.cpp" />
+    <ClCompile Include="src\OrderRecorder.cpp" />
+    <ClCompile Include="src\OrderSchema.cpp" />
+    <ClCompile Include="src\OrderValidatorStageA.cpp" />
+    <ClCompile Include="src\OrderValidatorStageB.cpp" />
+    <ClCompile Include="src\PromptRenderer.cpp" />
+    <ClCompile Include="src\RejectReason.cpp" />
+    <ClCompile Include="src\ReplayLlmClient.cpp" />
     <ClCompile Include="src\RuntimeColumnProbe.cpp" />
+    <ClCompile Include="src\Snapshot.cpp" />
+    <ClCompile Include="src\StubLlmClient.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

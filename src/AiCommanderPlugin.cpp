@@ -1,14 +1,27 @@
 #include "AiCommanderPlugin.h"
 
+#include "PromptRenderer.h"
+#include "ReplayLlmClient.h"
+#include "StubLlmClient.h"
+
+#include <component/ComponentFieldAccess.h>
+#include <component/ComponentTypeNames.h>
 #include <core/logging/GlobalLogger.h>
+#include <core/threading/IThreadRunner.h>
+#include <entity/IEntity.h>
 #include <entity/IEntityManager.h>
+#include <entity/TransformRuntimeColumns.h>
 #include <plugin/IPluginServices.h>
 #include <plugin/IScriptingPluginService.h>
 #include <plugin/PluginContext.h>
 #include <scripting/ScriptingApiContext.h>
 
+#include <fstream>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace arkheon::aicommander {
 
@@ -21,7 +34,63 @@ constexpr std::string_view kPluginId = "ai-commander";
     return value ? "non-null" : "NULL";
 }
 
+// Reads the doctrine block for the prompt's stable prefix. Missing is not an error: the prefix is
+// still well-formed without it, and refusing to start over an absent text file would make the
+// commander harder to bring up than it needs to be.
+[[nodiscard]] std::string readDoctrine(const std::string& path) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) {
+        return {};
+    }
+    std::ostringstream buffer;
+    buffer << stream.rdbuf();
+    return buffer.str();
+}
+
+// The production StageBWorldView: reads live state through IEntityManager on the simulation
+// thread. Never handed to a worker.
+class EngineWorldView final : public StageBWorldView {
+public:
+    explicit EngineWorldView(const n8ro::sim::IEntityManager* manager) : manager_(manager) {}
+
+    bool entityExists(const std::string& entityId) const override {
+        return manager_ != nullptr && manager_->getEntity(entityId) != nullptr;
+    }
+
+    std::string teamOf(const std::string& entityId) const override {
+        if (manager_ == nullptr) {
+            return {};
+        }
+        const n8ro::sim::IEntity* entity = manager_->getEntity(entityId);
+        return entity == nullptr ? std::string() : entity->getTeam();
+    }
+
+    bool positionOf(const std::string& entityId, double& lat, double& lon, double& alt) const override {
+        if (manager_ == nullptr) {
+            return false;
+        }
+        const std::optional<double> latitude = n8ro::sim::readComponentFieldReal(
+            *manager_, entityId, n8ro::sim::kComponentTransform, "positionGeodetic/latitudeDeg");
+        const std::optional<double> longitude = n8ro::sim::readComponentFieldReal(
+            *manager_, entityId, n8ro::sim::kComponentTransform, "positionGeodetic/longitudeDeg");
+        const std::optional<double> altitude = n8ro::sim::readComponentFieldReal(
+            *manager_, entityId, n8ro::sim::kComponentTransform, "positionGeodetic/altitudeHaeM");
+        if (!latitude || !longitude || !altitude) {
+            return false;
+        }
+        lat = *latitude;
+        lon = *longitude;
+        alt = *altitude;
+        return true;
+    }
+
+private:
+    const n8ro::sim::IEntityManager* manager_ = nullptr;
+};
+
 } // namespace
+
+AiCommanderPlugin::~AiCommanderPlugin() = default;
 
 int AiCommanderPlugin::getInterfaceVersion() const {
     return 1;
@@ -35,22 +104,66 @@ n8ro::core::PluginMetadata AiCommanderPlugin::getMetadata() const {
     return metadata;
 }
 
+void AiCommanderPlugin::rebuildBackend() {
+    const CommanderConfig& config = runtime_.config();
+
+    switch (config.backend) {
+        case Backend::Stub:
+            runtime_.setClient(std::make_unique<StubLlmClient>());
+            break;
+        case Backend::Replay: {
+            auto replay = std::make_unique<ReplayLlmClient>();
+            std::string error;
+            if (!replay->load(config.replayPath, error)) {
+                N8RO_LOG_ERROR(
+                    std::string("ai-commander: replay backend unavailable - ") + error
+                        + ". The commander will not issue orders.",
+                    kLogCategory);
+                runtime_.setClient(nullptr);
+                return;
+            }
+            N8RO_LOG_INFO(
+                std::string("ai-commander: replay loaded ") + std::to_string(replay->entryCount())
+                    + " recorded orders from " + config.replayPath,
+                kLogCategory);
+            runtime_.setClient(std::move(replay));
+            break;
+        }
+        case Backend::Local:
+        case Backend::Claude:
+            // Phase 1b and Phase 2. Deliberately not stubbed out with a silent fallback to `stub`:
+            // an operator who selected `local` and silently got canned orders would have no way to
+            // notice, and every downstream measurement would be meaningless.
+            N8RO_LOG_WARNING(
+                std::string("ai-commander: backend '") + toString(config.backend)
+                    + "' is not implemented in this build (Phase 1b/2). The commander will not "
+                      "issue orders. Set commander.backend to stub or replay.",
+                kLogCategory);
+            runtime_.setClient(nullptr);
+            return;
+    }
+
+    // The prefix is rebuilt with the backend, so a doctrine or config change invalidates the
+    // prompt cache exactly once and deliberately (AIC-BE-3).
+    runtime_.promptRenderer().build(config, readDoctrine(config.doctrinePath));
+}
+
 void AiCommanderPlugin::initialize(n8ro::core::PluginContext& context) {
     shutdown_ = false;
     scriptingApiRegistered_ = false;
     probeAttemptedThisRun_ = false;
+    frameCounter_ = 0;
 
-    // OQ-7: PluginContext documents both `services` and `threadRunner` as nullable, and nobody has
-    // observed what the host actually passes to a sim plugin. Log both on every load — this is the
-    // whole evidence base for whether the worker can use IThreadRunner::submitBackgroundTask or
-    // must own a std::thread. The fallback is specified either way, so this is a simplification
-    // question rather than a blocker; the log line is what closes it.
+    // OQ-7, resolved 2026-08-01: the host supplies both non-null. The line stays because the field
+    // is documented nullable and a future host could change that — the fallback below is what the
+    // FR requires either way.
     {
-        const std::string line = std::string("ai-commander: [OQ-7] PluginContext.services is ")
+        const std::string line = std::string("ai-commander: PluginContext.services is ")
             + yesNo(context.services != nullptr) + ", PluginContext.threadRunner is "
             + yesNo(context.threadRunner != nullptr) + ".";
         N8RO_LOG_INFO(line, kLogCategory);
     }
+    threadRunner_ = context.threadRunner;
 
     if (context.services == nullptr) {
         N8RO_LOG_WARNING(
@@ -72,23 +185,33 @@ void AiCommanderPlugin::initialize(n8ro::core::PluginContext& context) {
     auto* scriptingService = static_cast<n8ro::sim::IScriptingPluginService*>(rawService);
     const n8ro::sim::ScriptingApiContext& scriptingContext = scriptingService->scriptingContext();
 
-    // Held for the AIC-ARCH-4 probe and, later, for building snapshots on the update thread.
-    // Never handed to a worker: IEntityManager is single-thread-only, and the worker's callable
-    // captures only a POD snapshot and the ILlmClient (AIC-ARCH-2).
     entityManager_ = scriptingContext.entityManager;
+    world_ = std::make_unique<EngineWorldView>(entityManager_);
+
+    rebuildBackend();
+
+    const CommanderConfig& config = runtime_.config();
+    if (config.recordEnabled && !runtime_.recorder().open(config.recordPath, 16 * 1024 * 1024, 4)) {
+        // Best-effort: recording must never stall or fail a frame.
+        N8RO_LOG_WARNING(
+            std::string("ai-commander: could not open the order log at '") + config.recordPath
+                + "'; the run will not be recorded.",
+            kLogCategory);
+    }
 
     scriptingApiRegistered_ =
         apiModule_.registerWith(scriptingService->missionRegistrar(), scriptingContext);
 
     if (scriptingApiRegistered_) {
-        const CommanderConfig& config = runtime_.config();
-        const std::string line = std::string("ai-commander: registered the aiCommander namespace. ")
-            + "backend=" + toString(config.backend)
-            + " enabled=" + (config.enabled ? "true" : "false")
-            + " cadenceS=" + std::to_string(static_cast<int>(config.cadenceS))
-            + " maxCommandedEntities=" + std::to_string(config.maxCommandedEntities)
-            + " recordPath=" + config.recordPath;
-        N8RO_LOG_INFO(line, kLogCategory);
+        N8RO_LOG_INFO(
+            std::string("ai-commander: registered the aiCommander namespace (14 functions). ")
+                + "backend=" + toString(config.backend)
+                + " enabled=" + (config.enabled ? "true" : "false")
+                + " cadenceS=" + std::to_string(static_cast<int>(config.cadenceS))
+                + " maxCommandedEntities=" + std::to_string(config.maxCommandedEntities)
+                + " prefixBytes=" + std::to_string(runtime_.promptRenderer().prefix().size())
+                + " recording=" + (runtime_.recorder().isOpen() ? runtime_.recorder().path() : "off"),
+            kLogCategory);
     } else {
         N8RO_LOG_WARNING(
             "ai-commander: one or more aiCommander functions failed to register.", kLogCategory);
@@ -102,11 +225,8 @@ void AiCommanderPlugin::runProbeIfPending() {
 
     ProbeReport report = probeRuntimeColumns(*entityManager_);
     if (report.result == ProbeResult::NotRun) {
-        // No entity with a transform yet. Stay pending and retry on a later frame rather than
-        // recording a verdict the scenario has not had a chance to earn.
-        return;
+        return;   // No entity yet; retry on a later frame.
     }
-
     probeAttemptedThisRun_ = true;
 
     const std::string verdict = std::string("ai-commander: runtime-column probe ")
@@ -116,35 +236,290 @@ void AiCommanderPlugin::runProbeIfPending() {
     } else {
         // A failed probe disables the commander. It does NOT fall back to a zero velocity: a
         // fabricated stationary own-ship would degrade every order downstream with no failing test
-        // and no log line, which is the exact failure mode AIC-ARCH-4 exists to prevent.
+        // and no log line, which is the failure mode AIC-ARCH-4 exists to prevent.
         N8RO_LOG_ERROR(verdict, kLogCategory);
         N8RO_LOG_ERROR(
-            "ai-commander: commander will not issue orders while the runtime-column probe is "
-            "failing.",
+            "ai-commander: the commander will not issue orders while the probe is failing.",
             kLogCategory);
     }
-
     runtime_.setProbeReport(std::move(report));
 }
 
+EntityPosition AiCommanderPlugin::positionOf(const std::string& entityId) const {
+    EntityPosition position;
+    if (world_ == nullptr) {
+        return position;
+    }
+    position.known = world_->positionOf(
+        entityId, position.latitudeDeg, position.longitudeDeg, position.altitudeHaeM);
+    return position;
+}
+
+bool AiCommanderPlugin::buildSnapshot(
+    const std::string& entityId, double simTimeS, std::int64_t serial, OrderSnapshot& out) const {
+    if (entityManager_ == nullptr) {
+        return false;
+    }
+    const n8ro::sim::IEntity* entity = entityManager_->getEntity(entityId);
+    if (entity == nullptr) {
+        return false;
+    }
+
+    // Authored schema leaves — slash-joined paths from schema-reference.json.
+    const std::optional<double> lat = n8ro::sim::readComponentFieldReal(
+        *entityManager_, entityId, n8ro::sim::kComponentTransform, "positionGeodetic/latitudeDeg");
+    const std::optional<double> lon = n8ro::sim::readComponentFieldReal(
+        *entityManager_, entityId, n8ro::sim::kComponentTransform, "positionGeodetic/longitudeDeg");
+    const std::optional<double> alt = n8ro::sim::readComponentFieldReal(
+        *entityManager_, entityId, n8ro::sim::kComponentTransform, "positionGeodetic/altitudeHaeM");
+    const std::optional<double> heading = n8ro::sim::readComponentFieldReal(
+        *entityManager_, entityId, n8ro::sim::kComponentTransform, "headingDeg");
+
+    // Runtime columns — DOT-joined paths, owned by TransformRuntimeColumns.h. These resolve or
+    // return nullopt (OQ-9), and AIC-ARCH-4 has already verified they resolve on this tree.
+    const std::optional<double> velN = n8ro::sim::readComponentFieldReal(
+        *entityManager_, entityId, n8ro::sim::kComponentTransform,
+        n8ro::sim::kTransformColumnVelocityNorth);
+    const std::optional<double> velE = n8ro::sim::readComponentFieldReal(
+        *entityManager_, entityId, n8ro::sim::kComponentTransform,
+        n8ro::sim::kTransformColumnVelocityEast);
+    const std::optional<double> velD = n8ro::sim::readComponentFieldReal(
+        *entityManager_, entityId, n8ro::sim::kComponentTransform,
+        n8ro::sim::kTransformColumnVelocityDown);
+
+    // A nullopt on ANY required field aborts this entity's snapshot for the tick. Filling a hole
+    // with a default would produce an order computed from a state the aircraft was never in.
+    if (!lat || !lon || !alt || !heading || !velN || !velE || !velD) {
+        return false;
+    }
+
+    out.entityId = entityId;
+    out.simTimeS = simTimeS;
+    out.serial = serial;
+    out.latitudeDeg = *lat;
+    out.longitudeDeg = *lon;
+    out.altitudeHaeM = *alt;
+    out.headingDeg = *heading;
+    out.velNMps = *velN;
+    out.velEMps = *velE;
+    out.velDMps = *velD;
+    out.team = entity->getTeam();
+    return true;
+}
+
+void AiCommanderPlugin::drainCompletedOrders(double simTimeS, std::int64_t frame) {
+    if (world_ == nullptr) {
+        return;
+    }
+    const CommanderConfig& config = runtime_.config();
+
+    for (const std::string& entityId : runtime_.rosterIds()) {
+        EntityCommandState* state = runtime_.find(entityId);
+        if (state == nullptr) {
+            continue;
+        }
+        std::optional<CandidateOrder> candidate = state->completed.take();
+        if (!candidate.has_value()) {
+            continue;
+        }
+        // The request is no longer in flight whatever the outcome, or a single rejection would
+        // suppress this entity's requests for the rest of the run.
+        state->requestInFlight = false;
+
+        // -- Stage B: semantic validation against live state, here on the simulation thread ------
+        StageBRequest request;
+        request.commandedEntityId = entityId;
+        request.onRoster = true;
+        request.snapshotSimTimeS = candidate->snapshot.simTimeS;
+        request.currentSimTimeS = simTimeS;
+        request.publishedSerial = state->ladder.published.serial;
+        request.candidateSerial = candidate->snapshot.serial;
+        // B3 validates against the picture that accompanied THIS order's snapshot, not the picture
+        // current now — otherwise a target legitimately visible when the order was requested would
+        // be rejected merely because inference outlived the cadence window (ADR-3).
+        request.reportedTrackIds.reserve(candidate->snapshot.tracks.size());
+        for (const TrackReport& track : candidate->snapshot.tracks) {
+            request.reportedTrackIds.push_back(track.targetEntityId);
+        }
+
+        const StageBOutcome outcome =
+            validateStageB(candidate->order, request, config, *world_);
+
+        if (!outcome.accepted) {
+            runtime_.countRejection(outcome.reason);
+            runtime_.recorder().recordRejected(simTimeS, frame, entityId,
+                candidate->snapshot.serial, outcome.reason, outcome.detail, std::string());
+            if (config.backend == Backend::Replay) {
+                // A Stage-B rejection during replay means live state has diverged from the
+                // recorded run. That is the signal the reproduction guarantee has broken, and it
+                // must be visible rather than silently absorbed as an ordinary rejection.
+                runtime_.recorder().recordReplayDivergence(simTimeS, frame, entityId,
+                    candidate->snapshot.serial, outcome.reason, outcome.detail);
+            }
+            // Reject-and-retain: the previously published order stays in force untouched.
+            continue;
+        }
+
+        // -- publish -----------------------------------------------------------------------------
+        // Wholesale replacement. A script can never observe a half-applied order.
+        acceptOrder(state->ladder, candidate->order, candidate->snapshot.serial, simTimeS);
+        runtime_.countAcceptance(candidate->latencyMs);
+        // `t` is PUBLICATION time, which is what replay keys on.
+        runtime_.recorder().recordAccepted(simTimeS, frame, candidate->order,
+            candidate->snapshot.serial, candidate->latencyMs,
+            candidate->tokensIn, candidate->tokensOut);
+    }
+}
+
+void AiCommanderPlugin::advanceLadders(double simTimeS, std::int64_t frame) {
+    const CommanderConfig& config = runtime_.config();
+
+    for (const std::string& entityId : runtime_.rosterIds()) {
+        EntityCommandState* state = runtime_.find(entityId);
+        if (state == nullptr) {
+            continue;
+        }
+        const FallbackLevel before = state->ladder.level;
+        const EntityPosition position = positionOf(entityId);
+
+        if (advanceFallbackLadder(state->ladder, simTimeS, config, position)) {
+            // One record and one log line per TRANSITION, never per frame.
+            const double sinceS = state->ladder.lastAcceptedSimTimeS < 0.0
+                ? -1.0
+                : simTimeS - state->ladder.lastAcceptedSimTimeS;
+            runtime_.recorder().recordFallback(
+                simTimeS, frame, entityId, before, state->ladder.level, sinceS);
+            N8RO_LOG_INFO(
+                std::string("ai-commander: ") + entityId + " fallback " + toString(before) + " -> "
+                    + toString(state->ladder.level),
+                kLogCategory);
+        }
+    }
+}
+
+void AiCommanderPlugin::dispatchRequests(double simTimeS, std::int64_t frame) {
+    if (!runtime_.isOperational()) {
+        return;
+    }
+    const CommanderConfig& config = runtime_.config();
+    ILlmClient* client = runtime_.client();
+    if (client == nullptr) {
+        return;
+    }
+
+    for (const std::string& entityId : runtime_.rosterIds()) {
+        EntityCommandState* state = runtime_.find(entityId);
+        if (state == nullptr) {
+            continue;
+        }
+        // Per-entity request suppression: never two in flight for one aircraft. Without it a slow
+        // backend produces overlapping requests and a self-inflicted slowdown.
+        if (state->requestInFlight) {
+            continue;
+        }
+        if (simTimeS - state->lastRequestSimTimeS < config.cadenceS) {
+            continue;
+        }
+
+        OrderSnapshot snapshot;
+        if (!buildSnapshot(entityId, simTimeS, state->nextSerial, snapshot)) {
+            continue;   // A required field was unavailable; skip this entity for the tick.
+        }
+        snapshot.tracks = state->pendingTracks;
+        snapshot.loadout = state->pendingLoadout;
+        snapshot.situationNote = state->situationNote;
+        canonicalizeSnapshot(snapshot);
+
+        // The reported lists are cleared when the snapshot is taken, so a window's report reflects
+        // exactly one Tier-1 pass and a script that stops reporting stops contributing tracks
+        // rather than leaving a stale picture in place (AIC-API-1, v1.2).
+        state->pendingTracks.clear();
+        state->pendingLoadout.clear();
+
+        const std::string prompt = runtime_.promptRenderer().render(snapshot);
+        runtime_.recorder().recordRequested(simTimeS, frame, snapshot,
+            client->backendName(), client->modelName(),
+            PromptRenderer::stableHash(runtime_.promptRenderer().renderSuffix(snapshot)),
+            PromptRenderer::stableHash(prompt));
+
+        state->requestInFlight = true;
+        state->lastRequestSimTimeS = simTimeS;
+        ++state->nextSerial;
+        runtime_.countRequest();
+
+        // The worker's callable captures ONLY the snapshot (by value), the prompt (by value), the
+        // client pointer, and the destination slot. No IEntityManager, no IScenarioManager, no
+        // MessageBusPacked, no ISimulationEngine, no ScriptingApiContext, no recorder, no roster.
+        LatestWinsSlot<CandidateOrder>* slot = &state->completed;
+        auto work = [snapshot, prompt, client, slot]() mutable {
+            bool accepted = false;
+            RejectReason reason = RejectReason::None;
+            std::string detail;
+            std::string rawBody;
+            CandidateOrder candidate = CommanderRuntime::runWorkerCall(
+                std::move(snapshot), prompt, *client, accepted, reason, detail, rawBody);
+            if (!accepted) {
+                // A Stage-A rejection still has to reach the simulation thread, or the entity's
+                // requestInFlight flag would never clear and it would go permanently silent.
+                candidate.order = Order{};
+                candidate.order.entityId.clear();
+            }
+            (void)slot->publish(std::move(candidate));
+        };
+
+        if (threadRunner_ != nullptr) {
+            // OQ-7 resolved: the host does supply one. This is the primary path.
+            (void)threadRunner_->submitBackgroundTask(std::move(work));
+        } else {
+            // The specified fallback. Running inline is NOT acceptable for a real backend — it
+            // would block the update thread for the whole inference — so this path is only viable
+            // because stub and replay do no I/O. A network backend with no thread runner leaves
+            // the commander disabled, which rebuildBackend() reports.
+            if (!loggedNoThreadRunner_) {
+                loggedNoThreadRunner_ = true;
+                N8RO_LOG_WARNING(
+                    "ai-commander: no IThreadRunner; running the no-I/O backend inline. A network "
+                    "backend will not be dispatched without one.",
+                    kLogCategory);
+            }
+            work();
+        }
+    }
+}
+
 void AiCommanderPlugin::onTickFrame(double dt) {
-    (void)dt;
     if (shutdown_) {
         return;
     }
+    simTimeS_ += dt;
+    ++frameCounter_;
+    runtime_.setCurrentSimTimeS(simTimeS_);
+
     runProbeIfPending();
+
+    // Order matters. Draining first means the newest information a worker produced is published
+    // before the ladder decides whether this entity has gone stale, so an order that arrived this
+    // very frame is never counted against its own freshness.
+    drainCompletedOrders(simTimeS_, frameCounter_);
+    advanceLadders(simTimeS_, frameCounter_);
+    dispatchRequests(simTimeS_, frameCounter_);
 }
 
 void AiCommanderPlugin::onStop() {
-    // A new scenario brings a new entity set, so the probe verdict from the previous run does not
-    // carry over — re-earn it rather than trusting a stale pass.
+    // A new scenario brings a new entity set, so neither the probe verdict nor any per-entity
+    // state carries over.
     probeAttemptedThisRun_ = false;
-    runtime_.setProbeReport(ProbeReport{});
+    simTimeS_ = 0.0;
+    frameCounter_ = 0;
+    runtime_.reset();
 }
 
 void AiCommanderPlugin::shutdown() {
     shutdown_ = true;
+    runtime_.recorder().close();
     entityManager_ = nullptr;
+    threadRunner_ = nullptr;
+    world_.reset();
 }
 
 std::vector<n8ro::core::PluginConfigField> AiCommanderPlugin::getConfigFields() const {
@@ -157,8 +532,8 @@ bool AiCommanderPlugin::applyConfigFields(
     std::string error;
     if (!tryParseConfigFields(fields, runtime_.config(), parsed, error)) {
         // All-or-nothing: nothing has been written, so every prior value still stands. The reason
-        // is logged because a config rejection the operator cannot diagnose is indistinguishable
-        // from the plugin ignoring them.
+        // is logged because a rejection the operator cannot diagnose is indistinguishable from the
+        // plugin ignoring them.
         N8RO_LOG_WARNING(
             std::string("ai-commander: rejected config - ") + error
                 + ". No field was applied; previous configuration retained.",
@@ -166,14 +541,26 @@ bool AiCommanderPlugin::applyConfigFields(
         return false;
     }
 
-    const bool wasEnabled = runtime_.config().enabled;
+    const CommanderConfig previous = runtime_.config();
     runtime_.setConfig(parsed);
 
-    if (parsed.enabled != wasEnabled) {
+    const bool backendChanged = parsed.backend != previous.backend
+        || parsed.replayPath != previous.replayPath
+        || parsed.doctrinePath != previous.doctrinePath;
+    if (backendChanged) {
+        // Takes effect without restarting the process (AIC-ARCH-3). Any in-flight request from the
+        // previous backend is discarded on completion, because its snapshot serial will no longer
+        // be newer than what has since been published.
+        rebuildBackend();
+    }
+
+    if (parsed.enabled != previous.enabled) {
         N8RO_LOG_INFO(
             std::string("ai-commander: commander.enabled -> ") + (parsed.enabled ? "true" : "false")
                 + " (backend=" + toString(parsed.backend) + ").",
             kLogCategory);
+        runtime_.recorder().recordCommanderState(simTimeS_, parsed.enabled,
+            std::string("backend=") + toString(parsed.backend));
     }
     return true;
 }
