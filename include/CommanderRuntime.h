@@ -139,6 +139,13 @@ public:
         OrderSnapshot snapshot, const std::string& prompt, ILlmClient& client,
         bool& outAccepted, RejectReason& outReason, std::string& outDetail, std::string& outRawBody);
 
+    // The form the worker actually uses: packs the Stage-A verdict into the returned candidate so
+    // it survives the thread boundary. Prefer this over the out-parameter overload — a caller that
+    // drops those out-parameters silently loses every syntactic rejection from the counters and
+    // the order log.
+    [[nodiscard]] static CandidateOrder runWorkerCall(
+        OrderSnapshot snapshot, const std::string& prompt, ILlmClient& client);
+
     void countRejection(RejectReason reason);
     void countAcceptance(std::int64_t latencyMs);
     void countRequest();

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Order.h"
+#include "RejectReason.h"
 #include "Snapshot.h"
 
 #include <cstdint>
@@ -11,6 +12,12 @@
 namespace arkheon::aicommander {
 
 // A candidate order coming back off the worker, before Stage B has seen it.
+//
+// It carries the Stage-A VERDICT as well as the order, because a Stage-A rejection still has to be
+// counted and recorded — and neither the counters nor the recorder may be touched from the worker.
+// Discarding the verdict at the thread boundary would silently drop every syntactic rejection from
+// `aicmd.reject.*` and from the order log, which is precisely the evidence AIC-VAL-1 exists to
+// produce.
 struct CandidateOrder {
     Order order;
     OrderSnapshot snapshot;   // The snapshot it derives from: carries the reported track list that
@@ -18,6 +25,12 @@ struct CandidateOrder {
     std::int64_t latencyMs = 0;
     int tokensIn = 0;
     int tokensOut = 0;
+
+    // Stage-A outcome, carried across the slot for the simulation thread to act on.
+    bool stageAAccepted = false;
+    RejectReason stageAReason = RejectReason::None;
+    std::string stageADetail;
+    std::string rawBody;      // Truncated by the recorder; retained for the order.rejected record.
 };
 
 // A mutex-guarded, latest-wins, single-slot exchange between the simulation thread and a worker.

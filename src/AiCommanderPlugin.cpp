@@ -327,6 +327,23 @@ void AiCommanderPlugin::drainCompletedOrders(double simTimeS, std::int64_t frame
         // suppress this entity's requests for the rest of the run.
         state->requestInFlight = false;
 
+        // -- Stage A verdict, acted on here because the worker could not ---------------------------
+        // A syntactic rejection must increment its counter and write its record just as a semantic
+        // one does; the worker had neither the counters nor the recorder. Handling it here also
+        // stops an empty order reaching Stage B, where it would be re-reported as a `roster`
+        // failure and double-counted under the wrong reason.
+        if (!candidate->stageAAccepted) {
+            if (candidate->stageAReason != RejectReason::None) {
+                runtime_.countRejection(candidate->stageAReason);
+                runtime_.recorder().recordRejected(simTimeS, frame, entityId,
+                    candidate->snapshot.serial, candidate->stageAReason,
+                    candidate->stageADetail, candidate->rawBody);
+            }
+            // reason == None means "no order was due" (a replay with nothing at this simulation
+            // time, or an empty 204 body). Not a rejection, not an event — nothing to count.
+            continue;
+        }
+
         // -- Stage B: semantic validation against live state, here on the simulation thread ------
         StageBRequest request;
         request.commandedEntityId = entityId;
@@ -453,19 +470,10 @@ void AiCommanderPlugin::dispatchRequests(double simTimeS, std::int64_t frame) {
         // MessageBusPacked, no ISimulationEngine, no ScriptingApiContext, no recorder, no roster.
         LatestWinsSlot<CandidateOrder>* slot = &state->completed;
         auto work = [snapshot, prompt, client, slot]() mutable {
-            bool accepted = false;
-            RejectReason reason = RejectReason::None;
-            std::string detail;
-            std::string rawBody;
-            CandidateOrder candidate = CommanderRuntime::runWorkerCall(
-                std::move(snapshot), prompt, *client, accepted, reason, detail, rawBody);
-            if (!accepted) {
-                // A Stage-A rejection still has to reach the simulation thread, or the entity's
-                // requestInFlight flag would never clear and it would go permanently silent.
-                candidate.order = Order{};
-                candidate.order.entityId.clear();
-            }
-            (void)slot->publish(std::move(candidate));
+            // The verdict rides across the slot with the candidate. A Stage-A rejection must reach
+            // the simulation thread both so the entity's requestInFlight flag clears — otherwise it
+            // goes permanently silent — and so the rejection can be counted and recorded there.
+            (void)slot->publish(CommanderRuntime::runWorkerCall(std::move(snapshot), prompt, *client));
         };
 
         if (threadRunner_ != nullptr) {

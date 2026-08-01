@@ -220,6 +220,28 @@ CandidateOrder CommanderRuntime::runWorkerCall(
     return candidate;
 }
 
+CandidateOrder CommanderRuntime::runWorkerCall(
+    OrderSnapshot snapshot, const std::string& prompt, ILlmClient& client) {
+    bool accepted = false;
+    RejectReason reason = RejectReason::None;
+    std::string detail;
+    std::string rawBody;
+    CandidateOrder candidate =
+        runWorkerCall(std::move(snapshot), prompt, client, accepted, reason, detail, rawBody);
+
+    // The verdict travels WITH the candidate rather than being discarded here. The worker cannot
+    // touch the counters or the recorder — both are simulation-thread-only — so the only way a
+    // Stage-A rejection reaches them is by riding across the slot.
+    candidate.stageAAccepted = accepted;
+    candidate.stageAReason = reason;
+    candidate.stageADetail = std::move(detail);
+    candidate.rawBody = std::move(rawBody);
+    if (!accepted) {
+        candidate.order = Order{};
+    }
+    return candidate;
+}
+
 void CommanderRuntime::countRequest() {
     ++stats_.requested;
 }

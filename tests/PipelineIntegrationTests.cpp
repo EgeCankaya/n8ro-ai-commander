@@ -79,8 +79,15 @@ struct Harness {
                 continue;
             }
             state->requestInFlight = false;
-            if (candidate->order.entityId.empty()) {
-                continue;   // Stage-A rejection; already counted on the worker side.
+
+            // Stage-A verdict, acted on here exactly as the plugin does. The harness used to test
+            // for an empty entityId instead, which diverged from the plugin's real path and is why
+            // the suite missed that Stage-A rejections were never being counted or recorded.
+            if (!candidate->stageAAccepted) {
+                if (candidate->stageAReason != RejectReason::None) {
+                    runtime.countRejection(candidate->stageAReason);
+                }
+                continue;
             }
 
             StageBRequest request;
@@ -149,18 +156,8 @@ struct Harness {
                 runtime.countRequest();
 
                 const std::string prompt = runtime.promptRenderer().render(snapshot);
-                bool accepted = false;
-                RejectReason reason = RejectReason::None;
-                std::string detail;
-                std::string rawBody;
-                CandidateOrder candidate = CommanderRuntime::runWorkerCall(
-                    snapshot, prompt, *runtime.client(), accepted, reason, detail, rawBody);
-                if (!accepted) {
-                    runtime.countRejection(reason);
-                    candidate.order = Order{};
-                    candidate.order.entityId.clear();
-                }
-                (void)state->completed.publish(std::move(candidate));
+                (void)state->completed.publish(
+                    CommanderRuntime::runWorkerCall(snapshot, prompt, *runtime.client()));
             }
         }
 
@@ -413,6 +410,70 @@ AIC_TEST(PipelineIgnoresReportsWhileDisabled) {
                   "nothing may accumulate while disabled");
     AIC_EXPECT_EQ(state->pendingLoadout.size(), static_cast<std::size_t>(0),
                   "nothing may accumulate while disabled");
+    return true;
+}
+
+// Regression, found in the milestone close-out code review.
+//
+// A Stage-A rejection has to survive the thread boundary carrying its REASON, or the whole
+// syntactic half of the validator becomes invisible: no `aicmd.reject.*` increment, no
+// order.rejected record, and — worse — an empty order reaching Stage B, where it is re-reported as
+// a `roster` failure and counted under the wrong reason entirely.
+//
+// The original code discarded the verdict at the slot and signalled rejection by clearing
+// entityId, which lost the reason and mislabelled the failure.
+AIC_TEST(StageARejectionsSurviveTheThreadBoundaryWithTheirReason) {
+    Harness harness;
+    setUpHarness(harness);
+    AIC_EXPECT_TRUE(harness.runtime.requestCommand(kOwnId), "enrolment");
+
+    // Force the backend to return a body that fails Stage A with a specific, identifiable reason.
+    auto* stub = static_cast<StubLlmClient*>(harness.runtime.client());
+    stub->injectBody(R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"attack",)"
+                     R"("cruiseSpeedMps":300.0,"orbitRadiusM":0.0,"roe":"weaponsFree",)"
+                     R"("reason":"Unknown posture."})");
+
+    harness.tick(1.0);   // dispatch: the injected body is validated on the worker
+    harness.tick(1.0);   // drain: the verdict is acted on
+
+    const CommanderStats& stats = harness.runtime.stats();
+    AIC_EXPECT_EQ(stats.rejected, static_cast<std::int64_t>(1),
+                  "the Stage-A rejection must be counted exactly once");
+
+    const auto entry = stats.rejectByReason.find("enum");
+    AIC_EXPECT_TRUE(entry != stats.rejectByReason.end(),
+                    "the rejection must be attributed to 'enum' (unknown posture), not lost and "
+                    "not mislabelled as a Stage-B 'roster' failure");
+    AIC_EXPECT_EQ(entry->second, static_cast<std::int64_t>(1), "counted once under 'enum'");
+    AIC_EXPECT_TRUE(stats.rejectByReason.find("roster") == stats.rejectByReason.end(),
+                    "an empty order must never reach Stage B and be re-reported as 'roster'");
+
+    // And the entity must not be wedged: requestInFlight has to clear so it can ask again.
+    const EntityCommandState* state = harness.runtime.find(kOwnId);
+    AIC_EXPECT_FALSE(state->requestInFlight,
+                     "a rejected request must clear requestInFlight or the entity goes "
+                     "permanently silent");
+    return true;
+}
+
+// A backend with nothing due (replay past its last record, or a 204) is NOT a rejection. Counting
+// it as one would make the acceptance-rate metric meaningless on any replay run.
+AIC_TEST(NothingDueIsNotCountedAsARejection) {
+    Harness harness;
+    setUpHarness(harness);
+    AIC_EXPECT_TRUE(harness.runtime.requestCommand(kOwnId), "enrolment");
+
+    auto* stub = static_cast<StubLlmClient*>(harness.runtime.client());
+    stub->injectBody("");   // completed, but empty - "no order due"
+
+    harness.tick(1.0);
+    harness.tick(1.0);
+
+    const CommanderStats& stats = harness.runtime.stats();
+    AIC_EXPECT_EQ(stats.rejected, static_cast<std::int64_t>(0),
+                  "an empty completed body is 'nothing due', not a rejection");
+    const EntityCommandState* state = harness.runtime.find(kOwnId);
+    AIC_EXPECT_FALSE(state->requestInFlight, "requestInFlight still clears");
     return true;
 }
 
