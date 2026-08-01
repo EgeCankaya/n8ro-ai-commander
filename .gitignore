@@ -35,3 +35,4 @@ logs/
 # Model weights are large and live in the release tree at data/ai/model/.
 *.gguf
 *.safetensors
+.claude/

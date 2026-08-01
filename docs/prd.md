@@ -10,8 +10,9 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 > **One-liner:** A `n8ro-sim` plugin that lets a language model issue tactical *intent* — posture, target, waypoint, rules of engagement — to entities in a running scenario, while every kinematic decision and every state mutation stays in the deterministic C++ and Lua tiers that already exist.
 
 **Date:** 2026-07-31 (revised 2026-08-01)
-**Status:** Draft v1.2
+**Status:** Draft v1.3
 **Revision history:**
+- v1.3 — reconciled the contract with two findings from the Phase 1a gate, both recorded in [PR #1](https://github.com/EgeCankaya/n8ro-ai-commander/pull/1). (a) **"TSAN clean" is unsatisfiable on the target platform** — no ThreadSanitizer runtime ships for Windows — so the Phase 1a gate item, the §Risks Threading mitigation, the integration-suite bullet, and UAC-AIC-ARCH-2 now name the evidence that was actually produced (ASan 65/65, a 20,000-publish exchange-slot stress test with torn-read detection, and a `static_assert`-enforced value-only capture), with the residual gap versus a real race detector stated rather than papered over. (b) **The prompt prefix was measured** at 4,738 bytes ≈ 1,200 tokens on a live engine run; recorded as evidence against OQ-8, which stays **open** — the padding call is a Phase 2 cost judgement for the owner — and the Cost model's arithmetic is recomputed off the measured figure instead of the ~800-token assumption.
 - v1.2 — closed the snapshot-reachability gap found in design: sensor tracks and weapon loadout have no public C++ read seam, so Tier 1 now reports them into the commander (`aiCommander.reportTrack` / `reportLoadout` in AIC-API-1; Stage-B B3, §Exactly what is transmitted, and AIC-ORD-2 restated accordingly). Folded in four mechanism corrections verified against the shipped headers (transport failure is `std::nullopt`, not `statusCode == 0`; detections arrive as triples; transform velocity/orientation/acceleration are runtime columns on dot-joined paths that read back `0` silently; Stage-B B1 uses `IEntityManager::getEntity`). Added AIC-ARCH-4 (runtime-column startup probe) and OQ-9.
 - v1.1 — added §Source control and repository (standalone repo, layout, ignore rules, the single `open-solution.cmd` relocation edit, CI split, visibility); recorded the owner's decision that plugin source files carry no Arkheon per-file header; added the `prompt.doctrinePath` config field, which §Scope Authority requires be authorized here before design.
 **Owner:** Arkheon Technologies — N8RO platform
@@ -47,7 +48,9 @@ The boundary of this document is the plugin and its contracts: the order schema,
 
 Items 1–3 corrected the authoring brief against what is actually installed. Items 4–7 were found in
 design (2026-08-01) by reading the shipped headers and generated stubs, and correct *this document*.
-Each is load-bearing.
+Items 8–9 were found at the **Phase 1a gate** (2026-08-01, PR #1) by running the toolchain and the
+engine rather than by reading them, and correct requirements this document had written from
+assumption. Each is load-bearing.
 
 1. **HTTPS is available.** `IHttpClient.h` warns that `https` needs the OpenSSL build. `bin/libssl-3-x64.dll` and `bin/libcrypto-3-x64.dll` are both present, so the Phase 2 call to `api.anthropic.com` is not blocked on a missing TLS backend. This must still be asserted at runtime (see AIC-BE-4).
 2. **A sanctioned async mechanism exists.** `IThreadRunner::submitBackgroundTask` is declared in the SDK. The plugin does not need a hand-rolled `std::thread` — but `PluginContext::threadRunner` is documented nullable, so a fallback is still required (OQ-7).
@@ -56,6 +59,8 @@ Each is load-bearing.
 5. **A transport failure is `std::nullopt`, not `statusCode == 0`.** *(v1.2)* `IHttpClient::send()` returns `std::optional<HttpResponse>` and yields `std::nullopt` on a transport / TLS failure or a malformed URL. A response that *is* returned always carries a real status-line code. The `HttpResponse::statusCode == 0` sentinel documented in the struct is therefore not what a caller observes on failure. Affects Stage-A check A1, AIC-BE-1, and AIC-BE-4.
 6. **Detections arrive as repeating triples, not a list.** *(v1.2)* `sensor.getDetectionList(sensorEntityId)` returns `targetEntityId, range_m, snr_DB` repeated as Lua multiple return values, and returns *no* values when there is no detection. The countable enumeration idiom is `sensor.getTrackNr(id)` followed by `sensor.getTrackById(id, i)` with `i` **1-based**. Affects the reference Tier-1 script and the snapshot.
 7. **Transform velocity, orientation, and acceleration are runtime columns, not schema leaves.** *(v1.2)* They are declared only in `TransformRuntimeColumns.h`, addressed by **dot**-joined paths (`velocityNed.x`), and — per that header — a path that does not resolve reads back `0` **silently, without an error**. That defeats this PRD's rule that a `std::nullopt` on a required snapshot field aborts the snapshot, because a mistyped path yields a plausible zero instead of a `nullopt`. Drives AIC-ARCH-4 and OQ-9. Stage-B B1's `entityControl.exists` is likewise a Lua verb; the C++ equivalent is `IEntityManager::getEntity(id) != nullptr`.
+8. **ThreadSanitizer does not exist on this platform.** *(v1.3)* No `clang_rt.tsan` runtime ships anywhere in Visual Studio 2026 Insiders. `VC\Tools\MSVC\14.51.36231\include\sanitizer\` carries `tsan_interface.h` and `tsan_interface_atomic.h` — **headers only**, with no library to link — alongside the ASan, UBSan, and fuzzer runtimes, which do ship complete. Neither MSVC nor the bundled LLVM toolchain supports TSan on Windows. **Consequence:** the v1.2 Phase 1a gate item "TSAN clean" was permanently unsatisfiable, and a gate no build can pass is worse than no gate — it trains everyone to wave the checklist through. Replaced by the concurrency-evidence set in §Validation and test plan, with the residual gap recorded as a risk and race-detector coverage moved to §Out of scope. Affects the Threading risk row, the integration suite, the Phase 1a gate, the rollback triggers, and UAC-AIC-ARCH-2.
+9. **The rendered prompt prefix is ~1,200 tokens, not ~800.** *(v1.3)* Measured on a live engine run: **4,738 bytes**, logged at startup as `prefixBytes`, ≈ 1,200 tokens. Haiku 4.5's prompt-cache minimum is 4,096 tokens, so the prefix as written silently does not cache — the direction v1.2 already assumed, but now with a real number rather than the "roughly 800–1500" range OQ-8 was written against. **Consequence:** the Cost model's per-order arithmetic was computed from a 1,000-token prompt and is understated; it is recomputed against ~1,400 input tokens below. This is **evidence into OQ-8, not a resolution of it** — whether to pad to the cache minimum remains a Phase 2 cost judgement for the owner.
 
 ## Problem statement
 
@@ -94,6 +99,8 @@ The commander's job is to replace exactly that cascade — the posture selection
 | Direct kinematic writes by the plugin | N/A | Exactly 0 | Call-site audit + a test asserting the plugin never invokes `entityControl.requestUpdatePosition/Velocity/Orientation` or `writeComponentField*` on `componentTransform` | Every gate |
 | Cost per four-ship scenario-hour (Phase 2) | N/A | ≤ $1.10 with Haiku 4.5 | Token accounting in the order log × published rate | Phase 2 gate |
 
+*(v1.3)* The cost target above was set against a ~1,000-token prompt. The measured prefix (§Corrections, item 9) puts the **uncached** Haiku figure at ~$1.30 per four-ship-hour, above the target; the cached-and-padded figure is ~$0.73, below it. The target is left unchanged because meeting it is exactly the question OQ-8 asks, and moving a target to match a measurement would erase the signal.
+
 ### Non-goals / deferred scope
 
 - **Not a real-time LLM control loop.** The measured floor is 3–6 s per order for the 3B on CPU and 10–15 s for the 7B. Anything reactive — missile defeat, merge maneuvering, launch timing — stays in Tier 0/1 where it already works. The trade-off accepted: the commander cannot respond to events faster than its cadence, so Tier 1 must be able to act correctly on a stale order.
@@ -115,6 +122,7 @@ The commander's job is to replace exactly that cascade — the posture selection
 | GPU provisioning or inference-server packaging | Out of scope | No inference server ships in this tree. Installing and running one on target machines is a deployment responsibility, recorded as a dependency and OQ-2. | N/A | 2026-07-31 |
 | Plugin-side (C++) reading of sensor tracks or weapon loadout | Out of scope | No public read seam exists: no track component in the schema or `ComponentTypeNames.h`, no `IEntityManager` accessor, and `ComponentFieldAccess` has no reader for the `list`-typed loadout (§Corrections, item 4). Tier 1 reports both instead (AIC-API-1). Revisit only if the SDK later exposes a track surface — the ingress verbs would then become an optional override rather than the only path. | N/A until the SDK exposes one | 2026-08-01 |
 | Plugin-side synthesis of a track list from the entity roster | Out of scope | Technically available via `IEntityManager::getAllEntities()`, and deliberately rejected: a roster is not a sensor picture. Substituting one would silently grant the model vision through terrain and beyond sensor range, and Stage-B B3 would then validate hallucinated targets against that fiction rather than catching them. | N/A — rejected, not deferred | 2026-08-01 |
+| Dynamic race detection (ThreadSanitizer) over the sim-thread/worker boundary | Out of scope | No TSan runtime exists on the target platform: VS 2026 Insiders ships `tsan_interface.h` headers with no `clang_rt.tsan` library, and neither MSVC nor the bundled LLVM toolchain supports TSan on Windows (§Corrections, item 8). Substituted, not skipped — ASan over the full suite, a 20,000-publish exchange-slot stress test with torn-read detection, and a `static_assert`-enforced value-only worker capture (§Validation and test plan). The residual gap is recorded as a risk row rather than closed. | N/A until a race detector exists for this toolchain | 2026-08-01 |
 | Free-text track attributes (`team`, `kind`, `domain`) in the prompt | Deferred | The v1.2 ingress verbs carry scalars only. Adding attributes means widening `reportTrack`, which is a PRD revision, and each added string is a new injection surface to charset-filter. Revisit if order quality shows the model cannot discriminate targets without them. | v1.1 | 2026-08-01 |
 
 ## Key hypotheses
@@ -254,6 +262,7 @@ The system SHALL perform all inference on a worker context, exchanging only valu
 **Acceptance criteria:**
 - WHEN a request is in flight, the plugin's `onTickFrame` cost SHALL remain within the p95/p99 budget in Success Metrics.
 - The worker callable SHALL capture only a POD snapshot and the `ILlmClient`; it SHALL NOT capture or dereference `IEntityManager`, `IScenarioManager`, `MessageBusPacked`, `ISimulationEngine`, or `ScriptingApiContext`.
+- *(v1.3)* That capture constraint SHALL be enforced at compile time by `static_assert` over the captured types, and the snapshot's independence SHALL be covered by a deep-copy-outlives-original test. This criterion is load-bearing rather than belt-and-braces: with no race detector available on the target platform (§Corrections, item 8), a structural proof that the worker holds nothing shared is the strongest guarantee this design can obtain, and it is the one that does not depend on which interleavings a test run happened to hit.
 - Snapshot and order slots SHALL be latest-wins: a newer snapshot overwrites an unconsumed older one; a newer completed order overwrites an unconsumed older one.
 - WHILE `commander.enabled` is false, no worker SHALL be scheduled.
 - IF `PluginContext::threadRunner` is null, THEN the plugin SHALL fall back to an owned worker thread; IF that also fails, THEN the commander SHALL remain disabled and log the reason once.
@@ -583,19 +592,19 @@ The system SHALL render every prompt as a byte-stable prefix followed by a volat
 
 **Customer scenario:** An operator on CPU inference needs every second of latency the design can recover.
 
-**Pain removed:** Token generation is memory-bandwidth-bound; re-evaluating an unchanged 1000-token prefix on every request wastes the majority of the wall-clock budget, and on the hosted backend it forfeits the cache discount entirely.
+**Pain removed:** Token generation is memory-bandwidth-bound; re-evaluating an unchanged ~1,200-token prefix on every request wastes the majority of the wall-clock budget, and on the hosted backend it forfeits the cache discount entirely.
 
 **Structure:**
 
 | Segment | Content | Volatility |
 |---|---|---|
-| Prefix (cacheable) | System prompt · posture and ROE vocabulary · the Order JSON schema · doctrine text | Byte-identical for the life of the run. Changes only when a config field that affects it changes, which invalidates the cache once, deliberately |
+| Prefix (cacheable) | System prompt · posture and ROE vocabulary · the Order JSON schema · doctrine text | Byte-identical for the life of the run. Changes only when a config field that affects it changes, which invalidates the cache once, deliberately. **Measured: 4,738 bytes ≈ 1,200 tokens** *(v1.3, live engine run — §Corrections, item 9)* |
 | Suffix (volatile) | The per-entity snapshot from §"Exactly what is transmitted" | New every request; ~150–250 tokens |
 
 **Acceptance criteria:**
 - A test renders the prefix 100 times across varying snapshots and asserts byte equality.
 - The prefix contains no timestamp, no entity id, no counter, and no floating-point formatting of live state.
-- The prefix's token count is recorded at startup and compared against the configured model's cache minimum — 4096 tokens for Haiku 4.5, 1024 for Sonnet 5, 512 for Opus 5 — with a warning logged when it falls short, because a prefix under the minimum silently does not cache.
+- The prefix's byte and token counts are recorded at startup (as `prefixBytes` and the derived token estimate) and compared against the configured model's cache minimum — 4096 tokens for Haiku 4.5, 1024 for Sonnet 5, 512 for Opus 5 — with a warning logged when it falls short, because a prefix under the minimum silently does not cache. *(v1.3)* This comparison now has a **real observed value on the local tree**: 4,738 bytes ≈ 1,200 tokens, i.e. below Haiku 4.5's 4096-token minimum and above both Sonnet 5's and Opus 5's. The criterion is therefore no longer a hypothetical guard — on the default `claude.model = claude-haiku-4-5` it is expected to *fire* on every run until OQ-8 is decided, and a run in which it does **not** fire on Haiku means the prefix changed and the measurement needs retaking.
 - *(v1.2)* The suffix's Tier-1-reported lists render in a **deterministic order** — tracks ascending by `targetEntityId`, loadout ascending by `hardpointName` — not in Lua call order. Two snapshots holding the same set of reports SHALL render byte-identically, so `snapshotHash` (AIC-DET-1) is a function of the picture rather than of the order the script happened to iterate in.
 
 **Trace:** UAC-AIC-BE-3
@@ -816,6 +825,8 @@ The `*.jsonl` rule is the one most likely to be missed: AIC-DET-1 recording is *
 
 **Continuous integration is partial, by necessity.** Hosted runners have no SDK, no `n8ro-*.lib`, and no VS 2026, so they can run only: order-schema validity plus accept/reject fixture round-trips (AIC-ORD-1, AIC-VAL-1), `clang-format`, and docs linting. The `Release | x64` build, the `dumpbin /exports` check (AIC-API-1), and the Appendix A schema-conformance test — which re-reads `schema-reference.json`, a file that cannot be committed — require a **self-hosted runner with the release tree installed**. Any build badge must state which runner produced it.
 
+*(v1.3)* The concurrency-evidence set that replaces the unavailable TSAN gate (§Validation and test plan) lands on the **self-hosted** side for the same reason: the AddressSanitizer build is a `/fsanitize=address` build of the same solution and needs the SDK, and the exchange-slot stress test links the plugin. Only the `static_assert` capture check is toolchain-portable, and it is a compile-time property of code the hosted runner cannot compile anyway. There is no configuration in which a hosted runner substantiates the threading claim.
+
 ### Inference-server prerequisites
 
 | Backend | Prerequisite | Ships in tree? |
@@ -846,7 +857,7 @@ All are exposed through `aiCommander.getStats()` as JSON and written to the orde
 
 | Event | When | Fields |
 |---|---|---|
-| `commander.startup` | `initialize()` | backend, model, cadence, roster cap, prefix token count, cache-minimum comparison, TLS availability, runtime-column probe result *(v1.2)*, `services` / `threadRunner` nullability |
+| `commander.startup` | `initialize()` | backend, model, cadence, roster cap, `prefixBytes` and the derived prefix token count *(v1.3 — the field the 4,738-byte measurement was read from)*, cache-minimum comparison, TLS availability, runtime-column probe result *(v1.2)*, `services` / `threadRunner` nullability |
 | `commander.egressWarning` | First hosted request in a run | destination host, model, field-count in the volatile suffix. **Always logged** — an egress must never be silent |
 | `order.rejected` | Every rejection | entityId, serial, reason, detail, truncated raw body |
 | `fallback.transition` | Ladder step change | entityId, from level, to level, seconds since last accepted order |
@@ -906,7 +917,7 @@ Per commanded entity, per cadence window: one HTTP request, ~1 KB up, ~1 KB down
 ### Trigger conditions
 
 - Plugin frame cost exceeds the p99 budget in a live run.
-- Any evidence of a worker touching SDK state (crash, corrupted entity, ASAN/TSAN report).
+- Any evidence of a worker touching SDK state (crash, corrupted entity, AddressSanitizer report, or a torn read reported by the exchange-slot stress test). *(v1.3 — TSAN is not available on this platform, §Corrections item 8; the trigger is correspondingly the evidence that can actually be produced.)*
 - Any unauthorized egress — a `commander.egressWarning` in a run that was meant to be local.
 - Order acceptance rate below 50 % with no configuration explanation.
 
@@ -986,7 +997,7 @@ Have the mission script call the model directly.
 | Risk | Impact | Likelihood | Mitigation |
 |---|---|---|---|
 | **Determinism loss.** `execution-models-and-timing.md` treats reproducibility as a design goal; an LLM in the loop breaks it outright | High | Certain — this is a property of the design, not a failure mode | Record/replay from day one (AIC-DET-1/2). Order log on by default. A per-mode guarantee table so nobody assumes more than holds. `stub` and `replay` backends give CI a deterministic path |
-| **Threading.** `IHttpClient::send()` is blocking and single-thread-only; `ScriptingApiContext` collaborators are single-thread-only | Critical — undefined behavior, corrupted state | Medium if the pattern is not enforced structurally | Snapshot-by-value → worker → order slot (AIC-ARCH-2). Worker captures no SDK pointer. One `IHttpClient` per worker. TSAN in CI on the integration test |
+| **Threading.** `IHttpClient::send()` is blocking and single-thread-only; `ScriptingApiContext` collaborators are single-thread-only | Critical — undefined behavior, corrupted state | Medium if the pattern is not enforced structurally | Snapshot-by-value → worker → order slot (AIC-ARCH-2). Worker captures no SDK pointer, enforced by `static_assert` over the captured types plus a deep-copy-outlives-original test. One `IHttpClient` per worker. *(v1.3 — the mitigation previously read "TSAN in CI"; no TSan runtime exists on Windows, §Corrections item 8.)* Evidence in its place: the full suite green under AddressSanitizer (65/65) and a 20,000-publish exchange-slot stress test against a concurrent consumer with torn-read detection. See the residual-risk row below for what this does **not** buy |
 | **Validation.** A model emits an illegal or hallucinated order | High — wrong entity commanded, fratricide, out-of-envelope waypoint | High — expected behavior of a 3B model without constrained decoding | Two-stage pipeline (AIC-VAL-1), 13 named reject reasons, adversarial test corpus, reject-and-retain (AIC-VAL-2), constrained decoding on both backends |
 | **Data classification.** Scenario state sent to a hosted API leaves the machine; every file here carries an Arkheon proprietary header | Critical | Low if gated, certain if not | `claude.enabled` independent and default-false; enumerated transmitted-field allowlist asserted by test (AIC-SEC-2); mandatory egress warning; owner authorization required per the deployment checklist |
 | **Unmet dependency.** No inference server ships | High — Phase 1b cannot run | Certain today | Recorded as a dependency with a named owner gap (OQ-2); `stub` backend keeps Phases 0/1a fully deliverable and testable without it |
@@ -994,6 +1005,7 @@ Have the mission script call the model directly.
 | **Cadence too slow to be useful** (H1 wrong) | Medium — feature delivers less than hoped | Medium on CPU with the 7B | Default to the 3B; GPU decision recorded as OQ-2; if H1 fails, narrow scope to mission-start intent rather than chasing latency |
 | **Entitlement gate blocks AI-using plugins** | Medium — plugin will not load on licensed machines | Unknown | OQ-5. Check `core/entitlement/AccessGate.h` behavior before Phase 1b deployment |
 | **Silent zero from a runtime column.** *(v1.2)* A mistyped or renamed `componentTransform` runtime column reads back `0` with no error, so the snapshot carries a fabricated stationary own-ship and every order is computed from it | High — degraded order quality with no failing test and no log line; the defect is invisible precisely because it looks like valid data | Medium — the path convention differs from the schema's (dot vs slash) and the header states the failure is silent | AIC-ARCH-4 startup probe against a known-moving entity; commander refuses to enable on probe failure; probe result in the startup log, `getStats()`, and the runbook; a negative test asserts a broken path disables rather than degrades. OQ-9 pins the actual observed behaviour |
+| **No race detector on the target platform.** *(v1.3)* A data race in the sim-thread/worker exchange can exist and go unobserved: ASan finds memory errors, not races — it models no happens-before relation and will not flag an unsynchronized access that does not corrupt memory on the interleavings it happens to run | Medium — a race that never manifests under test is still a race, and the failure it eventually produces (a torn or stale order) is one the fallback ladder makes look like a model failure rather than a threading bug | Low that one exists, given the structural design; **certain** that no tool on this platform would prove otherwise | Accepted, not mitigated away, and stated here so it is not mistaken for a covered case. What is actually held: (a) a compile-time proof the worker shares nothing (`static_assert` over the captured types + deep-copy-outlives-original), which is stronger than a detector on the *sharing* question and is the load-bearing argument; (b) the exchange slot is the single crossing point and is stress-covered at 20,000 publishes with a serial encoded into a second field, so a torn read is detected rather than merely improbable; (c) ASan 65/65 over the full suite, which excludes the memory-error class entirely. What is **not** held: no happens-before analysis, no coverage of interleavings the stress test did not hit, and no coverage of reorderings that x86-64's strong memory model hides but a weaker one would expose. If the plugin is ever built for a platform with a TSan runtime, running it there is the cheapest way to close this — recorded in §Out of scope |
 | **Tier-1 reporting silently not wired.** *(v1.2)* A script adopts the commander but never calls `reportTrack`, so the model sees no tracks and every targeted order rejects `track` | Medium — looks like model failure, is actually an integration gap | Medium — it is a new obligation and easy to omit | `aicmd.tracks.reported` metric with an alert threshold; the runbook's `track` row checks it *first*; reporting is advisory by design so the entity still flies waypoint postures rather than failing |
 
 ### Open questions
@@ -1009,7 +1021,7 @@ Carried from the authoring brief unresolved, per instruction, plus questions thi
 | OQ-5 | Is there an entitlement/licensing gate on AI-using plugins? | Open | Phase 1b deployment | `core/entitlement/AccessGate.h` and `LexActivator.dll` are present in the tree. Resolved by reading `AccessGate.h`'s contract and testing plugin load on a licensed machine. If gated, the plugin needs an entitlement check at `initialize()` |
 | OQ-6 | Which scenario and entity for the first demo? | Open | Phase 1b start | Existing scenarios include `baltic_sentinel`, `kamikaze_swarm_outback`, `oppint_blue_cap`, `oppint_red_interceptor`, `oppint_red_sam`, `shahed_launcher_truck`, `paramotor_waypoint_mission`, `global_air_traffic_showcase`. Resolved by an owner pick. `oppint_red_interceptor` is the natural candidate because its Tier-1 logic is already the quality bar and its posture vocabulary is this PRD's enum |
 | OQ-7 | Does the host supply a non-null `IThreadRunner` to sim plugins at `initialize()`? | **Resolved 2026-08-01** | — | **Yes — both are non-null.** Observed on a live `n8ro-sim-local` run: *"PluginContext.services is non-null, PluginContext.threadRunner is non-null."* The plugin therefore uses `IThreadRunner::submitBackgroundTask` as its primary dispatch. The owned-thread fallback stays implemented per AIC-ARCH-2 — the field is documented nullable, and one host observation does not license removing a specified fallback — but it is now the contingency rather than the expected path |
-| OQ-8 | Should the doctrine prefix be padded to the configured model's cache minimum? | Open | Phase 2 start | Haiku 4.5's prompt-cache minimum is 4096 tokens; a 1–2 page doctrine block is roughly 800–1500 and will silently not cache. Padding to 4096 with genuine doctrine makes caching pay, but a *longer* uncached prompt costs more than a short one — see the Cost model. Resolved by measuring the actual prefix token count and comparing both regimes against the table below |
+| OQ-8 | Should the doctrine prefix be padded to the configured model's cache minimum? | **Open — now with a measurement** | Phase 2 start | Haiku 4.5's prompt-cache minimum is 4096 tokens. *(v1.3)* The prefix has been **measured**: 4,738 bytes ≈ **1,200 tokens** on a live engine run, logged as `prefixBytes` (§Corrections, item 9). It therefore silently does not cache on Haiku 4.5 as written. Three consequences, all evidence *into* the question and none of them answering it: the padding delta is **~2,900 tokens, not ~3,300**, so padding costs less than the v1.2 arithmetic implied; the uncached baseline the padding is judged against is **higher** than assumed ($0.00180/order, not $0.00140), so caching wins by more; and the uncached four-ship-hour figure now **exceeds** the §Success metrics ≤ $1.10 target while the cached one does not. **Deliberately left open.** What remains is not a measurement but a judgement the owner owns: whether ~2,900 tokens of *genuine* doctrine are worth writing. Padding with filler to earn a cache discount is a net loss in every dimension except the invoice, and this PRD will not pre-commit that call. Resolved at Phase 2 start by an owner decision on doctrine content, against the recomputed regimes in §Cost model |
 | OQ-9 | Can `readComponentFieldReal` address the transform's **runtime** columns at all, and if so does a bad path really return `0` rather than `std::nullopt`? | **Resolved 2026-08-01** | — | *(Added v1.2, resolved same day.)* **Yes it can, and bad paths are LOUD, not silent.** Observed on a live run against entity `NeutralDuplexHome_01`: `velocityNed.x` resolved, the schema's slash form `velocityNed/x` **also** resolved, and the deliberately misspelled `velocityNed.q` returned `std::nullopt` while emitting `DynamicLayout::handle: no field at path 'velocityNed.q'` at ERROR level. The silent-zero warning in `TransformRuntimeColumns.h` describes the raw handle-resolution path, not `readComponentFieldReal`, which validates and reports. **Consequence:** AIC-ARCH-4's probe is a plain resolve-check; the moving-entity heuristic is not required and a stationary entity is a valid subject |
 
 ### Rabbit holes
@@ -1024,20 +1036,29 @@ Carried from the authoring brief unresolved, per instruction, plus questions thi
 
 *[Finance / Owner]* Phase 2 only. Phase 1 has no marginal cost.
 
-**Assumptions.** Prompt ≈ 1000 input tokens (stable prefix ~800 + volatile suffix ~200); output ≈ 80 tokens for a constrained order; cadence 20 s → 180 orders per entity-hour; a four-ship scenario → 720 orders per scenario-hour. Budget: **$100 in held credit.**
+**Assumptions.** *(v1.3 — recomputed against the measured prefix.)* Prompt ≈ **1,400** input tokens (stable prefix **~1,200, measured at 4,738 bytes on a live engine run** — §Corrections, item 9 — plus volatile suffix ~200); output ≈ 80 tokens for a constrained order; cadence 20 s → 180 orders per entity-hour; a four-ship scenario → 720 orders per scenario-hour. Budget: **$100 in held credit.**
+
+The v1.2 table assumed a ~800-token prefix and therefore a 1,000-token prompt. Every uncached figure below is ~29 % higher as a result; nothing else in the model changed.
 
 | Model | $/MTok in | $/MTok out | $/order | $/entity-hour | $/four-ship-hour | Four-ship hours on $100 |
 |---|---|---|---|---|---|---|
-| `claude-haiku-4-5` | $1 | $5 | $0.00140 | $0.252 | **$1.01** | **≈ 99** |
-| `claude-sonnet-5` (introductory, through 2026-08-31) | $2 | $10 | $0.00280 | $0.504 | $2.02 | ≈ 50 |
-| `claude-sonnet-5` (list) | $3 | $15 | $0.00420 | $0.756 | $3.02 | ≈ 33 |
-| `claude-opus-5` | $5 | $25 | $0.00700 | $1.260 | $5.04 | ≈ 20 |
+| `claude-haiku-4-5` | $1 | $5 | $0.00180 | $0.324 | **$1.30** | **≈ 77** |
+| `claude-sonnet-5` (introductory, through 2026-08-31) | $2 | $10 | $0.00360 | $0.648 | $2.59 | ≈ 39 |
+| `claude-sonnet-5` (list) | $3 | $15 | $0.00540 | $0.972 | $3.89 | ≈ 26 |
+| `claude-opus-5` | $5 | $25 | $0.00900 | $1.620 | $6.48 | ≈ 15 |
 
-**With prompt caching (Haiku 4.5, doctrine padded to the 4096-token minimum).** Cache reads bill at 0.1× base, cache writes at 1.25×. Per order: 4096 cached-read tokens × $0.10/MTok = $0.00041, plus 200 volatile × $1/MTok = $0.00020, plus 80 output × $5/MTok = $0.00040 → **$0.00101/order**, or **$0.73 per four-ship-hour ≈ 137 hours on $100**. Cache writes cost $0.0051 each and recur only when the 5-minute TTL lapses, which a 20 s cadence never allows — negligible.
+*(Prior v1.2 values, for comparison: Haiku $0.00140/order, $1.01/four-ship-hour, ≈ 99 hours.)*
 
-**The caching decision is not free, and this is what OQ-8 turns on.** Padding the prefix from ~800 to 4096 tokens *without* caching would cost $0.0047/order — over three times the unpadded price. Caching that padded prefix brings it to $0.00101, which beats the unpadded-uncached $0.00140 by ~28 %. So: pad only if the extra ~3300 tokens are doctrine worth having, and only if caching is confirmed working. If the doctrine genuinely fits in 800 tokens, ship it short and uncached — Haiku's 4096-token minimum makes a short prefix uncacheable no matter what, and padding with filler to earn a discount is a net loss in every dimension except the invoice.
+**With prompt caching (Haiku 4.5, doctrine padded to the 4096-token minimum).** Cache reads bill at 0.1× base, cache writes at 1.25×. Per order: 4096 cached-read tokens × $0.10/MTok = $0.00041, plus 200 volatile × $1/MTok = $0.00020, plus 80 output × $5/MTok = $0.00040 → **$0.00101/order**, or **$0.73 per four-ship-hour ≈ 137 hours on $100**. Cache writes cost $0.0051 each and recur only when the 5-minute TTL lapses, which a 20 s cadence never allows — negligible. These figures are unchanged by the v1.3 measurement: a padded prefix is 4096 tokens regardless of what it was padded *from*.
 
-**Recommendation:** default `claude.model = claude-haiku-4-5`. At $1.01 per four-ship scenario-hour the $100 credit funds roughly 99 hours of live four-ship operation — far beyond any plausible demo and evaluation need. Reserve Sonnet 5 for order-quality comparison runs (a 50-hour budget at introductory pricing is ample for A/B evaluation), and keep Opus 5 out of the control loop entirely; at 5× Haiku's cost for a decision that emits six posture values, it is the wrong instrument.
+**The caching decision is not free, and this is what OQ-8 turns on** *(reframed v1.3 — the arithmetic below was written against an assumed ~800-token prefix; the real figure is ~1,200)*. Two things move, in the same direction:
+
+- **The padding delta is smaller than the table implied** — ~2,900 tokens to reach 4096, not ~3,300 — so there is less doctrine to write and less to pay for if it is never cached. Padding *without* caching still costs $0.0047/order, but that is now ~2.6× the unpadded price rather than the ~3.4× the old baseline suggested.
+- **The uncached baseline it is judged against is higher** — $0.00180/order, not $0.00140 — so caching the padded prefix ($0.00101) now beats unpadded-uncached by **~44 %**, not ~28 %. In scenario-hour terms: **$0.73 cached-and-padded vs $1.30 unpadded**, and only the former sits under the §Success metrics ≤ $1.10 target.
+
+So the economic case for padding is **stronger** than v1.2 stated, and the "ship it short" escape hatch has narrowed: the v1.2 framing rested on the doctrine possibly fitting in ~800 tokens, and it demonstrably does not — it is already ~1,200 and still nowhere near cacheable on Haiku 4.5. **This does not resolve OQ-8.** Cost is not the only axis, and the question the arithmetic cannot answer is whether ~2,900 further tokens of *genuine* doctrine exist to be written. Padding with filler to earn a discount remains a net loss in every dimension except the invoice, and that judgement is the owner's at Phase 2 start.
+
+**Recommendation:** default `claude.model = claude-haiku-4-5`. At $1.30 per four-ship scenario-hour uncached — or $0.73 padded and cached — the $100 credit funds roughly **77 hours** of live four-ship operation in the worst case, still far beyond any plausible demo and evaluation need. Reserve Sonnet 5 for order-quality comparison runs (~39 hours at introductory pricing remains ample for A/B evaluation), and keep Opus 5 out of the control loop entirely; at 5× Haiku's cost for a decision that emits six posture values, it is the wrong instrument.
 
 **Budget guard:** `aicmd.tokens.in` / `.out` accumulate in the order log; the runbook triggers a model downgrade or a switch to `local` at 80 % of budget.
 
@@ -1068,9 +1089,36 @@ Carried from the authoring brief unresolved, per instruction, plus questions thi
 **Integration — stubbed client, no inference server** *(the CI gate)*
 - Load the plugin into the engine with `commander.backend = "stub"`, run ≥ 200 simulated ticks against a test scenario.
 - Assert: N orders accepted, per-frame p95 within budget, no order log corruption, Lua getters return the published order, `getOrderSerial` strictly increases.
-- Run under TSAN; assert no data race between the sim thread and the worker.
-- Assert the worker never dereferences an SDK pointer (structurally, via a build-time assertion on the captured types where the language permits, and via review otherwise).
+- *(v1.3)* Run under **AddressSanitizer**, not TSAN — see the concurrency-evidence block below for why, and for what carries the threading claim in its place.
+- Assert the worker never dereferences an SDK pointer (structurally, via a build-time `static_assert` on the captured types where the language permits, and via review otherwise).
 - *(v1.2)* Runtime-column probe (AIC-ARCH-4): assert the probe passes on a healthy tree; assert that a deliberately misspelled column path makes the probe fail and leaves the commander disabled rather than producing a zero-velocity snapshot.
+
+**Concurrency evidence — in lieu of ThreadSanitizer** *(v1.3)*
+
+TSAN is not available on the target platform. VS 2026 Insiders ships `tsan_interface.h` and
+`tsan_interface_atomic.h` under `VC\Tools\MSVC\14.51.36231\include\sanitizer\` but **no
+`clang_rt.tsan` runtime anywhere**, and neither MSVC nor the bundled LLVM toolchain supports TSan on
+Windows (§Corrections, item 8). The v1.2 plan's "run under TSAN" bullet and Phase 1a's "TSAN clean"
+gate item were therefore unsatisfiable as written. They are replaced by three artifacts that were
+actually produced, and by an explicit statement of what those artifacts do not cover.
+
+| # | Evidence | What it substantiates |
+|---|---|---|
+| C1 | The full suite runs clean under **AddressSanitizer** (`/fsanitize=address`), **65/65** | No use-after-free, no heap or stack overflow, no double free, no use-after-scope anywhere in the plugin — including across the snapshot hand-off, which is where a lifetime bug between the sim thread and the worker would land |
+| C2 | A dedicated concurrency test hammers the **sim-thread/worker exchange slot with 20,000 concurrent publishes** against a concurrent consumer, encoding each publish's **serial into a second field** so that a mismatch between the two fields identifies a torn read | The one shared crossing point in the design holds up under contention, and a torn or interleaved read is **detected** rather than merely improbable — the second field converts "we never saw corruption" into a positive check with a failing condition |
+| C3 | The worker's callable **captures only value types**, asserted by `static_assert` over the captured types, plus a **deep-copy-outlives-original** test that destroys the source snapshot while the worker still holds its copy | The structural argument, which stands independently of any test run: a worker that shares nothing cannot race on shared state. This is the load-bearing claim; C1 and C2 corroborate it |
+
+**What this does not cover, stated plainly.** AddressSanitizer detects **memory errors, not data
+races** — it models no happens-before relation, and an unsynchronized access that does not corrupt
+memory on the interleavings it happens to execute produces no report. So C1's 65/65 is silent on the
+race question by construction, not by luck. C2 is a stress test, and a stress test samples
+interleavings; passing 20,000 publishes bounds the probability of the races it can reach, it does not
+prove their absence, and it runs on x86-64, whose strong memory model hides reorderings that a weaker
+one would expose. C3 proves what the worker *captures*, not that the exchange slot's own
+synchronization is correct. The honest summary: this set makes an unnoticed race unlikely and
+clears the memory-error class over every path the suite exercises, but it is **not** equivalent to a
+clean TSAN run, and no configuration available on this platform is. Carried as a standing residual risk in §Risks and as an
+Out-of-Scope row, not closed.
 
 **Replay determinism**
 - Record a `stub` run to a log; replay it twice; assert byte-identical published-order sequences and identical per-tick position hashes.
@@ -1108,7 +1156,11 @@ Carried from the authoring brief unresolved, per instruction, plus questions thi
 **Validation gate:**
 - All unit, stubbed-integration, and replay-determinism tests green; suite runs with no inference server and no network.
 - Frame-cost p95/p99 within budget over a 200-tick run.
-- TSAN clean.
+- *(v1.3, replacing "TSAN clean" — no TSan runtime exists on Windows, §Corrections item 8)* The concurrency-evidence set is green and its residual gap is acknowledged rather than waived:
+  - full suite clean under AddressSanitizer (`/fsanitize=address`), 65/65;
+  - the exchange-slot stress test passes 20,000 concurrent publishes against a concurrent consumer with no torn read detected by the second-field serial check;
+  - the worker's value-only capture holds at compile time (`static_assert`) and the deep-copy-outlives-original test passes.
+- *(v1.3)* The prompt prefix's `prefixBytes` is logged at startup and compared against the configured model's cache minimum, and the observed value is recorded as evidence into OQ-8 — **which this gate does not resolve**. Measured on the local tree: 4,738 bytes ≈ 1,200 tokens, below Haiku 4.5's 4096-token minimum.
 - Adversarial corpus 40/40 rejected with correct reason codes.
 - The reference Tier-1 script implements every AIC-ORD-2 row **and both reporting obligations**, and falls back correctly when `aiCommander` is nil.
 - *(v1.2)* The runtime-column probe passes on the target tree, and a deliberately broken column path is shown to disable the commander rather than yield a zero-velocity snapshot.
@@ -1136,7 +1188,7 @@ Carried from the authoring brief unresolved, per instruction, plus questions thi
 - Refusal, 429, 5xx, and TLS-unavailable paths each exercised and correct.
 - Measured cost per order within 20 % of the Cost model's Haiku row; if not, the model reconciles the difference before further runs.
 - p95 latency ≤ 2.5 s.
-- OQ-8 resolved by measuring the real prefix token count against both cost regimes.
+- OQ-8 resolved. *(v1.3 — the measurement half is already done: 4,738 bytes ≈ 1,200 tokens, taken at the Phase 1a gate. What remains at this gate is the owner's judgement on whether ~2,900 tokens of genuine doctrine are worth writing to reach Haiku 4.5's cache minimum, against the recomputed regimes in §Cost model — $1.30/four-ship-hour unpadded-uncached vs $0.73 padded-and-cached.)*
 
 ## Review checklist
 
@@ -1157,9 +1209,12 @@ Carried from the authoring brief unresolved, per instruction, plus questions thi
 - [x] Per-file header convention for plugin sources decided and recorded
 - [x] *(v1.2)* Every snapshot field traced to a reachable source, verified against the shipped headers rather than assumed
 - [x] *(v1.2)* Both path conventions (schema slash-joined vs runtime dot-joined) documented, with the silent-failure mode called out and a probe requirement attached
+- [x] *(v1.3)* Every validation-gate item names a tool or command that exists on the target platform, verified rather than assumed
+- [x] *(v1.3)* Where a gate was replaced by weaker evidence, the residual gap is stated in §Risks and §Out of scope rather than absorbed into the restatement
+- [x] *(v1.3)* The Cost model's input assumptions are traced to a measurement, not an estimate — prefix size measured at 4,738 bytes and recorded in §Corrections
 - [ ] Owner authorization for the hosted backend — **outstanding, Phase 2 gate**
 - [ ] Repository visibility confirmed — private assumed; publication needs the same authorization as the hosted backend
-- [ ] OQ-1 through OQ-8 — **outstanding**
+- [ ] OQ-1 through OQ-6 and OQ-8 — **outstanding** *(v1.3 — OQ-7 and OQ-9 resolved 2026-08-01; OQ-8 now has its measurement but not its decision, which is the owner's at Phase 2 start)*
 
 ## Appendix A: Units and frames, traced to source
 
@@ -1199,7 +1254,9 @@ Also from the generated stubs rather than the schema: sensor tracks report `rang
 ### UAC-AIC-ARCH-2: Snapshot → worker → order-slot threading
 **GIVEN** an operator running the 7B model on CPU, where one order takes 10–15 s
 **WHEN** a request is in flight across many simulation frames
-**THEN** `onTickFrame` cost stays under 0.5 ms at p95 and 2.0 ms at p99, the worker holds no SDK pointer, and TSAN reports no race between the sim thread and the worker.
+**THEN** `onTickFrame` cost stays under 0.5 ms at p95 and 2.0 ms at p99, the worker holds no SDK pointer — a property asserted at compile time by `static_assert` over the captured types, not merely observed — the full suite is clean under AddressSanitizer (65/65), and the exchange-slot stress test completes 20,000 concurrent publishes against a concurrent consumer with no torn read detected by its second-field serial check.
+
+*(v1.3 — this UAC previously read "TSAN reports no race". There is no ThreadSanitizer runtime for Windows, so that condition could never be met on the target platform; §Corrections item 8. The criteria above are what was actually run. They do not carry the same guarantee — AddressSanitizer finds memory errors, not races, and a stress test samples interleavings rather than proving their absence — and the gap is held open as a risk row rather than closed by restatement.)*
 
 ### UAC-AIC-ARCH-3: One `ILlmClient` seam
 **GIVEN** a CI machine with no inference server and no network
@@ -1266,7 +1323,7 @@ Also from the generated stubs rather than the schema: sensor tracks report `rang
 ### UAC-AIC-BE-3: Prompt prefix stability
 **GIVEN** a run with a fixed configuration
 **WHEN** 100 prompts are rendered from 100 different snapshots
-**THEN** the prefix bytes are identical across all 100, the prefix contains no timestamp/entity id/counter, and startup logged the prefix token count against the configured model's cache minimum.
+**THEN** the prefix bytes are identical across all 100, the prefix contains no timestamp/entity id/counter, and startup logged `prefixBytes` and the derived token count against the configured model's cache minimum — a comparison that has a real observed value on the local tree (4,738 bytes ≈ 1,200 tokens, below Haiku 4.5's 4096-token minimum, so the shortfall warning fires on the default model until OQ-8 is decided).
 
 ### UAC-AIC-BE-4: TLS availability
 **GIVEN** a target machine whose OpenSSL runtime is missing
@@ -1353,6 +1410,17 @@ Also from the generated stubs rather than the schema: sensor tracks report `rang
 - Reporting is advisory: a script that reports nothing still gets orders, but cannot receive a targeted one. The degradation is legible rather than silent.
 - Cost: the Lua surface grows from 12 functions to 14, and the reference script carries an obligation it would not otherwise have. Accepted, because the alternative that needed no new verbs — roster synthesis — would have fed the validator a fiction and made B3 worse than useless.
 
+### ADR-7: Substitute structural and stress evidence for a race detector
+
+**Status:** Proposed *(added v1.3)*
+**Context:** AIC-ARCH-2's threading claim was to be substantiated by a clean ThreadSanitizer run. No TSan runtime exists for this platform: VS 2026 Insiders ships `tsan_interface.h` / `tsan_interface_atomic.h` with no `clang_rt.tsan` library, and neither MSVC nor the bundled LLVM toolchain supports TSan on Windows, while ASan, UBSan, and the fuzzer runtimes all ship complete. The gate as written could not be passed by any build on the target platform.
+**Decision:** Carry the threading claim on three artifacts instead — a `static_assert`-enforced value-only worker capture with a deep-copy-outlives-original test (structural), a 20,000-publish exchange-slot stress test with a serial encoded into a second field so torn reads are detected (empirical, targeted at the single crossing point), and the full suite clean under AddressSanitizer at 65/65 (excludes the memory-error class). State the residual gap versus a real race detector in §Risks and record race detection in §Out of scope rather than declaring the concern closed.
+**Consequences:**
+- The gate becomes passable and, more importantly, *meaningful*: an unsatisfiable checklist item trains reviewers to wave the checklist through, which costs more than the coverage it pretends to provide.
+- The load-bearing argument moves from detection to structure. A worker that provably captures nothing shared is a stronger statement about *sharing* than any detector run, and it is checked at compile time on every build rather than in one CI job.
+- What is lost is real and is not recovered by any of the three: no happens-before analysis, no coverage of unexecuted interleavings, and no visibility into reorderings x86-64's memory model hides. The design is not proven race-free; it is argued race-free and stress-corroborated.
+- Cost: the residual risk is permanent for as long as the plugin is Windows-only. If it is ever built for a platform with a TSan runtime, running it there is the cheapest available closure and should be taken.
+
 ## Quality gate notes
 
 Advisory. Gaps found while composing this PRD, not blockers.
@@ -1362,9 +1430,51 @@ Advisory. Gaps found while composing this PRD, not blockers.
 - **H1 is the load-bearing hypothesis and is the hardest to measure objectively.** "Posture transitions a reviewer marks appropriate" is a human judgment. If Phase 1b needs a harder signal, candidates are: time-to-first-valid-shot, shots per kill, and survival rate across paired runs — all computable from the existing entity logs. Worth deciding before the Phase 1b gate rather than during it.
 - **OQ-4 could invalidate the chosen architecture cheaply, so it should be answered early.** It is scheduled at the Phase 1a gate for that reason: a half-day investigation of `n8ro-sim-bot`'s tool surface, before Phase 1b spends effort on the local adapter. The order schema, validator, and replay format survive a "yes", so the exposure is bounded to the adapter layer.
 - **The doctrine text is unwritten and is on the critical path for order quality.** It is the one Phase 1 deliverable this PRD does not specify in detail, because its content is domain expertise rather than engineering. Flagged as a rabbit hole with a one-day timebox; if it needs more, that is a signal to reconsider the RAG deferral.
+- **v1.3 note — a validation gate must name a tool that exists on the target platform.** "TSAN clean" survived from the authoring brief through two revisions and a design pass without anyone checking whether a ThreadSanitizer runtime ships for Windows. It does not, and the PRD consequently specified a gate no build could ever pass. The lesson generalizes past this one item: a gate is a claim about *this* toolchain, and every gate item should be traceable to a command someone has run here, in the same way §Corrections requires every SDK fact to be traceable to a shipped header. The other gate items were checked against this when v1.3 was written — `dumpbin /exports`, `/fsanitize=address`, and the replay suite all exist and all run — but the check should be part of writing a gate, not part of repairing one.
+- **v1.3 note — two Phase 1a gate items were assumptions wearing the costume of measurements.** "TSAN clean" was unrunnable and the Cost model's ~800-token prefix was a guess that undershot the measured 1,200 by a third, carrying every uncached figure in the table down with it. Both were phrased with the confidence of observed facts. The pattern to watch: a number with no units-and-source trace behind it (Appendix A's discipline) reads exactly like one that has been measured, and the Cost model — the one section whose whole output is arithmetic — had no such trace on its most load-bearing input. §Corrections item 9 now carries it.
 - **v1.2 note — the snapshot was specified from the Lua surface, not the C++ one.** Every field in the original §Exactly what is transmitted named a Lua verb, and two of them turned out to have no C++ equivalent. The lesson generalizes: for a C++ plugin, "which verb returns this?" is the wrong traceability question — "which header or schema record exposes this to *the plugin*?" is the right one. Appendix A now carries the Lua/C++ split explicitly so the next field added is checked against both columns.
 
 ## Changelog
+
+### v1.3 — 2026-08-01
+
+**Topics in this revision:** both from the Phase 1a gate, recorded in [PR #1](https://github.com/EgeCankaya/n8ro-ai-commander/pull/1).
+
+- **"TSAN clean" is unsatisfiable on the target platform** *(constraint change + review finding)*. No `clang_rt.tsan` runtime ships anywhere in VS 2026 Insiders — only `tsan_interface.h` / `tsan_interface_atomic.h` headers under `VC\Tools\MSVC\14.51.36231\include\sanitizer\`, alongside complete ASan, UBSan, and fuzzer runtimes; neither MSVC nor the bundled LLVM toolchain supports TSan on Windows. As written the PRD permanently failed its own Phase 1a gate. Replaced by the evidence actually produced — ASan 65/65, a 20,000-publish exchange-slot stress test with second-field torn-read detection, and a `static_assert`-enforced value-only worker capture with a deep-copy-outlives-original test — with the residual gap versus a real race detector stated explicitly rather than absorbed.
+- **The prompt prefix has a measured size** *(decision input, **not** an OQ resolution)*. 4,738 bytes ≈ 1,200 tokens on a live engine run, logged at startup as `prefixBytes`, against Haiku 4.5's 4,096-token cache minimum. Recorded as evidence into OQ-8, which stays **open** — the padding call is a Phase 2 cost judgement for the owner. The Cost model's arithmetic is recomputed off the measured figure instead of the ~800-token assumption.
+
+**Sections updated:**
+- §Header — Status to Draft v1.3; revision-history entry added.
+- §Corrections verified in-tree — preamble extended for the gate-found items; **items 8 (TSan absent) and 9 (prefix measured) added**.
+- §Success metrics — note added under the table: the measured prefix puts uncached Haiku at ~$1.30/four-ship-hour, above the ≤ $1.10 target; target deliberately left unchanged because meeting it is what OQ-8 asks.
+- §Out of scope — **1 row added**: dynamic race detection (TSAN), status *Out of scope*, no target — substituted rather than deferred.
+- §FRs — AIC-ARCH-2: acceptance criterion added making the `static_assert` capture check and the deep-copy test load-bearing in the absence of a race detector.
+- §FRs — AIC-BE-3: Pain-removed prefix figure corrected to ~1,200 tokens; structure table carries the measured 4,738 bytes; the cache-minimum acceptance criterion notes the real observed value and that the shortfall warning is now *expected to fire* on the default model.
+- §Source control and repository → CI split — the concurrency-evidence set placed on the self-hosted runner, with the reason no hosted configuration can substantiate the threading claim.
+- §Observability → Logging — `commander.startup` gains `prefixBytes` as the field the measurement was read from.
+- §Rollback strategy → Trigger conditions — "ASAN/TSAN report" restated as an ASan report or a stress-test torn read.
+- §Risks — Threading row's mitigation rewritten off "TSAN in CI"; **1 row added**: no race detector on the target platform, with what is and is not held enumerated.
+- §Open questions — OQ-8 status to *Open — now with a measurement*; rationale carries the measured figure, the smaller ~2,900-token padding delta, the higher uncached baseline, and an explicit statement that the judgement remains the owner's.
+- §Cost model — **fully recomputed** against a 1,400-token prompt: assumptions, the four-model table (Haiku $0.00180/order, $1.30/four-ship-hour, ≈ 77 hours), the OQ-8 framing paragraph (padding delta ~2,900 not ~3,300; caching now wins by ~44 % not ~28 %), and the recommendation. The cached-and-padded figures are unchanged, as a padded prefix is 4096 tokens regardless of origin. Prior v1.2 values retained inline for comparison.
+- §Validation and test plan — the integration suite's "Run under TSAN" bullet replaced with ASan; **new "Concurrency evidence — in lieu of ThreadSanitizer" block** added (C1/C2/C3 table plus an explicit non-coverage paragraph).
+- §Milestones → Phase 1a — "TSAN clean" replaced with the three-part concurrency-evidence item; prefix-measurement item added, marked as *not* resolving OQ-8.
+- §Milestones → Phase 2 — OQ-8 gate line notes the measurement half is done and names what remains.
+- §Review checklist — 3 items added; the outstanding-OQ line corrected to OQ-1–6 and OQ-8.
+- §Appendix B — UAC-AIC-ARCH-2 rewritten off "TSAN reports no race", with a note on why the replacement is weaker; UAC-AIC-BE-3 carries the observed prefix value.
+- §Appendix C — **ADR-7 added** (substitute structural and stress evidence for a race detector).
+- §Quality gate notes — 2 lessons recorded (a gate must name a tool that exists here; assumptions phrased as measurements).
+
+**Sections explicitly verified no-change:**
+- §One-liner · §Purpose and scope · §Source inputs · §Problem statement · §Prior art · §Goals · §Non-goals · §Key hypotheses (H2 concerns prefix *stability*, which the size measurement does not touch) · §Tenets · §Security posture — Trust boundaries / Enforcement model / Exactly what is transmitted / Threat model · §Naming and path conventions · AIC-ARCH-1 · AIC-ARCH-3 · AIC-ARCH-4 · AIC-ORD-1 · AIC-ORD-2 · AIC-VAL-1 · AIC-VAL-2 · AIC-SEC-2 · AIC-API-1 · AIC-API-2 · AIC-BE-1 · AIC-BE-2 · AIC-BE-4 · AIC-DET-1 · AIC-DET-2 · §Scope authority · §Performance requirements · §Cross-service impact · §Configuration and deployment (build/deploy flow, repository layout, ignore rules, inference-server prerequisites) · §Observability — Metrics / Health · §Operational readiness — Runbook / Deployment checklist / Capacity planning / Dependencies · §Rollback steps / Data rollback / Partial rollback · §Alternatives considered · §Rabbit holes · §Milestones Phase 0 / 1b · §Appendix A · Appendix B UACs other than ARCH-2 and BE-3 · ADR-1 through ADR-6
+
+**New OQ entries:** none. Nothing in this revision is deferred: the TSan gap is an availability fact with no decision pending, so it is recorded as an Out-of-Scope row and a standing risk rather than a question awaiting an answer.
+**Resolved OQ entries:** none. OQ-8 explicitly **not** resolved — evidence recorded, decision left to the owner at Phase 2 start.
+**Out-of-Scope additions:** 1 row — dynamic race detection (ThreadSanitizer), substituted not deferred
+**Out-of-Scope closures:** none
+**FR changes:** +0 added, ~2 modified (AIC-ARCH-2, AIC-BE-3), −0 removed
+**UAC changes:** +0 added, ~2 modified (UAC-AIC-ARCH-2, UAC-AIC-BE-3), −0 removed
+**ADR changes:** +1 added (ADR-7)
+**Scope guard:** no new FRs, no new config fields, no new Lua functions, no change to the posture vocabulary, ROE values, order schema, or backend set. Lua surface remains 14 functions; config set remains as specified in AIC-API-2.
 
 ### v1.2 — 2026-08-01
 
