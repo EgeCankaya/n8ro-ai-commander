@@ -240,6 +240,7 @@ void CommanderRuntime::countRejection(RejectReason reason) {
 void CommanderRuntime::reset() {
     entities_.clear();
     probeReport_ = ProbeReport{};
+    frameCost_.reset();
 }
 
 std::string CommanderRuntime::statsJson() const {
@@ -266,6 +267,17 @@ std::string CommanderRuntime::statsJson() const {
         (void)byReason.setInt64(entry.first, entry.second);
     }
     (void)root.set("rejectByReason", byReason);
+
+    // Per-frame plugin cost, in milliseconds to match the budget's units. This is the measured
+    // answer to "does the commander fit inside the frame", and it is the number the runbook's
+    // aicmd.frame.p95Ms alert reads.
+    n8ro::core::JsonValue frame = n8ro::core::JsonValue::object();
+    (void)frame.setDouble("p50Ms", frameCost_.p50Us() / 1000.0);
+    (void)frame.setDouble("p95Ms", frameCost_.p95Us() / 1000.0);
+    (void)frame.setDouble("p99Ms", frameCost_.p99Us() / 1000.0);
+    (void)frame.setDouble("maxMs", frameCost_.maxUs() / 1000.0);
+    (void)frame.setInt64("frames", frameCost_.totalFrames());
+    (void)root.set("frame", frame);
 
     n8ro::core::JsonValue probe = n8ro::core::JsonValue::object();
     (void)probe.setString("result", toString(probeReport_.result));

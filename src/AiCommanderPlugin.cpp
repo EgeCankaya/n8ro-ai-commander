@@ -16,6 +16,7 @@
 #include <plugin/PluginContext.h>
 #include <scripting/ScriptingApiContext.h>
 
+#include <chrono>
 #include <fstream>
 #include <optional>
 #include <sstream>
@@ -491,6 +492,10 @@ void AiCommanderPlugin::onTickFrame(double dt) {
     if (shutdown_) {
         return;
     }
+    // Timed from the first statement to the last, so the recorded cost is the plugin's whole
+    // contribution to the frame rather than a favourably-chosen slice of it.
+    const auto started = std::chrono::steady_clock::now();
+
     simTimeS_ += dt;
     ++frameCounter_;
     runtime_.setCurrentSimTimeS(simTimeS_);
@@ -503,9 +508,38 @@ void AiCommanderPlugin::onTickFrame(double dt) {
     drainCompletedOrders(simTimeS_, frameCounter_);
     advanceLadders(simTimeS_, frameCounter_);
     dispatchRequests(simTimeS_, frameCounter_);
+
+    const auto elapsed = std::chrono::steady_clock::now() - started;
+    runtime_.frameCost().record(
+        std::chrono::duration<double, std::micro>(elapsed).count());
+}
+
+void AiCommanderPlugin::writeRunEndStats() {
+    // "All metrics are exposed through aiCommander.getStats() and written to the order log at run
+    // end" (Observability). Emitted at run end rather than periodically: a per-frame or per-minute
+    // stats line would bury the order records that are the log's actual purpose.
+    const FrameCostHistogram& cost = runtime_.frameCost();
+    if (cost.totalFrames() == 0) {
+        return;
+    }
+
+    const std::string summary = std::string("ai-commander: run end - frames=")
+        + std::to_string(cost.totalFrames())
+        + " frameCost p50=" + std::to_string(cost.p50Us() / 1000.0)
+        + "ms p95=" + std::to_string(cost.p95Us() / 1000.0)
+        + "ms p99=" + std::to_string(cost.p99Us() / 1000.0)
+        + "ms max=" + std::to_string(cost.maxUs() / 1000.0) + "ms"
+        + " | requested=" + std::to_string(runtime_.stats().requested)
+        + " accepted=" + std::to_string(runtime_.stats().accepted)
+        + " rejected=" + std::to_string(runtime_.stats().rejected);
+    N8RO_LOG_INFO(summary, kLogCategory);
+
+    runtime_.recorder().recordCommanderState(simTimeS_, false, runtime_.statsJson());
 }
 
 void AiCommanderPlugin::onStop() {
+    writeRunEndStats();
+
     // A new scenario brings a new entity set, so neither the probe verdict nor any per-entity
     // state carries over.
     probeAttemptedThisRun_ = false;
@@ -515,6 +549,11 @@ void AiCommanderPlugin::onStop() {
 }
 
 void AiCommanderPlugin::shutdown() {
+    // A process killed without a clean onStop() must still leave its measurements behind — which
+    // is the common case for a headless run.
+    if (!shutdown_) {
+        writeRunEndStats();
+    }
     shutdown_ = true;
     runtime_.recorder().close();
     entityManager_ = nullptr;

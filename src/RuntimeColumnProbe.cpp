@@ -7,9 +7,7 @@
 #include <entity/TransformRuntimeColumns.h>
 
 #include <array>
-#include <optional>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace arkheon::aicommander {
@@ -25,18 +23,6 @@ constexpr std::array<std::string_view, 3> kRequiredVelocityColumns{
     n8ro::sim::kTransformColumnVelocityDown,
 };
 
-// Picks any entity carrying a transform. Since OQ-9 established that an unresolvable column
-// returns std::nullopt rather than a fabricated zero, the subject does not need to be moving —
-// a stationary entity proves resolution just as well.
-[[nodiscard]] const n8ro::sim::IEntity* pickSubject(const n8ro::sim::IEntityManager& manager) {
-    for (const n8ro::sim::IEntity* entity : manager.getAllEntities()) {
-        if (entity != nullptr && entity->hasComponent(n8ro::sim::kComponentTransform)) {
-            return entity;
-        }
-    }
-    return nullptr;
-}
-
 } // namespace
 
 const char* toString(ProbeResult result) {
@@ -48,25 +34,18 @@ const char* toString(ProbeResult result) {
     return "notRun";
 }
 
-ProbeReport probeRuntimeColumns(const n8ro::sim::IEntityManager& manager) {
+ProbeReport probeRuntimeColumnsWith(const std::string& entityId, const ColumnReader& read) {
     ProbeReport report;
+    report.probedEntityId = entityId;
 
-    const n8ro::sim::IEntity* subject = pickSubject(manager);
-    if (subject == nullptr) {
-        // Nothing to probe yet. Deliberately NOT a failure — the caller retries on a later frame
-        // rather than recording a verdict the scenario has not had a chance to earn.
+    if (entityId.empty() || !read) {
         report.result = ProbeResult::NotRun;
-        report.detail = "no entity with a componentTransform is loaded yet";
+        report.detail = "no entity to probe";
         return report;
     }
 
-    const std::string entityId = subject->getScenarioEntityName();
-    report.probedEntityId = entityId;
-
     for (const std::string_view column : kRequiredVelocityColumns) {
-        const std::optional<double> value = n8ro::sim::readComponentFieldReal(
-            manager, entityId, n8ro::sim::kComponentTransform, column);
-        if (!value.has_value()) {
+        if (!read(entityId, column).has_value()) {
             report.result = ProbeResult::Fail;
             report.detail = "componentTransform runtime column '" + std::string(column)
                 + "' did not resolve on entity '" + entityId
@@ -78,6 +57,34 @@ ProbeReport probeRuntimeColumns(const n8ro::sim::IEntityManager& manager) {
     report.result = ProbeResult::Pass;
     report.detail = "velocityNed.{x,y,z} resolved on '" + entityId + "'";
     return report;
+}
+
+ProbeReport probeRuntimeColumns(const n8ro::sim::IEntityManager& manager) {
+    // Any entity with a transform will do. Since an unresolvable column returns nullopt rather
+    // than a fabricated zero (OQ-9), the subject does not need to be moving — a stationary entity
+    // proves resolution just as well, and insisting on a moving one risks a false FAIL on the
+    // first frame before physics has integrated a velocity.
+    std::string subjectId;
+    for (const n8ro::sim::IEntity* entity : manager.getAllEntities()) {
+        if (entity != nullptr && entity->hasComponent(n8ro::sim::kComponentTransform)) {
+            subjectId = entity->getScenarioEntityName();
+            break;
+        }
+    }
+
+    if (subjectId.empty()) {
+        ProbeReport report;
+        report.result = ProbeResult::NotRun;
+        report.detail = "no entity with a componentTransform is loaded yet";
+        return report;
+    }
+
+    return probeRuntimeColumnsWith(
+        subjectId,
+        [&manager](const std::string& entityId, std::string_view fieldPath) {
+            return n8ro::sim::readComponentFieldReal(
+                manager, entityId, n8ro::sim::kComponentTransform, fieldPath);
+        });
 }
 
 } // namespace arkheon::aicommander

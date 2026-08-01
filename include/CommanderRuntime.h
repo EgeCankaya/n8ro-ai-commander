@@ -2,6 +2,7 @@
 
 #include "CommanderConfig.h"
 #include "FallbackLadder.h"
+#include "FrameCostHistogram.h"
 #include "ILlmClient.h"
 #include "OrderRecorder.h"
 #include "OrderSlot.h"
@@ -90,6 +91,11 @@ public:
     void setCurrentSimTimeS(double simTimeS) { currentSimTimeS_ = simTimeS; }
     [[nodiscard]] double currentSimTimeS() const { return currentSimTimeS_; }
 
+    // The plugin's own per-frame cost. Measured, not asserted: the p95/p99 budget is a Success
+    // Metric and it needs a number behind it.
+    [[nodiscard]] FrameCostHistogram& frameCost() { return frameCost_; }
+    [[nodiscard]] const FrameCostHistogram& frameCost() const { return frameCost_; }
+
     // -- roster (AIC-API-1) ---------------------------------------------------------------------
     [[nodiscard]] bool requestCommand(const std::string& entityId);
     [[nodiscard]] bool releaseCommand(const std::string& entityId);
@@ -145,6 +151,7 @@ private:
     CommanderConfig config_;
     ProbeReport probeReport_;
     CommanderStats stats_;
+    FrameCostHistogram frameCost_;
     double currentSimTimeS_ = 0.0;
 
     std::map<std::string, std::unique_ptr<EntityCommandState>> entities_;

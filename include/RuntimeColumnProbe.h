@@ -1,6 +1,9 @@
 #pragma once
 
+#include <functional>
+#include <optional>
 #include <string>
+#include <string_view>
 
 namespace n8ro::sim {
 class IEntityManager;
@@ -24,20 +27,26 @@ struct ProbeReport {
     std::string probedEntityId;  // The entity the probe ran against, for reproducibility.
 };
 
-// Verifies that the componentTransform runtime columns the snapshot depends on
-// (velocityNed.{x,y,z}) actually resolve, and refuses to let the commander enable if they do not.
+// Reads one componentTransform field of one entity. The seam that makes the probe testable: the
+// production caller binds it to readComponentFieldReal, and the suite binds it to a fake that can
+// be made to fail on demand — which is the only way to cover the branch that DISABLES the
+// commander, and that branch is the entire reason the probe exists.
+using ColumnReader = std::function<std::optional<double>(
+    const std::string& entityId, std::string_view fieldPath)>;
+
+// The pure form. Verifies that velocityNed.{x,y,z} resolve for `entityId`.
 //
 // Why a probe is needed at all: these columns are declared in TransformRuntimeColumns.h rather
 // than in the schema, and they use dot-joined paths where every authored schema leaf uses slashes.
-// A path that silently read back a plausible zero instead of failing would produce a stationary
-// own-ship in every snapshot, degrading orders with no failing test and no log line.
 //
-// OQ-9 (resolved 2026-08-01, observed on a live run) established that this failure is in fact
-// LOUD, not silent: readComponentFieldReal validates the path through DynamicLayout::handle and
-// returns std::nullopt for a name that is not a column. The probe is therefore a plain
-// resolve-check — no moving-entity heuristic is required, and a stationary entity is a valid
-// subject. The same run also showed both path forms resolve ("velocityNed.x" and "velocityNed/x"),
-// so the dot form is used here only because TransformRuntimeColumns.h is its declared authority.
+// OQ-9 (resolved 2026-08-01, observed on a live run) established that an unresolvable column
+// returns std::nullopt rather than a fabricated zero: readComponentFieldReal validates the path
+// through DynamicLayout::handle and reports. The probe is therefore a plain resolve-check — no
+// moving-entity heuristic, and a stationary entity is a valid subject.
+[[nodiscard]] ProbeReport probeRuntimeColumnsWith(
+    const std::string& entityId, const ColumnReader& read);
+
+// The engine-facing form: picks any entity carrying a componentTransform and probes it.
 [[nodiscard]] ProbeReport probeRuntimeColumns(const n8ro::sim::IEntityManager& manager);
 
 } // namespace arkheon::aicommander

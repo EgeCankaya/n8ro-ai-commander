@@ -65,6 +65,10 @@ private:
 
     [[nodiscard]] EntityPosition positionOf(const std::string& entityId) const;
 
+    // Writes the frame-cost percentiles and pipeline counters to the log and the order record at
+    // run end (Observability).
+    void writeRunEndStats();
+
     CommanderRuntime runtime_;
     AiCommanderApiModule apiModule_;
 

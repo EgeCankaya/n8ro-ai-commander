@@ -96,6 +96,7 @@ echo [Deploy] ai-commander.dll copied to $(N8RO_RELEASE_USER_SIM_PLUGINS)</Comma
     <ClInclude Include="include\CommanderRuntime.h" />
     <ClInclude Include="include\EnvVar.h" />
     <ClInclude Include="include\FallbackLadder.h" />
+    <ClInclude Include="include\FrameCostHistogram.h" />
     <ClInclude Include="include\ILlmClient.h" />
     <ClInclude Include="include\Order.h" />
     <ClInclude Include="include\OrderRecorder.h" />
@@ -117,6 +118,7 @@ echo [Deploy] ai-commander.dll copied to $(N8RO_RELEASE_USER_SIM_PLUGINS)</Comma
     <ClCompile Include="src\CommanderRuntime.cpp" />
     <ClCompile Include="src\EnvVar.cpp" />
     <ClCompile Include="src\FallbackLadder.cpp" />
+    <ClCompile Include="src\FrameCostHistogram.cpp" />
     <ClCompile Include="src\Order.cpp" />
     <ClCompile Include="src\OrderRecorder.cpp" />
     <ClCompile Include="src\OrderSchema.cpp" />
