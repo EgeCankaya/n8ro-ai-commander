@@ -1,0 +1,127 @@
+name: CI (self-hosted)
+
+# Everything that requires the N8RO SDK: the build, the exports check, the unit suite, the
+# AddressSanitizer run, and the deployed-artifact smoke.
+#
+# This needs a runner with a LICENSED N8RO RELEASE INSTALLED and Visual Studio 2026 (v18.x, the
+# v145 toolset). Hosted runners have none of that and never will — no SDK headers, no n8ro-*.lib,
+# no VS 2026 — so there is no configuration in which GitHub's own runners substantiate any of it.
+#
+# Any build badge produced from this workflow must say which runner produced it. A green badge from
+# ci-hosted.yml means the PRD linted and nothing classified was committed; it does not mean the
+# plugin compiles.
+#
+# Runner setup: register a self-hosted runner with the labels below on a machine where
+# `C:\N8RO\setup.cmd` exists. Override N8RO_RELEASE_ROOT if the tree lives elsewhere.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  N8RO_RELEASE_ROOT: C:\N8RO
+
+jobs:
+  build-and-test:
+    name: Build, test, smoke
+    runs-on: [self-hosted, windows, n8ro-release]
+    # Never abandon a half-installed plugin in the release tree if a step fails partway.
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify the release tree is present
+        run: |
+          if not exist "%N8RO_RELEASE_ROOT%\setup.cmd" (
+            echo ::error::No N8RO release at %N8RO_RELEASE_ROOT%. This runner is mislabelled - the
+            echo ::error::n8ro-release label promises a licensed install.
+            exit /b 1
+          )
+          if not exist "%N8RO_RELEASE_ROOT%\lib\n8ro-core.lib" (
+            echo ::error::Release tree at %N8RO_RELEASE_ROOT% has no lib\n8ro-core.lib.
+            exit /b 1
+          )
+          echo Release tree OK: %N8RO_RELEASE_ROOT%
+
+      - name: Uninstall any previously deployed plugin
+        run: |
+          REM A clean install, not an incremental one. An install-time regression that only appears
+          REM on a fresh deploy is exactly what this job exists to catch.
+          if exist "%N8RO_RELEASE_ROOT%\userPlugins\sim\ai-commander.dll" del /q "%N8RO_RELEASE_ROOT%\userPlugins\sim\ai-commander.dll"
+          if exist "%N8RO_RELEASE_ROOT%\data\resources\missions\stubs\aiCommander.lua" del /q "%N8RO_RELEASE_ROOT%\data\resources\missions\stubs\aiCommander.lua"
+          if exist "bin" rmdir /s /q "bin"
+          if exist "x64" rmdir /s /q "x64"
+          exit /b 0
+
+      - name: Build plugin (Release^|x64)
+        run: |
+          call "%N8RO_RELEASE_ROOT%\setup.cmd" >nul || exit /b 1
+          call "%N8RO_RELEASE_ROOT%\dev\setup-dev.cmd" >nul || exit /b 1
+          "%N8RO_RELEASE_MSBUILD_CMD%" ai-commander.vcxproj /p:Configuration=Release /p:Platform=x64 /v:minimal /nologo
+
+      - name: Verify exports
+        run: |
+          call "%N8RO_RELEASE_ROOT%\setup.cmd" >nul || exit /b 1
+          call "%N8RO_RELEASE_ROOT%\dev\setup-dev.cmd" >nul || exit /b 1
+          REM AIC-API-1: a plugin missing any of the three is silently not loadable by the host.
+          for %%S in (create_plugin destroy_plugin get_plugin_signature) do (
+            dumpbin /nologo /exports "bin\release\ai-commander.dll" | findstr /C:"%%S" >nul || (
+              echo ::error::ai-commander.dll does not export %%S
+              exit /b 1
+            )
+            echo   exports %%S
+          )
+
+      - name: Build and run unit suite
+        run: |
+          call "%N8RO_RELEASE_ROOT%\setup.cmd" >nul || exit /b 1
+          call "%N8RO_RELEASE_ROOT%\dev\setup-dev.cmd" >nul || exit /b 1
+          "%N8RO_RELEASE_MSBUILD_CMD%" tests\ai-commander-tests.vcxproj /p:Configuration=Release /p:Platform=x64 /v:minimal /nologo || exit /b 1
+          cd /d "%N8RO_RELEASE%"
+          "%GITHUB_WORKSPACE%\tests\bin\release\ai-commander-tests.exe"
+
+      - name: Build and run under AddressSanitizer
+        run: |
+          REM Substitutes for the unavailable ThreadSanitizer (ADR-7). ASan clears the memory-error
+          REM class; the race argument rests on the exchange-slot stress test and the static_assert
+          REM value-only capture, both of which run inside this same suite.
+          call "%N8RO_RELEASE_ROOT%\setup.cmd" >nul || exit /b 1
+          call "%N8RO_RELEASE_ROOT%\dev\setup-dev.cmd" >nul || exit /b 1
+          "%N8RO_RELEASE_MSBUILD_CMD%" tests\ai-commander-tests.vcxproj /p:Configuration=Release /p:Platform=x64 ^
+            /p:EnableASAN=true /p:IntDir=x64\asan\ /p:OutDir=bin\asan\ /v:minimal /nologo || exit /b 1
+          cd /d "%N8RO_RELEASE%"
+          "%GITHUB_WORKSPACE%\tests\bin\asan\ai-commander-tests.exe"
+
+      - name: Smoke the deployed artifact
+        shell: pwsh
+        run: |
+          # Unit tests prove the pipeline correct in isolation; smoke proves the DEPLOYED artifact
+          # behaves in the real engine. A missing export, an unresolved scripting service, a wrong
+          # namespace, or a failing runtime-column probe all pass every unit test and fail here.
+          ./tests/smoke/run-smoke.ps1 -ReleaseRoot $env:N8RO_RELEASE_ROOT -RunSeconds 30
+
+      - name: Collect logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selfhosted-logs
+          path: |
+            ${{ runner.temp }}/aic-smoke/*.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Leave the release tree clean
+        if: always()
+        run: |
+          REM The runner's release tree is shared with interactive use. Do not leave a PR's build
+          REM deployed into it - the next person to run a scenario would silently load it.
+          if exist "%N8RO_RELEASE_ROOT%\userPlugins\sim\ai-commander.dll" del /q "%N8RO_RELEASE_ROOT%\userPlugins\sim\ai-commander.dll"
+          exit /b 0

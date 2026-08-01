@@ -10,8 +10,9 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 > **One-liner:** A `n8ro-sim` plugin that lets a language model issue tactical *intent* — posture, target, waypoint, rules of engagement — to entities in a running scenario, while every kinematic decision and every state mutation stays in the deterministic C++ and Lua tiers that already exist.
 
 **Date:** 2026-07-31 (revised 2026-08-01)
-**Status:** Draft v1.4
+**Status:** Draft v1.5
 **Revision history:**
+- v1.5 — restated §Source control's CI paragraph against the **built** implementation. v1.1's split assumed hosted runners could execute the order-schema and validator fixtures; they cannot, because every test links `n8ro-core` (`JsonValue` for the schema and Stage-A validator, `TestRunner` for the harness). The real boundary is *compiles / does not compile*, not *which FRs*. Documented the two workflows that now exist, the badge obligation, the shared-release-tree cleanup obligation, and why `clang-format` ships advisory rather than gating.
 - v1.4 — **resolved OQ-4** by enumerating the MCP stack's tool surface from the shipped binaries. `n8ro-sim-bot.exe` registers exactly two tools (`workbook_describe_api`, `workbook_eval`) and **no entity-control tool**; `n8ro-data-bot.exe`'s ~37 tools are all database-authoring operations. Alternative 2 does not supersede Alternative 1. Cascaded through §Prior art, §Out of scope (Deferred → Out of scope, verified absent), §Cross-service impact, §Alternatives Option 2 (rewritten off evidence, with four concrete disqualifications), and §Quality gate notes. Recorded `workbook_eval` as an adjacent LLM-facing arbitrary-Lua channel that reaches the same safety goal by human approval where this plugin reaches it by a closed schema.
 - v1.3 — reconciled the contract with two findings from the Phase 1a gate, both recorded in [PR #1](https://github.com/EgeCankaya/n8ro-ai-commander/pull/1). (a) **"TSAN clean" is unsatisfiable on the target platform** — no ThreadSanitizer runtime ships for Windows — so the Phase 1a gate item, the §Risks Threading mitigation, the integration-suite bullet, and UAC-AIC-ARCH-2 now name the evidence that was actually produced (ASan 65/65, a 20,000-publish exchange-slot stress test with torn-read detection, and a `static_assert`-enforced value-only capture), with the residual gap versus a real race detector stated rather than papered over. (b) **The prompt prefix was measured** at 4,738 bytes ≈ 1,200 tokens on a live engine run; recorded as evidence against OQ-8, which stays **open** — the padding call is a Phase 2 cost judgement for the owner — and the Cost model's arithmetic is recomputed off the measured figure instead of the ~800-token assumption.
 - v1.2 — closed the snapshot-reachability gap found in design: sensor tracks and weapon loadout have no public C++ read seam, so Tier 1 now reports them into the commander (`aiCommander.reportTrack` / `reportLoadout` in AIC-API-1; Stage-B B3, §Exactly what is transmitted, and AIC-ORD-2 restated accordingly). Folded in four mechanism corrections verified against the shipped headers (transport failure is `std::nullopt`, not `statusCode == 0`; detections arrive as triples; transform velocity/orientation/acceleration are runtime columns on dot-joined paths that read back `0` silently; Stage-B B1 uses `IEntityManager::getEntity`). Added AIC-ARCH-4 (runtime-column startup probe) and OQ-9.
@@ -824,7 +825,22 @@ The `*.jsonl` rule is the one most likely to be missed: AIC-DET-1 recording is *
 
 **Repository visibility.** Private by default. The plugin's sources necessarily quote proprietary SDK surface — component type strings, `schema-reference.json` leaf paths, Lua verb signatures and arities, scenario names — and `docs/prd.md` is dense with it. Publication requires the same explicit owner authorization as the hosted backend (§Operational readiness deployment checklist). The per-file header decision above is about provenance marking and does **not** imply publication clearance.
 
-**Continuous integration is partial, by necessity.** Hosted runners have no SDK, no `n8ro-*.lib`, and no VS 2026, so they can run only: order-schema validity plus accept/reject fixture round-trips (AIC-ORD-1, AIC-VAL-1), `clang-format`, and docs linting. The `Release | x64` build, the `dumpbin /exports` check (AIC-API-1), and the Appendix A schema-conformance test — which re-reads `schema-reference.json`, a file that cannot be committed — require a **self-hosted runner with the release tree installed**. Any build badge must state which runner produced it.
+**Continuous integration is partial, by necessity — and the split is not where v1.1 assumed.** *(Restated v1.5 against the built implementation.)* v1.1 expected hosted runners to carry "order-schema validity plus accept/reject fixture round-trips (AIC-ORD-1, AIC-VAL-1)". They cannot. **Every test in the suite links `n8ro-core`**: the order schema and Stage-A validator are built on `n8ro::core::JsonValue`, and the harness is `n8ro::core::TestCase` / `TestRunner`. So zero of the 67 tests run on a hosted runner.
+
+That is a consequence of two deliberate choices, both of which stand: `JsonValue` ships `validateAgainstSchema`, which is what makes AIC-ORD-1's "one definition, three consumers" literal rather than aspirational; and the SDK's test framework adds no third-party dependency to a repository that is meant to be buildable from a licensed install alone. The cost lands here, and it is worth paying.
+
+The real split is therefore **not** "some FRs hosted, some self-hosted" but **anything that compiles goes self-hosted; anything that does not runs hosted**:
+
+| Runner | Checks | Why it can run there |
+|---|---|---|
+| **Hosted** (`.github/workflows/ci-hosted.yml`) | PRD structural lint (`tools/lint-prd.ps1`); tracked-artifact guard (`tools/check-artifacts.ps1`); Lua syntax; commit FR-tagging; `clang-format` *(advisory — see below)* | Operates on text. Needs no SDK, no compiler, no release tree |
+| **Self-hosted** (`.github/workflows/ci-selfhosted.yml`, labels `self-hosted, windows, n8ro-release`) | `Release \| x64` build; `dumpbin /exports` (AIC-API-1); the 67-test suite; the AddressSanitizer run (ADR-7); the 25-check deployed-artifact smoke | All require the SDK, VS 2026's v145 toolset, and a licensed release tree |
+
+Two obligations follow. **Any build badge must state which runner produced it** — a green hosted badge means the PRD linted and nothing classified was committed; it does not mean the plugin compiles. And **the self-hosted runner's release tree is shared with interactive use**, so the workflow uninstalls the plugin it deployed on exit; leaving a PR's build in `userPlugins/sim` would have the next interactive scenario silently load it.
+
+**The PRD lint earns its place by having caught something real.** OQ-4 sat `Open` past its "Phase 1a end" decision target across three revisions and was found only by a `/prd-review` pass after the milestone had already closed. "An unresolved question with no decision target" and "an FR with no UAC" are mechanical properties of the document, and a script checks them on every push. It cannot judge whether a rationale is *good* — only that one exists. Rating the argument stays the reviewer's job.
+
+*(`clang-format` is advisory rather than gating: the config was added after the code was written and all 48 sources differ from it on comment-column alignment alone. Enforcing it today would mean an 8,400-line reformat commit with no behavioural content, landing on an open PR and destroying `git blame`. The intended path is a dedicated reformat commit added to `.git-blame-ignore-revs`, after which the job becomes a gate.)*
 
 *(v1.3)* The concurrency-evidence set that replaces the unavailable TSAN gate (§Validation and test plan) lands on the **self-hosted** side for the same reason: the AddressSanitizer build is a `/fsanitize=address` build of the same solution and needs the SDK, and the exchange-slot stress test links the plugin. Only the `static_assert` capture check is toolchain-portable, and it is a compile-time property of code the hosted runner cannot compile anyway. There is no configuration in which a hosted runner substantiates the threading claim.
 
@@ -1439,6 +1455,24 @@ Advisory. Gaps found while composing this PRD, not blockers.
 - **v1.2 note — the snapshot was specified from the Lua surface, not the C++ one.** Every field in the original §Exactly what is transmitted named a Lua verb, and two of them turned out to have no C++ equivalent. The lesson generalizes: for a C++ plugin, "which verb returns this?" is the wrong traceability question — "which header or schema record exposes this to *the plugin*?" is the right one. Appendix A now carries the Lua/C++ split explicitly so the next field added is checked against both columns.
 
 ## Changelog
+
+### v1.5 — 2026-08-01
+
+**Topics in this revision:**
+- **The CI split described since v1.1 was wrong about which side the tests land on.** Found while building the workflows. Hosted runners were expected to run "order-schema validity plus accept/reject fixture round-trips (AIC-ORD-1, AIC-VAL-1)"; in the built implementation zero of the 67 tests can run there, because the order schema and Stage-A validator are built on `n8ro::core::JsonValue` and the harness is `n8ro::core::TestRunner`. Both dependencies are deliberate and stand — `validateAgainstSchema` is what makes AIC-ORD-1's one-definition-three-consumers claim literal, and the SDK harness keeps the repository free of third-party test dependencies — so the paragraph was restated rather than the design changed.
+
+**Sections updated:**
+- §Header — Status to Draft v1.5; revision-history entry added.
+- §Source control and repository → CI paragraph — rewritten. The split is restated as *compiles / does not compile* rather than *which FRs*, with a table naming both workflow files and the self-hosted runner labels. Added the badge obligation (a green hosted badge does not mean the plugin compiles), the shared-release-tree cleanup obligation, the rationale for the PRD lint (it exists because OQ-4's slip was caught late by a human), and the reason `clang-format` ships advisory.
+
+**Sections explicitly verified no-change:**
+- Everything else. No FR, UAC, OQ, metric, milestone, risk, or ADR was touched: this revision corrects a description of tooling, not a requirement.
+
+**New OQ entries:** none.
+**Resolved OQ entries:** none.
+**Out-of-Scope additions:** none.
+**FR changes:** +0, ~0, −0.
+**UAC changes:** none.
 
 ### v1.4 — 2026-08-01
 

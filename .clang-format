@@ -1,0 +1,45 @@
+# Formatting for the ai-commander plugin.
+#
+# Chosen to match the shipped SDK headers and the sim-scripting sample this plugin was cloned from,
+# so a reader moving between the release tree and this repository is not reading two dialects:
+# 4-space indent, 100-column limit, attached braces, pointers bound to the type.
+#
+# Deliberately NOT reformatting to a stricter house style. The sample is the reference an author
+# reads first; matching it costs nothing and diverging from it costs every future reader a
+# double-take.
+
+BasedOnStyle: Google
+Language: Cpp
+Standard: c++17
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+
+AccessModifierOffset: -4
+IndentCaseLabels: true
+NamespaceIndentation: None
+FixNamespaceComments: true
+
+PointerAlignment: Left
+DerivePointerAlignment: false
+ReferenceAlignment: Pointer
+
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: true
+
+# The comments in this codebase carry the reasoning, and reflowing them mangles deliberate line
+# breaks in multi-sentence explanations.
+ReflowComments: false
+
+# Include order matters here: the plugin's own headers, then the SDK's, then the standard library.
+# Grouping them keeps the SDK dependency surface visible at a glance in every file.
+SortIncludes: CaseSensitive
+IncludeBlocks: Preserve
+
+AlwaysBreakTemplateDeclarations: Yes
+SpaceAfterTemplateKeyword: false
