@@ -53,6 +53,17 @@ using TestFactory = std::unique_ptr<n8ro::core::TestCase> (*)();
 
 std::vector<TestFactory>& registry();
 
+// The release root, captured in main() BEFORE the SDK test framework initializes.
+//
+// This has to be captured early: GlobalLogger::initializeForTests() repoints N8RO_RELEASE at a
+// per-run test-artifacts directory so log files land there, which is correct for logging and
+// wrong for anything that needs the actual installed tree. Reading the variable from inside a test
+// case yields "<release>\test_artifacts" and a file-not-found on every SDK path.
+//
+// Empty when the suite was run without setup.cmd.
+const std::string& releaseRoot();
+void setReleaseRoot(std::string root);
+
 struct AutoRegister {
     explicit AutoRegister(TestFactory factory) { registry().push_back(factory); }
 };
