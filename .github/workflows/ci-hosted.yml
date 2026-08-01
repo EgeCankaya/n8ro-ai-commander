@@ -1,0 +1,141 @@
+name: CI (hosted)
+
+# Everything that does NOT require the N8RO SDK.
+#
+# The split is not "some tests here, some there" — it is "anything that compiles goes to the
+# self-hosted runner, anything that does not runs here". Every unit test in this repository links
+# n8ro-core (JsonValue for the order schema and validator; TestRunner for the harness), so a hosted
+# runner cannot execute a single one of them. That is a consequence of two deliberate choices —
+# using the SDK's JSON Schema validator so AIC-ORD-1's "one definition, three consumers" is literal,
+# and using the SDK's test framework so the suite adds no third-party dependency — and the cost
+# lands here.
+#
+# What is left is still worth running on every push: the PRD is the contract, and most of the ways
+# it decays are mechanical. See tools/lint-prd.ps1.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prd-lint:
+    name: PRD structural lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Lint the PRD
+        shell: pwsh
+        run: ./tools/lint-prd.ps1
+
+  artifact-guard:
+    name: Tracked-artifact guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The guard reads `git ls-files`, which needs the real index rather than a sparse one.
+          fetch-depth: 1
+
+      - name: Assert no classified or licensed artifact is tracked
+        shell: pwsh
+        run: ./tools/check-artifacts.ps1
+
+  format:
+    name: clang-format (advisory)
+    runs-on: ubuntu-latest
+    # ADVISORY, not a gate — deliberately, and this should be revisited exactly once.
+    #
+    # .clang-format was added after the code was written, and all 48 sources differ from it. The
+    # differences are cosmetic (comment-column alignment), so enforcing it today would mean an
+    # 8,400-line reformat commit landing on top of an open PR: it would bury the reviewable diff
+    # and make `git blame` useless on every line for a change with no behavioural content.
+    #
+    # The intended path is a dedicated "style: apply clang-format" commit on its own PR, added to
+    # .git-blame-ignore-revs, after which this job loses `continue-on-error` and becomes a real
+    # gate. Until then it reports the delta without failing the build — a job that cannot fail is
+    # near-worthless, and pretending otherwise with a green check would be worse than this note.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check formatting
+        run: |
+          if [ ! -f .clang-format ]; then
+            echo "::notice::no .clang-format in the repository; skipping"
+            exit 0
+          fi
+          files=$(git ls-files '*.h' '*.cpp')
+          if [ -z "$files" ]; then echo "no C++ sources"; exit 0; fi
+          clang-format --version
+          differing=0
+          total=0
+          for f in $files; do
+            total=$((total + 1))
+            if ! clang-format --dry-run --Werror "$f" 2>/dev/null; then
+              differing=$((differing + 1))
+              echo "::warning file=$f::differs from .clang-format"
+            fi
+          done
+          echo "clang-format: $differing of $total files differ"
+          if [ "$differing" -gt 0 ]; then
+            echo "::notice::Advisory only. Land a dedicated reformat commit, add it to"
+            echo "::notice::.git-blame-ignore-revs, then remove continue-on-error from this job."
+          fi
+
+  lua-syntax:
+    name: Lua syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Lua
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq lua5.4
+
+      - name: Parse every Lua file
+        run: |
+          # luac -p parses without executing. The reference Tier-1 script is a deliverable
+          # (AIC-ORD-2) and a syntax error in it would only surface when a scenario loads it.
+          status=0
+          for f in $(git ls-files '*.lua'); do
+            if luac5.4 -p "$f"; then
+              echo "  ok   $f"
+            else
+              echo "::error file=$f::Lua syntax error"
+              status=1
+            fi
+          done
+          exit $status
+
+  commit-discipline:
+    name: Commit messages name their FR
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check subjects
+        shell: pwsh
+        run: |
+          # The loop convention is that a commit names the FR it implements, so `git log` stays a
+          # traceability index rather than a diary. Advisory: docs, test, chore, fix and merge
+          # commits legitimately have no FR.
+          $base = "${{ github.event.pull_request.base.sha }}"
+          $head = "${{ github.event.pull_request.head.sha }}"
+          $subjects = @(& git log --format=%s "$base..$head")
+          $missing = @()
+          foreach ($s in $subjects) {
+            if ([regex]::IsMatch($s, '^(docs|test|chore|ci|build|refactor|Merge)')) { continue }
+            if (-not [regex]::IsMatch($s, 'AIC-[A-Z]+-\d')) { $missing += $s }
+          }
+          Write-Host "commits examined : $($subjects.Count)"
+          Write-Host "without an FR tag: $($missing.Count)"
+          foreach ($m in $missing) { Write-Host "::warning::commit does not name an FR: $m" }
+          exit 0
