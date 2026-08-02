@@ -124,8 +124,8 @@ AIC_TEST(SchemaForbidsAdditionalProperties) {
     // (v1.7) The document is oneOf over two branches, so the guarantee has to hold on EVERY branch:
     // one permissive branch would be a hole the model could steer into by choosing its posture.
     const JsonValue branches = orderJsonSchema().get("oneOf");
-    AIC_EXPECT_TRUE(branches.isArray() && branches.size() == 2,
-                    "the order schema must be oneOf over two branches");
+    AIC_EXPECT_TRUE(branches.isArray() && branches.size() >= 2,
+                    "the order schema must be oneOf over posture-discriminated branches");
 
     for (std::size_t i = 0; i < branches.size(); ++i) {
         const JsonValue branch = branches.at(i);
@@ -226,8 +226,8 @@ AIC_TEST(PostureAndRoeRoundTrip) {
 // The schema's enum lists and the C++ enums must agree, or the validator would accept a posture
 // the code cannot represent (or reject one it can).
 AIC_TEST(SchemaEnumsMatchTheCppEnums) {
-    // (v1.7) The posture vocabulary is now split across the two branches. The union must still be
-    // exactly the six C++ postures, and no posture may appear in both - a posture in two branches
+    // (v1.7) The posture vocabulary is now split across the branches. The union must still be
+    // exactly the six C++ postures, and no posture may appear twice - a posture in two branches
     // would make the oneOf ambiguous and hand the model a way to pick which rules apply to it.
     const JsonValue branches = orderJsonSchema().get("oneOf");
     std::vector<std::string> seen;

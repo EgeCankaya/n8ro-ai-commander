@@ -177,7 +177,26 @@ void AiCommanderPlugin::rebuildBackend() {
 
     // The prefix is rebuilt with the backend, so a doctrine or config change invalidates the
     // prompt cache exactly once and deliberately (AIC-BE-3).
-    runtime_.promptRenderer().build(config, readDoctrine(config.doctrinePath));
+    const std::string doctrine = readDoctrine(config.doctrinePath);
+    if (doctrine.empty()) {
+        // Loudly, because the failure is otherwise invisible: the prefix renders "(none provided)",
+        // every order is still accepted, and only order QUALITY degrades - which no counter shows.
+        // The path is relative to the host's working directory, not to the DLL, so a deployed
+        // plugin looks for it under the release root and finds nothing unless it was put there.
+        N8RO_LOG_WARNING(
+            std::string("ai-commander: no doctrine at '") + config.doctrinePath
+                + "' (resolved relative to the host's working directory). The prompt prefix will "
+                  "carry '(none provided)' and order quality is degraded, silently, in a way no "
+                  "rejection counter reports. Copy the plugin's data/doctrine.txt there, or point "
+                  "prompt.doctrinePath at it.",
+            kLogCategory);
+    } else {
+        N8RO_LOG_INFO(
+            std::string("ai-commander: doctrine loaded from '") + config.doctrinePath + "' ("
+                + std::to_string(doctrine.size()) + " bytes)",
+            kLogCategory);
+    }
+    runtime_.promptRenderer().build(config, doctrine);
 }
 
 void AiCommanderPlugin::initialize(n8ro::core::PluginContext& context) {

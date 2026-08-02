@@ -107,34 +107,48 @@ JsonValue buildSharedProperties() {
     return properties;
 }
 
+// The three things a branch fixes. Every posture in a branch must agree on all three, which is what
+// makes the branch expressible to a constrained decoder at all: within a branch, no field's rule is
+// conditional on anything.
+struct BranchShape {
+    bool waypoint = false;     // waypoint required (true) or not declared at all (false)
+    bool target = false;       // targetEntityId non-empty (true) or forced empty (false)
+    bool orbit = false;        // orbitRadiusM > 0 (true) or forced 0 (false)
+};
+
 // One branch of the oneOf.
 //
-// `withWaypoint` is the whole point of the split: the waypoint branch requires the field, and the
-// geometry branch does not declare it at all, so additionalProperties:false turns its absence into
-// a prohibition rather than a silence. A constrained decoder can hold both of those; it cannot hold
-// "required only when posture is one of these three", which is what a flat document would need
-// if/then/else to say and which the decoding path does not honour.
-JsonValue buildBranch(const std::vector<const char*>& postures, bool withWaypoint,
+// The split is the whole point. A branch that requires `waypoint` and one that does not declare it
+// at all — combined with additionalProperties:false, which turns "not declared" into a prohibition
+// rather than a silence — says what a flat document would need if/then/else to say, and the
+// decoding path does not honour if/then/else.
+//
+// The same trick carries the other two rules: `targetEntityId` is bounded to exactly zero
+// characters where the posture forbids one, and `orbitRadiusM` to exactly zero where the posture
+// forbids an orbit. A decoder told the bound cannot emit outside it.
+JsonValue buildBranch(const std::vector<const char*>& postures, BranchShape shape,
                       const std::string& postureDescription, const std::string& branchDescription) {
     JsonValue properties = buildSharedProperties();
     (void)properties.set("posture", makeEnum(postures, postureDescription));
 
-    if (withWaypoint) {
-        (void)properties.set("targetEntityId", makeString(0, 0,
-            "Not applicable to these postures. Emit the empty string."));
-        (void)properties.set("waypoint", buildWaypoint());
-    } else {
+    if (shape.target) {
         (void)properties.set("targetEntityId", makeString(1, kMaxEntityIdChars,
             "The contact to act against, taken from the reported track list. Never invent one."));
+    } else {
+        (void)properties.set("targetEntityId", makeString(0, 0,
+            "Not applicable to these postures - the aircraft selects for itself. Emit the empty "
+            "string."));
     }
 
-    // orbitRadiusM is described differently per branch because its legal range differs, and a
-    // decoder that is told the range can simply not emit an illegal value.
-    if (withWaypoint) {
-        (void)properties.set("orbitRadiusM", makeNumber(0.0, kMaxOrbitRadiusM,
+    if (shape.waypoint) {
+        (void)properties.set("waypoint", buildWaypoint());
+    }
+
+    if (shape.orbit) {
+        (void)properties.set("orbitRadiusM", makeNumber(1.0, kMaxOrbitRadiusM,
             "Orbit radius in metres (unit M; "
-            "/datablocks/componentNavigation/onWaypointReachedLoiterRadiusM). Greater than zero "
-            "for hold, and exactly 0 for ingress and rtb."));
+            "/datablocks/componentNavigation/onWaypointReachedLoiterRadiusM). Required and greater "
+            "than zero for this posture."));
     } else {
         (void)properties.set("orbitRadiusM", makeNumber(0.0, 0.0,
             "Not applicable to these postures. Emit 0."));
@@ -144,7 +158,7 @@ JsonValue buildBranch(const std::vector<const char*>& postures, bool withWaypoin
         "schemaVersion", "entityId", "posture", "targetEntityId",
         "cruiseSpeedMps", "orbitRadiusM", "roe", "reason",
     };
-    if (withWaypoint) {
+    if (shape.waypoint) {
         required.push_back("waypoint");
     }
 
@@ -157,39 +171,69 @@ JsonValue buildBranch(const std::vector<const char*>& postures, bool withWaypoin
     return branch;
 }
 
-const JsonValue& waypointBranch() {
+// -- the four branches ---------------------------------------------------------------------------
+//
+// One per distinct field-constraint profile, which is the partition the A6 rules actually induce.
+// An earlier two-branch split grouped `defend` with `engage` and `crank` because none of them
+// carries a waypoint — and then measured 2/12 rejections for "defend must not carry a
+// targetEntityId", because that grouping is wrong about the OTHER rule. Postures group by their
+// whole constraint profile or not at all.
+
+const JsonValue& transitBranch() {
     static const JsonValue branch = buildBranch(
-        {"ingress", "hold", "rtb"}, true,
-        "Postures that fly to an ordered point. ingress repositions to it, hold orbits it, rtb "
-        "egresses to it.",
-        "An order that sends the aircraft to a point. Carries a waypoint and no target.");
+        {"ingress", "rtb"}, BranchShape{true, false, false},
+        "Postures that fly to an ordered point without orbiting it. ingress repositions to the "
+        "assigned area; rtb egresses.",
+        "An order that sends the aircraft to a point. Carries a waypoint, no target, no orbit.");
     return branch;
 }
 
-const JsonValue& geometryBranch() {
+const JsonValue& holdBranch() {
     static const JsonValue branch = buildBranch(
-        {"engage", "crank", "defend"}, false,
-        "Postures where the aircraft computes its own geometry. engage pursues the target, crank "
-        "flies an offset while a shot is supported, defend turns cold from the nearest threat.",
-        "An order that names an intent the aircraft resolves into geometry itself. Carries no "
-        "waypoint - supplying one would be a field nothing reads.");
+        {"hold"}, BranchShape{true, false, true},
+        "Orbit the ordered point at the ordered radius, retaining options rather than committing.",
+        "A hold order. Carries a waypoint AND a non-zero orbit radius; the two are meaningless "
+        "apart.");
+    return branch;
+}
+
+const JsonValue& targetedBranch() {
+    static const JsonValue branch = buildBranch(
+        {"engage", "crank"}, BranchShape{false, true, false},
+        "Postures directed at a specific contact. engage pursues it; crank flies an offset while a "
+        "shot is supported.",
+        "An order against a named contact. Carries a target and no waypoint - the aircraft computes "
+        "the geometry itself.");
+    return branch;
+}
+
+const JsonValue& defendBranch() {
+    static const JsonValue branch = buildBranch(
+        {"defend"}, BranchShape{false, false, false},
+        "Turn cold from the nearest threat and descend. The aircraft picks the threat and the "
+        "maneuver.",
+        "A defensive order. Carries neither a target nor a waypoint: naming either would be "
+        "commanding geometry the aircraft is better placed to choose.");
     return branch;
 }
 
 JsonValue buildOrderSchema() {
     JsonValue branches = JsonValue::array();
-    (void)branches.pushBack(waypointBranch());
-    (void)branches.pushBack(geometryBranch());
+    (void)branches.pushBack(transitBranch());
+    (void)branches.pushBack(holdBranch());
+    (void)branches.pushBack(targetedBranch());
+    (void)branches.pushBack(defendBranch());
 
     JsonValue schema = JsonValue::object();
     (void)schema.setString("$schema", "http://json-schema.org/draft-07/schema#");
     (void)schema.setString("title", "N8RO AI Entity Commander Order");
     (void)schema.set("oneOf", branches);
     (void)schema.setString("description",
-        "Exactly one order for exactly one entity, matching exactly one of the two branches below. "
-        "Which branch applies is decided by the posture. There is deliberately no property for "
-        "heading, pitch, roll, velocity, acceleration, turn rate, load factor, hardpoint selection, "
-        "or a fire command: those are the deterministic tiers' job, not the model's.");
+        "Exactly one order for exactly one entity, matching exactly one of the branches below. "
+        "Which branch applies is decided by the posture, and each branch states every field's rule "
+        "unconditionally. There is deliberately no property for heading, pitch, roll, velocity, "
+        "acceleration, turn rate, load factor, hardpoint selection, or a fire command: those are "
+        "the deterministic tiers' job, not the model's.");
 
     return schema;
 }
@@ -209,7 +253,19 @@ const std::string& orderJsonSchemaText() {
 }
 
 const n8ro::core::JsonValue& orderSchemaBranch(Posture posture) {
-    return postureRequiresWaypoint(posture) ? waypointBranch() : geometryBranch();
+    switch (posture) {
+        case Posture::Hold:
+            return holdBranch();
+        case Posture::Engage:
+        case Posture::Crank:
+            return targetedBranch();
+        case Posture::Defend:
+            return defendBranch();
+        case Posture::Ingress:
+        case Posture::Rtb:
+            break;
+    }
+    return transitBranch();
 }
 
 } // namespace arkheon::aicommander

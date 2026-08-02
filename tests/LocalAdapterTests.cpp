@@ -160,48 +160,85 @@ FakeHttpClient* attachFake(LocalLlmClient& client, std::unique_ptr<FakeHttpClien
 // This is the test that keeps PRD §Corrections item 13 from silently regressing. A flattened schema
 // still validates every legal order, so nothing else in the suite would notice it — the only
 // symptom would be a `reject.shape` rate that nobody could explain.
-AIC_TEST(SchemaIsOneOfWithTwoPostureBranches) {
+AIC_TEST(SchemaBranchesEncodeExactlyTheA6Rules) {
     const JsonValue& schema = orderJsonSchema();
     AIC_EXPECT_TRUE(schema.has("oneOf"), "embedded schema has no oneOf");
     const JsonValue branches = schema.get("oneOf");
-    AIC_EXPECT_TRUE(branches.isArray(), "oneOf is not an array");
-    AIC_EXPECT_EQ(branches.size(), static_cast<std::size_t>(2), "oneOf branch count");
+    AIC_EXPECT_TRUE(branches.isArray() && branches.size() >= 2, "oneOf must carry branches");
 
+    std::size_t posturesSeen = 0;
     for (std::size_t i = 0; i < branches.size(); ++i) {
         const JsonValue branch = branches.at(i);
+        const JsonValue properties = branch.get("properties");
+
         AIC_EXPECT_TRUE(branch.get("additionalProperties").isBool()
                             && !branch.get("additionalProperties").asBool(),
             "branch " << i << " must set additionalProperties:false");
 
         const JsonValue required = branch.get("required");
         AIC_EXPECT_TRUE(required.isArray(), "branch " << i << " has no required array");
-        bool hasTarget = false;
-        bool hasOrbit = false;
-        bool hasWaypoint = false;
+        bool requiresTarget = false;
+        bool requiresOrbit = false;
+        bool requiresWaypoint = false;
         for (std::size_t r = 0; r < required.size(); ++r) {
             const std::string name = required.at(r).asString();
-            hasTarget = hasTarget || name == "targetEntityId";
-            hasOrbit = hasOrbit || name == "orbitRadiusM";
-            hasWaypoint = hasWaypoint || name == "waypoint";
+            requiresTarget = requiresTarget || name == "targetEntityId";
+            requiresOrbit = requiresOrbit || name == "orbitRadiusM";
+            requiresWaypoint = requiresWaypoint || name == "waypoint";
         }
-        // The whole point: a constrained decoder emits what `required` names and nothing else.
-        AIC_EXPECT_TRUE(hasTarget, "branch " << i << " must require targetEntityId");
-        AIC_EXPECT_TRUE(hasOrbit, "branch " << i << " must require orbitRadiusM");
+        // A constrained decoder emits what `required` names and nothing else. These two are the
+        // fields the model omitted entirely before v1.7.
+        AIC_EXPECT_TRUE(requiresTarget, "branch " << i << " must require targetEntityId");
+        AIC_EXPECT_TRUE(requiresOrbit, "branch " << i << " must require orbitRadiusM");
 
-        const JsonValue postures = branch.get("properties").get("posture").get("enum");
-        AIC_EXPECT_EQ(postures.size(), static_cast<std::size_t>(3), "branch " << i << " posture count");
-        const bool isWaypointBranch = postures.at(0).asString() == "ingress";
-        if (isWaypointBranch) {
-            AIC_EXPECT_TRUE(hasWaypoint, "the waypoint branch must require waypoint");
-            AIC_EXPECT_TRUE(branch.get("properties").has("waypoint"),
-                "the waypoint branch must declare a waypoint property");
-        } else {
-            AIC_EXPECT_FALSE(hasWaypoint, "the geometry branch must not require waypoint");
-            // Not merely optional — absent, so additionalProperties:false forbids it outright.
-            AIC_EXPECT_FALSE(branch.get("properties").has("waypoint"),
-                "the geometry branch must not declare a waypoint property at all");
+        // Every posture in a branch must agree with that branch on every rule. A branch whose
+        // postures disagree is a branch that cannot state the rule unconditionally — which is
+        // exactly the bug an earlier two-branch split had, grouping `defend` with `engage`.
+        const JsonValue postures = properties.get("posture").get("enum");
+        AIC_EXPECT_TRUE(postures.size() >= 1, "branch " << i << " declares no posture");
+        posturesSeen += postures.size();
+
+        const bool declaresWaypoint = properties.has("waypoint");
+        const std::int64_t targetMinLength = properties.get("targetEntityId").get("minLength").asInt64();
+        const double orbitMin = properties.get("orbitRadiusM").get("minimum").asDouble();
+        const double orbitMax = properties.get("orbitRadiusM").get("maximum").asDouble();
+
+        for (std::size_t p = 0; p < postures.size(); ++p) {
+            Posture posture{};
+            const std::string name = postures.at(p).asString();
+            AIC_EXPECT_TRUE(arkheon::aicommander::tryParsePosture(name, posture),
+                "schema posture '" << name << "' has no C++ counterpart");
+
+            const bool needsWaypoint = arkheon::aicommander::postureRequiresWaypoint(posture);
+            AIC_EXPECT_TRUE(needsWaypoint == declaresWaypoint,
+                "posture '" << name << "' is in a branch whose waypoint rule disagrees with A6");
+            AIC_EXPECT_TRUE(needsWaypoint == requiresWaypoint,
+                "posture '" << name << "' is in a branch whose required-waypoint disagrees with A6");
+            // Not merely optional where forbidden — absent, so additionalProperties:false makes it
+            // a prohibition rather than a silence.
+
+            const bool needsTarget = arkheon::aicommander::postureRequiresTarget(posture);
+            AIC_EXPECT_TRUE(needsTarget == (targetMinLength >= 1),
+                "posture '" << name << "' is in a branch whose targetEntityId rule disagrees with A6"
+                            << " (minLength=" << targetMinLength << ")");
+            if (!needsTarget) {
+                AIC_EXPECT_EQ(properties.get("targetEntityId").get("maxLength").asInt64(),
+                    static_cast<std::int64_t>(0),
+                    "posture '" << name << "' must be bounded to an EMPTY targetEntityId");
+            }
+
+            if (posture == Posture::Hold) {
+                AIC_EXPECT_TRUE(orbitMin > 0.0,
+                    "hold's branch must bound orbitRadiusM above zero, got minimum " << orbitMin);
+            } else {
+                AIC_EXPECT_EQ(orbitMax, 0.0,
+                    "posture '" << name << "' must be bounded to orbitRadiusM == 0");
+            }
         }
     }
+
+    AIC_EXPECT_EQ(posturesSeen, static_cast<std::size_t>(6),
+        "the branches together must cover all six postures exactly once");
     return true;
 }
 

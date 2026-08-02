@@ -86,7 +86,22 @@ if errorlevel 1 (
   echo [Error] Failed to deploy plugin DLL to $(N8RO_RELEASE_USER_SIM_PLUGINS)
   exit /b 1
 )
-echo [Deploy] ai-commander.dll copied to $(N8RO_RELEASE_USER_SIM_PLUGINS)</Command>
+echo [Deploy] ai-commander.dll copied to $(N8RO_RELEASE_USER_SIM_PLUGINS)
+REM Seed the doctrine block. prompt.doctrinePath defaults to data\doctrine.txt, resolved against
+REM the HOST's working directory - the release root - so a deployed plugin finds nothing there
+REM unless it is put there. Copied ONLY IF ABSENT, deliberately: this file is edited by whoever
+REM tunes tactics rather than whoever rebuilds the DLL, and clobbering their edits on every build
+REM would be worse than not seeding it at all.
+if not exist "$(N8RO_RELEASE)\data\doctrine.txt" (
+  copy /Y "$(ProjectDir)data\doctrine.txt" "$(N8RO_RELEASE)\data\doctrine.txt" >nul
+  if errorlevel 1 (
+    echo [Warning] Could not seed doctrine.txt into $(N8RO_RELEASE)\data - order quality is degraded until it is placed there
+  ) else (
+    echo [Deploy] doctrine.txt seeded into $(N8RO_RELEASE)\data
+  )
+) else (
+  echo [Deploy] doctrine.txt already present in $(N8RO_RELEASE)\data - left untouched
+)</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>

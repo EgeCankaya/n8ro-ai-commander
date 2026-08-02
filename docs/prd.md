@@ -10,8 +10,9 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 > **One-liner:** A `n8ro-sim` plugin that lets a language model issue tactical *intent* — posture, target, waypoint, rules of engagement — to entities in a running scenario, while every kinematic decision and every state mutation stays in the deterministic C++ and Lua tiers that already exist.
 
 **Date:** 2026-07-31 (revised 2026-08-02)
-**Status:** Draft v1.7
+**Status:** Draft v1.7.1
 **Revision history:**
+- v1.7.1 — **corrected the branch partition** on the first live run of the shipping adapter. v1.7 split the schema by waypoint presence, which grouped `defend` with `engage` and `crank`; those postures agree about waypoints and disagree about targets, so the branch could not state the target rule and 2/12 live orders were rejected *"defend must not carry a targetEntityId"*. Partitioning by **whole constraint profile** yields four branches — transit, hold, targeted, defend — and measured **0 rejections in 24 live orders**. AIC-ORD-1's acceptance criterion is strengthened to assert branch bounds against the A6 predicates per posture, which is the check that would have caught v1.7's split. Prefix growth (4,738 → 14,074 bytes) recorded as a real cost and as evidence into OQ-8.
 - v1.7 — **restructured AIC-ORD-1's embedded schema and resolved OQ-5 and OQ-6**, on measurements taken at Phase 1b start. v1.6 predicted that Stage-A `shape` rejections would be non-trivial and would fall as prompt wording improved; both halves were tested and the second is false. The shipped prompt against the shipped schema produced **10/12 shape rejections**, because Ollama's `format` compels only what the schema's `required` array names, and this model **omits every optional field** rather than over-emitting as v1.6's models did. Adding a field-presence block to the prompt moved nothing; `if`/`then`/`else` was confirmed unhonoured; a schema expressed as **`oneOf` over two posture-discriminated branches produced 0/12 with the prompt untouched**. AIC-ORD-1 now specifies that shape. Separately, **OQ-5 resolves "No"** — the entitlement subsystem is absent from every sim binary and from the import library plugins link, so the contingency check it proposed could not have been written — and **OQ-6 resolves to `oppint_red_interceptor` / `RedSu35_01`** by owner pick.
 - v1.6 — **resolved OQ-1 and OQ-2** against the target machine and a live spike, unblocking Phase 1b. Ollama 0.32.5 is installed and serving on `localhost:11434` with 14 instruct models already imported, so the shipped split GGUFs need no import at all; its `format` parameter enforces the AIC-ORD-1 schema (3/3 valid across two models), which retires the GBNF concern. A GPU is present — RTX 4070 Ti SUPER, 16 GB — giving **~1.7 s warm** round trips on a 7B. Three findings folded in: model **cold start (22–46 s) exceeds `commander.requestTimeoutS`**, so the first order of a run times out as configured; `local.model`'s default was a GGUF *filename* where Ollama needs a *tag*; and JSON Schema cannot express AIC-ORD-1's conditional-presence rules, so Stage-A `shape` rejections are load-bearing rather than incidental.
 - v1.5 — restated §Source control's CI paragraph against the **built** implementation. v1.1's split assumed hosted runners could execute the order-schema and validator fixtures; they cannot, because every test links `n8ro-core` (`JsonValue` for the schema and Stage-A validator, `TestRunner` for the harness). The real boundary is *compiles / does not compile*, not *which FRs*. Documented the two workflows that now exist, the badge obligation, the shared-release-tree cleanup obligation, and why `clang-format` ships advisory rather than gating.
@@ -87,6 +88,8 @@ predicted; one of those predictions did not survive contact. Each is load-bearin
     **Two consequences, in opposite directions.** Item 12's *mechanism* is confirmed — `format` secures A4 and not A6, and `if`/`then`/`else` does not close the gap. Item 12's *remedy* is refuted: the prompt is not the lever. A field-presence block stating the A6 rules imperatively changed nothing at all, which is the direct measurement of the "shape rejections measure prompt quality" hypothesis this document carried into the Phase 1b gate. What closes it is a schema the decoder can actually enforce: `oneOf` over `{ingress, hold, rtb}` **with** `waypoint` required and `{engage, crank, defend}` **without** it. That adds no field, posture, configuration value, verb, or backend — it re-expresses the field contract of AIC-ORD-1's table in a form a constrained decoder can hold. AIC-ORD-1 is restated accordingly. **Stage-A A6 is not relaxed by one line:** the decoder becomes a second line of defence, not a replacement, because "the validator is the real defence" and a backend that stops honouring `format` must still be caught.
 
 14. **Today's cold load is 3.9 s, not 22–46 s — and a warm-up ping saves nothing.** *(v1.7)* Re-measured with `keep_alive: 0` forcing eviction before each sample: first order cold **3,860 ms** (server-reported `load_duration` 2,451 ms), second order warm 1,170 ms. The gap against item 10's 22–46 s is almost certainly the OS page cache — item 10 measured a cold *disk* read, this measures a VRAM-evicted but file-cached load — so **item 10 is not superseded; it remains the worst case**, and both sit inside the 90 s timeout. The design question item 10 left open is answered by the same measurement: a `num_predict: 1` warm-up ping costs **2,503 ms** and leaves the first real order at 1,432 ms, i.e. **3,935 ms against 3,860 ms without it**. A warm-up relocates the cold cost, it does not remove it, so the adapter does **not** warm the model at construction. What it does instead is answer item 11's complaint directly: a one-shot `GET /api/tags` preflight on the worker, on the first request only, so a mistyped model tag surfaces as a named configuration error instead of a generic transport rejection.
+
+15. **Two branches were the wrong number; the partition is by constraint profile, not by waypoint.** *(v1.7.1)* Item 13's remedy was right and its partition was not. v1.7 split the document by waypoint presence, which put `defend` in the same branch as `engage` and `crank`. Those three agree about waypoints and **disagree about targets** — `engage` and `crank` require a non-empty `targetEntityId`, `defend` forbids one — so that branch could not state the target rule unconditionally, and the first live soak through the shipping adapter measured **2/12 rejections**, every one of them reading *"posture 'defend' must not carry a targetEntityId"*. A branch can only state a rule its postures agree on. The A6 rules induce exactly **four** constraint profiles across the six postures — transit (`ingress`, `rtb`), hold, targeted (`engage`, `crank`), and defend — and at four branches the same harness measured **0 rejections in 24 orders**, `reject.schema` and `reject.shape` both 0 %. **The lesson generalizes past this schema:** v1.7's acceptance criterion asked only that the branches exist, which the wrong split satisfied. The criterion now asserts, for every posture in every branch, that the branch's bounds agree with the A6 predicate for that posture — a test the wrong split fails. The cost is that shared field descriptions repeat per branch: the rendered prefix went from 4,738 bytes to **14,074**, and measured p95 from ~1.7 s to ~2.2 s. Both are recorded rather than optimized away, and the prefix figure is material to OQ-8.
 
 ## Problem statement
 
@@ -372,16 +375,20 @@ The system SHALL accept from the model exactly one JSON object per request, conf
 
 `waypoint` is required WHEN `posture ∈ {ingress, hold, rtb}` and SHALL be **absent** otherwise — for `engage`, `crank`, and `defend`, Tier 1 computes the geometry itself, and an order carrying a field nothing reads is an order whose author and reader disagree about what was commanded.
 
-**How the conditional rules are encoded** *(v1.7 — see §Corrections item 13)*. The embedded schema document SHALL express the table above as **`oneOf` over two posture-discriminated branches**:
+**How the conditional rules are encoded** *(v1.7, corrected v1.7.1 — see §Corrections items 13 and 15)*. The embedded schema document SHALL express the table above as **`oneOf` over posture-discriminated branches, one per distinct field-constraint profile**. Every posture in a branch agrees with that branch on every rule, so each branch states its rules **unconditionally** — which is the property a constrained decoder can hold and `if`/`then`/`else` is not:
 
-| Branch | `posture` enum | `waypoint` | `targetEntityId`, `orbitRadiusM` |
-|---|---|---|---|
-| waypoint branch | `ingress` \| `hold` \| `rtb` | **required** | required, with the values the table gives (`""` and `0` unless `hold`) |
-| geometry branch | `engage` \| `crank` \| `defend` | **not a property of this branch at all** | required, with the values the table gives |
+| Branch | `posture` enum | `waypoint` | `targetEntityId` | `orbitRadiusM` |
+|---|---|---|---|---|
+| transit | `ingress` \| `rtb` | **required** | bounded to **exactly 0 characters** | bounded to **exactly `0`** |
+| hold | `hold` | **required** | bounded to exactly 0 characters | bounded to **`[1, 50000]`** |
+| targeted | `engage` \| `crank` | **not a property of this branch at all** | `minLength: 1` | bounded to exactly `0` |
+| defend | `defend` | not a property of this branch at all | bounded to exactly 0 characters | bounded to exactly `0` |
 
-Both branches carry `additionalProperties: false`, so the geometry branch's omission of `waypoint` is a prohibition rather than a silence. This is an encoding decision, not a contract change: every field, type, range, and conditional value in the table above is unchanged, and `targetEntityId` / `orbitRadiusM` remain *conditional in value* while becoming *unconditional in presence* — which is what the table already said by giving each of them a specified value in both branches ("empty otherwise", "`0` otherwise").
+Every branch carries `additionalProperties: false`, so a branch's omission of `waypoint` is a prohibition rather than a silence, and every branch requires `targetEntityId` and `orbitRadiusM` so a decoder is compelled to emit both. The union of the four `posture` enums is exactly the six-value vocabulary, each appearing once — a posture in two branches would make the `oneOf` ambiguous and hand the model a choice of which rules apply to it. This is an encoding decision, not a contract change: every field, type, range, and conditional value in the table above is unchanged, and `targetEntityId` / `orbitRadiusM` remain *conditional in value* while becoming *unconditional in presence* — which is what the table already said by giving each of them a specified value in both branches ("empty otherwise", "`0` otherwise").
 
-The reason it is stated here rather than left to the implementation is that it is load-bearing for the Phase 1b acceptance gate. A flat schema with an optional `targetEntityId` measured 10/12 `shape` rejections against a model that simply omits what it is not compelled to emit; this shape measured 0/12 with the prompt untouched. **Stage-A check A6 is unchanged and remains the enforcement** — the decoder is a second line, not a substitute, and an adapter whose backend silently stops honouring the schema must still be caught by the validator.
+The reason it is stated here rather than left to the implementation is that it is load-bearing for the Phase 1b acceptance gate. A flat schema with an optional `targetEntityId` measured 10/12 `shape` rejections against a model that simply omits what it is not compelled to emit; this shape measured **0 rejections in 24 live orders through the shipping adapter**. **Stage-A check A6 is unchanged and remains the enforcement** — the decoder is a second line, not a substitute, and an adapter whose backend silently stops honouring the schema must still be caught by the validator.
+
+The branch count is a consequence, not a choice: the A6 rules induce exactly four constraint profiles across six postures, and any coarser grouping puts two postures with different rules in one branch, which that branch then cannot state (§Corrections item 15). The cost is that the shared field descriptions repeat per branch, which grew the rendered prefix from 4,738 bytes to **14,074**. That is recorded rather than optimized away, and it is material to OQ-8: at roughly 3,500 tokens the prefix is now near Haiku 4.5's 4,096-token cache minimum instead of well under it.
 
 **Fields the model is structurally forbidden to emit.** The schema has no property for heading, pitch, roll, velocity components, acceleration, turn rate, load factor, hardpoint selection, or fire commands. A response carrying any additional property is rejected under `additionalProperties: false` (AIC-VAL-2). This is what "never produces raw kinematics" means concretely.
 
@@ -389,7 +396,7 @@ The reason it is stated here rather than left to the implementation is that it i
 - A JSON Schema document matching this table is embedded in the plugin and is the single source used for (a) Stage-A validation, (b) the Claude `output_config.format.schema`, and (c) the local adapter's `format` parameter. One definition, three consumers. *(v1.7 — (c) was "generating the local GBNF grammar"; OQ-1 resolved the local backend to Ollama's `format`, which takes the schema object directly.)*
 - Every unit in the table is traceable to a `unit` key in `schema-reference.json`, verified by a test that re-reads the file.
 - A response with an unknown top-level property is rejected.
-- *(v1.7)* The embedded document is `oneOf` over the two branches above, and a test asserts each branch's `required` array and that the geometry branch declares no `waypoint` property. A single flat object with optional conditional fields does not satisfy this criterion, because it does not constrain what the model emits (§Corrections item 13).
+- *(v1.7, corrected v1.7.1)* The embedded document is `oneOf` over the branches above, and a test asserts, **for every posture in every branch**, that the branch's waypoint, `targetEntityId`, and `orbitRadiusM` bounds agree with the Stage-A A6 predicates for that posture — not merely that some branch exists. A single flat object with optional conditional fields does not satisfy this criterion, because it does not constrain what the model emits (§Corrections item 13); nor does a branch whose postures disagree with each other (§Corrections item 15).
 
 **Trace:** UAC-AIC-ORD-1
 
@@ -1507,6 +1514,30 @@ Advisory. Gaps found while composing this PRD, not blockers.
 - **v1.2 note — the snapshot was specified from the Lua surface, not the C++ one.** Every field in the original §Exactly what is transmitted named a Lua verb, and two of them turned out to have no C++ equivalent. The lesson generalizes: for a C++ plugin, "which verb returns this?" is the wrong traceability question — "which header or schema record exposes this to *the plugin*?" is the right one. Appendix A now carries the Lua/C++ split explicitly so the next field added is checked against both columns.
 
 ## Changelog
+
+### v1.7.1 — 2026-08-02
+
+Written during Phase 1b implementation, from the first live run of the shipping adapter. v1.7 was
+right about the mechanism and wrong about the partition.
+
+- **§Corrections — new item 15: two branches were the wrong number.** v1.7 split the schema by
+  *waypoint presence* and put `defend` with `engage` and `crank`. Those three agree about waypoints
+  and disagree about targets — `engage` and `crank` require one, `defend` forbids one — so the
+  branch could not state the target rule, and the first live soak measured 2/12 rejections reading
+  *"posture 'defend' must not carry a targetEntityId"*. The partition is by **whole constraint
+  profile**, which yields four branches: transit (`ingress`, `rtb`), hold, targeted (`engage`,
+  `crank`), and defend. Re-measured: **0 rejections in 24 live orders**, `reject.schema` 0 %,
+  `reject.shape` 0 %.
+- **§FRs — AIC-ORD-1's encoding table** replaced with the four-branch table, and its acceptance
+  criterion strengthened: the test asserts that **for every posture in every branch** the branch's
+  bounds agree with the Stage-A A6 predicates, rather than that some branch exists. The weaker
+  criterion v1.7 wrote would have passed the very split this revision corrects.
+- **Prefix growth recorded, not hidden.** Repeating the shared field descriptions across four
+  branches took the rendered prefix from 4,738 bytes to **14,074**. Measured p95 moved from ~1.7 s
+  to ~2.2 s on the verification host — still far inside the ≤ 20 s local-7B target, and reported
+  because it is a real cost of the encoding. It is also material to **OQ-8**: at ~3,500 tokens the
+  prefix now sits near Haiku 4.5's 4,096-token cache minimum rather than well below it, which
+  shrinks the padding delta that question turns on.
 
 ### v1.7 — 2026-08-02
 
