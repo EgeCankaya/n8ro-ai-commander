@@ -10,8 +10,9 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 > **One-liner:** A `n8ro-sim` plugin that lets a language model issue tactical *intent* — posture, target, waypoint, rules of engagement — to entities in a running scenario, while every kinematic decision and every state mutation stays in the deterministic C++ and Lua tiers that already exist.
 
 **Date:** 2026-07-31 (revised 2026-08-01)
-**Status:** Draft v1.5
+**Status:** Draft v1.6
 **Revision history:**
+- v1.6 — **resolved OQ-1 and OQ-2** against the target machine and a live spike, unblocking Phase 1b. Ollama 0.32.5 is installed and serving on `localhost:11434` with 14 instruct models already imported, so the shipped split GGUFs need no import at all; its `format` parameter enforces the AIC-ORD-1 schema (3/3 valid across two models), which retires the GBNF concern. A GPU is present — RTX 4070 Ti SUPER, 16 GB — giving **~1.7 s warm** round trips on a 7B. Three findings folded in: model **cold start (22–46 s) exceeds `commander.requestTimeoutS`**, so the first order of a run times out as configured; `local.model`'s default was a GGUF *filename* where Ollama needs a *tag*; and JSON Schema cannot express AIC-ORD-1's conditional-presence rules, so Stage-A `shape` rejections are load-bearing rather than incidental.
 - v1.5 — restated §Source control's CI paragraph against the **built** implementation. v1.1's split assumed hosted runners could execute the order-schema and validator fixtures; they cannot, because every test links `n8ro-core` (`JsonValue` for the schema and Stage-A validator, `TestRunner` for the harness). The real boundary is *compiles / does not compile*, not *which FRs*. Documented the two workflows that now exist, the badge obligation, the shared-release-tree cleanup obligation, and why `clang-format` ships advisory rather than gating.
 - v1.4 — **resolved OQ-4** by enumerating the MCP stack's tool surface from the shipped binaries. `n8ro-sim-bot.exe` registers exactly two tools (`workbook_describe_api`, `workbook_eval`) and **no entity-control tool**; `n8ro-data-bot.exe`'s ~37 tools are all database-authoring operations. Alternative 2 does not supersede Alternative 1. Cascaded through §Prior art, §Out of scope (Deferred → Out of scope, verified absent), §Cross-service impact, §Alternatives Option 2 (rewritten off evidence, with four concrete disqualifications), and §Quality gate notes. Recorded `workbook_eval` as an adjacent LLM-facing arbitrary-Lua channel that reaches the same safety goal by human approval where this plugin reaches it by a closed schema.
 - v1.3 — reconciled the contract with two findings from the Phase 1a gate, both recorded in [PR #1](https://github.com/EgeCankaya/n8ro-ai-commander/pull/1). (a) **"TSAN clean" is unsatisfiable on the target platform** — no ThreadSanitizer runtime ships for Windows — so the Phase 1a gate item, the §Risks Threading mitigation, the integration-suite bullet, and UAC-AIC-ARCH-2 now name the evidence that was actually produced (ASan 65/65, a 20,000-publish exchange-slot stress test with torn-read detection, and a `static_assert`-enforced value-only capture), with the residual gap versus a real race detector stated rather than papered over. (b) **The prompt prefix was measured** at 4,738 bytes ≈ 1,200 tokens on a live engine run; recorded as evidence against OQ-8, which stays **open** — the padding call is a Phase 2 cost judgement for the owner — and the Cost model's arithmetic is recomputed off the measured figure instead of the ~800-token assumption.
@@ -63,6 +64,10 @@ assumption. Each is load-bearing.
 7. **Transform velocity, orientation, and acceleration are runtime columns, not schema leaves.** *(v1.2)* They are declared only in `TransformRuntimeColumns.h`, addressed by **dot**-joined paths (`velocityNed.x`), and — per that header — a path that does not resolve reads back `0` **silently, without an error**. That defeats this PRD's rule that a `std::nullopt` on a required snapshot field aborts the snapshot, because a mistyped path yields a plausible zero instead of a `nullopt`. Drives AIC-ARCH-4 and OQ-9. Stage-B B1's `entityControl.exists` is likewise a Lua verb; the C++ equivalent is `IEntityManager::getEntity(id) != nullptr`.
 8. **ThreadSanitizer does not exist on this platform.** *(v1.3)* No `clang_rt.tsan` runtime ships anywhere in Visual Studio 2026 Insiders. `VC\Tools\MSVC\14.51.36231\include\sanitizer\` carries `tsan_interface.h` and `tsan_interface_atomic.h` — **headers only**, with no library to link — alongside the ASan, UBSan, and fuzzer runtimes, which do ship complete. Neither MSVC nor the bundled LLVM toolchain supports TSan on Windows. **Consequence:** the v1.2 Phase 1a gate item "TSAN clean" was permanently unsatisfiable, and a gate no build can pass is worse than no gate — it trains everyone to wave the checklist through. Replaced by the concurrency-evidence set in §Validation and test plan, with the residual gap recorded as a risk and race-detector coverage moved to §Out of scope. Affects the Threading risk row, the integration suite, the Phase 1a gate, the rollback triggers, and UAC-AIC-ARCH-2.
 9. **The rendered prompt prefix is ~1,200 tokens, not ~800.** *(v1.3)* Measured on a live engine run: **4,738 bytes**, logged at startup as `prefixBytes`, ≈ 1,200 tokens. Haiku 4.5's prompt-cache minimum is 4,096 tokens, so the prefix as written silently does not cache — the direction v1.2 already assumed, but now with a real number rather than the "roughly 800–1500" range OQ-8 was written against. **Consequence:** the Cost model's per-order arithmetic was computed from a 1,000-token prompt and is understated; it is recomputed against ~1,400 input tokens below. This is **evidence into OQ-8, not a resolution of it** — whether to pad to the cache minimum remains a Phase 2 cost judgement for the owner.
+
+10. **A cold model load costs more than the whole request timeout.** *(v1.6)* Measured on the verification host: a warm 7B answers in ~1.7 s, but the **first** request after Ollama evicts a model took **22.6 s (qwen2.5 7B)** and **45.9 s (llama3.1 8B)**. `commander.requestTimeoutS` defaulted to 30 s, so the first order of every run would have timed out — reliably, not occasionally — and driven the fallback ladder from the moment the commander enabled. Ollama holds a model for its `keep_alive` window (5 minutes by default), which a 20 s cadence sustains indefinitely, so this is a first-order-of-a-run cost rather than a recurring one. Default raised to 90 s. A model warm-up at backend construction would remove it entirely and is a Phase 1b design option, deliberately **not** pre-committed here.
+11. **`local.model` named a file where Ollama needs a tag.** *(v1.6)* The default was `llama-3.2-3b-instruct-q4_k_m` — the shipped GGUF's filename. Ollama addresses models by tag (`qwen2.5:7b-instruct-q8_0`). As shipped, the local backend would have failed its first request with a model-not-found, and the failure would have surfaced as a generic transport rejection rather than as a configuration error.
+12. **JSON Schema cannot express the conditional-presence rules, so Stage-A `shape` is load-bearing.** *(v1.6)* Ollama's `format` enforced types, required fields, and both enums 3/3 in the spike — and both models still produced orders that AIC-ORD-1 forbids: non-zero `orbitRadiusM` on `ingress` and `engage`, and `engage` with an empty `targetEntityId`. Draft-07 cannot state "`orbitRadiusM` must be 0 unless `posture == hold`" without `if`/`then`/`else`, which the constrained-decoding path does not reliably honour. **Consequence:** constrained decoding secures A4 (schema) but not A6 (shape); the Stage-A conditional checks are the only thing enforcing those rules, and the `reject.shape` counter is expected to be non-trivial in Phase 1b rather than near-zero. *Caveat on the evidence:* the spike used a minimal hand-written prompt, not the real `PromptRenderer` prefix, which states the conditional rules and embeds the schema with its per-field descriptions. This bounds the failure mode; it does not measure the shipping system's rate.
 
 ## Problem statement
 
@@ -521,16 +526,16 @@ The system SHALL expose the following `PluginConfigField` set through `getConfig
 | `commander.cadenceS` | Real | `20.0` | Minimum simulation seconds between orders per entity |
 | `commander.maxCommandedEntities` | Int | `4` | Roster cap |
 | `commander.maxConcurrentRequests` | Int | `1` | Worker fan-out; one `IHttpClient` per worker |
-| `commander.requestTimeoutS` | Int | `30` | Written to `HttpRequest::timeoutS` (SDK default is 15) |
+| `commander.requestTimeoutS` | Int | `90` | Written to `HttpRequest::timeoutS` (SDK default is 15). *(v1.6 — raised from 30.)* Sized for a **cold model load**, not for steady state: a warm 7B answers in ~1.7 s, but the first request after Ollama evicts the model took **22–46 s** in the spike, and 46 s > 30 s means the first order of every run timed out as previously configured. See §Corrections item 10 |
 | `commander.maxOrderAgeS` | Real | `45.0` | Stage-B staleness bound |
 | `commander.orderValidityS` | Real | `120.0` | Fallback ladder step 1 |
 | `commander.releaseAfterS` | Real | `300.0` | Fallback ladder step 3 |
 | `commander.maxTracksInPrompt` | Int | `8` | Bounds the volatile suffix |
 | `prompt.doctrinePath` | Text | `data/doctrine.txt` | Repository-relative path to the doctrine block of the stable prefix (AIC-BE-3). A file, not a `Text` field: it is 1–2 pages, edited by whoever tunes tactics rather than whoever rebuilds the DLL, and its token count is what OQ-8 turns on. Read once at `initialize()`; a change mid-run does not take effect, preserving prefix byte-stability |
 | `local.baseUrl` | Text | `http://localhost:11434` | Matches `bin/ai/.env` `OLLAMA_BASE_URL` |
-| `local.model` | Text | `llama-3.2-3b-instruct-q4_k_m` | The 3B is the latency-viable CPU default |
+| `local.model` | Text | `qwen2.5:7b-instruct-q8_0` | *(v1.6 — was `llama-3.2-3b-instruct-q4_k_m`.)* An **Ollama tag**, not a GGUF filename; the old default named a file and would have failed on first request (§Corrections item 11). The 7B is the default now that OQ-2 resolved to a GPU — it measured ~1.7 s warm against the 8B's ~4.5 s, and the CPU-era reasoning that made the 3B "the latency-viable default" no longer applies |
 | `local.temperature` | Real | `0.0` | Greedy decoding; lowest run-to-run variance |
-| `local.grammarEnabled` | Bool | `true` | GBNF constrained decode where the server supports it (OQ-1) |
+| `local.grammarEnabled` | Bool | `true` | *(v1.6 — meaning pinned by OQ-1.)* Sends the embedded AIC-ORD-1 schema as Ollama's `format` parameter. Not GBNF — Ollama's JSON-Schema enforcement is the equivalent guarantee and is what the spike measured at 3/3. Set false only to reproduce an unconstrained-decoding baseline for H3 |
 | `claude.enabled` | Bool | `false` | **Independent authorization gate.** Data egress |
 | `claude.baseUrl` | Text | `https://api.anthropic.com` | Must be `https://` |
 | `claude.model` | Text | `claude-haiku-4-5` | |
@@ -567,7 +572,10 @@ The system SHALL reach a local inference server over `IHttpClient` at `local.bas
 - The request carries `commander.requestTimeoutS` as `HttpRequest::timeoutS`.
 - A `std::nullopt` return from `send()` is handled as a transport failure, distinct from a returned response carrying a non-2xx status. *(v1.2 — `send()` returns `std::optional<HttpResponse>`; the `statusCode == 0` sentinel in the struct is not what a caller observes on failure.)*
 - One `IHttpClient` instance per worker thread — never shared, per the header's single-thread-only contract.
-- The concrete endpoint path and payload shape are pinned once OQ-1 resolves; the adapter is written so that resolution is a single-file change.
+- *(v1.6 — pinned, OQ-1 resolved to Ollama.)* The request is `POST {local.baseUrl}/api/generate` with a JSON body carrying `model` (`local.model`, an Ollama **tag**), `prompt` (prefix + suffix per AIC-BE-3), `stream: false`, `options.temperature` (`local.temperature`), and — WHEN `local.grammarEnabled` — `format` set to the embedded AIC-ORD-1 schema. The order document is returned as a JSON **string** in the envelope's `response` field, so Stage-A check A2 unwraps that field before A3 parses it.
+- WHEN `local.grammarEnabled` is true, the adapter SHALL send the same schema object AIC-ORD-1 embeds — not a hand-copied variant. One definition, three consumers holds here or it holds nowhere.
+- The adapter SHALL NOT assume `format` enforces the conditional-presence rules. It does not (§Corrections item 12): Stage-A checks A6 remain the only enforcement, and an order that satisfies the schema can still be rejected `shape`.
+- The timeout SHALL accommodate a cold model load, which is 22–46 s on the verification host against ~1.7 s warm (§Corrections item 10). A timeout sized for steady state fails the first order of every run.
 
 **Trace:** UAC-AIC-BE-1
 
@@ -634,7 +642,7 @@ The system SHALL append one JSON object per line (JSONL) to the order log for ev
 **Pain removed:** `docs/modules/n8ro-sim/dev/execution-models-and-timing.md` treats reproducibility as a design goal. An LLM in the loop breaks it outright. Without a record, a run is not merely nondeterministic — it is uninvestigable.
 
 ```jsonl
-{"t":412.50,"frame":24750,"event":"order.requested","entityId":"RedSu35_01","serial":13,"backend":"local","model":"llama-3.2-3b-instruct-q4_k_m","snapshotHash":"sha256:9f2c…","promptHash":"sha256:41ab…"}
+{"t":412.50,"frame":24750,"event":"order.requested","entityId":"RedSu35_01","serial":13,"backend":"local","model":"qwen2.5:7b-instruct-q8_0","snapshotHash":"fnv1a64:9f2c…","promptHash":"fnv1a64:41ab…"}
 {"t":416.34,"frame":24980,"event":"order.accepted","entityId":"RedSu35_01","serial":13,"latencyMs":3840,"tokensIn":1004,"tokensOut":78,"order":{"schemaVersion":1,"entityId":"RedSu35_01","posture":"engage","targetEntityId":"BlueF18_02","cruiseSpeedMps":300.0,"orbitRadiusM":0.0,"roe":"weaponsFree","reason":"Lead bandit inside 45 km with a full BVR rail; committing."}}
 {"t":436.34,"frame":26180,"event":"order.rejected","entityId":"RedSu35_01","serial":14,"reason":"track","detail":"targetEntityId 'BlueF18_09' not in current track list","rawBody":"{…truncated to 4096 bytes…}"}
 ```
@@ -695,6 +703,9 @@ Conversely, **this PRD must not specify implementation detail beyond FR shape.**
 | Order round trip, local 3B Q4, CPU | 4 s | 8 s | 12 s | No — tracked |
 | Order round trip, local 7B Q4, CPU | 12 s | 20 s | 30 s | No — tracked |
 | Order round trip, either model on GPU | < 1 s | 2 s | 3 s | No — tracked |
+| **Measured, warm** — qwen2.5 7B q8_0, RTX 4070 Ti SUPER *(v1.6)* | — | **~1.7 s** | — | No — 3 samples, not a distribution |
+| **Measured, warm** — llama3.1 8B q4_K_M, same host *(v1.6)* | — | ~4.5 s | — | No — 3 samples |
+| **Measured, COLD** — first request after model eviction *(v1.6)* | — | **22–46 s** | — | **Yes** — bounds `commander.requestTimeoutS` |
 | Order round trip, Claude Haiku 4.5 | 1.2 s | 2.5 s | 5 s | No — tracked |
 
 The gating targets are the ones the plugin controls. Inference latency is a property of the host machine and the chosen model; the design's obligation is that it does not matter to frame time.
@@ -918,7 +929,8 @@ Per commanded entity, per cadence window: one HTTP request, ~1 KB up, ~1 KB down
 
 | Dependency | Status in tree | Degraded behavior | Notes |
 |---|---|---|---|
-| Inference server (Ollama or llama.cpp) | **Not installed** | Commander degrades through AIC-VAL-2 to Tier-1 behavior | Blocks Phase 1b live runs, not Phase 1a. OQ-1, OQ-2 |
+| Inference server — **Ollama 0.32.5** | **Installed and serving** on `localhost:11434`, 14 instruct models imported *(v1.6, verification host)* | Commander degrades through AIC-VAL-2 to Tier-1 behaviour | OQ-1 resolved. Still external and still not shipped in the tree: any *other* host needs its own install. Nothing in this repository installs or manages it |
+| GPU — **RTX 4070 Ti SUPER, 16 GB** | **Present** *(v1.6, verification host)* | On a GPU-less host the CPU latency rows govern and the cadence must be re-derived | OQ-2 resolved for this host only. One machine is not a fleet inventory |
 | GGUF models | Present (`data/ai/model/`, 6.5 GB) | — | 3B: 1.9 GB. 7B: 4.5 GB split across 2 files |
 | OpenSSL runtime | Present (`bin/libssl-3-x64.dll`, `bin/libcrypto-3-x64.dll`) | Hosted backend disabled with a TLS diagnosis (AIC-BE-4) | Blocks Phase 2 if absent on a target machine |
 | Anthropic API credit | $100 held, external | Requests fail; fallback ladder applies | Phase 2 only |
@@ -1020,7 +1032,9 @@ Have the mission script call the model directly.
 | **Threading.** `IHttpClient::send()` is blocking and single-thread-only; `ScriptingApiContext` collaborators are single-thread-only | Critical — undefined behavior, corrupted state | Medium if the pattern is not enforced structurally | Snapshot-by-value → worker → order slot (AIC-ARCH-2). Worker captures no SDK pointer, enforced by `static_assert` over the captured types plus a deep-copy-outlives-original test. One `IHttpClient` per worker. *(v1.3 — the mitigation previously read "TSAN in CI"; no TSan runtime exists on Windows, §Corrections item 8.)* Evidence in its place: the full suite green under AddressSanitizer (65/65) and a 20,000-publish exchange-slot stress test against a concurrent consumer with torn-read detection. See the residual-risk row below for what this does **not** buy |
 | **Validation.** A model emits an illegal or hallucinated order | High — wrong entity commanded, fratricide, out-of-envelope waypoint | High — expected behavior of a 3B model without constrained decoding | Two-stage pipeline (AIC-VAL-1), 13 named reject reasons, adversarial test corpus, reject-and-retain (AIC-VAL-2), constrained decoding on both backends |
 | **Data classification.** Scenario state sent to a hosted API leaves the machine; every file here carries an Arkheon proprietary header | Critical | Low if gated, certain if not | `claude.enabled` independent and default-false; enumerated transmitted-field allowlist asserted by test (AIC-SEC-2); mandatory egress warning; owner authorization required per the deployment checklist |
-| **Unmet dependency.** No inference server ships | High — Phase 1b cannot run | Certain today | Recorded as a dependency with a named owner gap (OQ-2); `stub` backend keeps Phases 0/1a fully deliverable and testable without it |
+| **Unmet dependency.** No inference server ships | High — Phase 1b cannot run | *(v1.6)* No longer current on the verification host, where Ollama 0.32.5 is installed and serving; still certain on any other machine | Resolved for that host by OQ-1. Nothing in this repository installs or manages a server, so a second host repeats the gap in full. `stub` backend keeps Phases 0/1a deliverable without one |
+| **Cold model load exceeds the request timeout.** *(v1.6)* A warm 7B answers in ~1.7 s; the first request after model eviction took 22–46 s | Medium — the first order of every run times out and the entity starts on the fallback ladder rather than under command. Presents as a transport failure, so it looks like a server problem rather than a configuration one | **Certain** with a steady-state-sized timeout; that is how it was found | `commander.requestTimeoutS` raised 30 → 90 s. A warm-up request at backend construction would remove it outright and is a Phase 1b design option. `keep_alive` sustains the model at a 20 s cadence, so this is first-order-only, not recurring |
+| **Constrained decoding does not enforce the conditional rules.** *(v1.6)* Ollama's `format` secured types and enums 3/3 while both models still emitted `orbitRadiusM` on non-`hold` postures and `engage` with no target | Medium — a higher `reject.shape` rate than the ≥ 95 % acceptance gate assumes, and it does not fall by tightening the decoder | High — observed on both models tested | Stage-A A6 is the enforcement and already exists; `reject.shape` is reported separately from `reject.schema` so the two are not confused. If prompt work does not move it, the schema needs `if`/`then`/`else` — a PRD revision, not a tuning pass |
 | **Prompt injection via external track feeds** | Medium — model-chosen orders | Low, but the channel is real (`componentTrackIdentity` is ADS-B-sourced free text) | `componentTrackIdentity` excluded from prompts entirely; charset/length filtering on all remaining strings; the validator is the real defense |
 | **Cadence too slow to be useful** (H1 wrong) | Medium — feature delivers less than hoped | Medium on CPU with the 7B | Default to the 3B; GPU decision recorded as OQ-2; if H1 fails, narrow scope to mission-start intent rather than chasing latency |
 | **Entitlement gate blocks AI-using plugins** | Medium — plugin will not load on licensed machines | Unknown | OQ-5. Check `core/entitlement/AccessGate.h` behavior before Phase 1b deployment |
@@ -1034,8 +1048,8 @@ Carried from the authoring brief unresolved, per instruction, plus questions thi
 
 | # | Question | Status | Decision target | Rationale (why open / what would resolve it) |
 |---|---|---|---|---|
-| OQ-1 | Which inference server on target machines — Ollama or llama.cpp server? | Open | Phase 1b start | llama.cpp loads the shipped `.gguf` files directly and offers GBNF grammars for hard output guarantees; Ollama needs `ollama create` plus a Modelfile to import them, and the 7B is split across two files. Resolved by a deployment decision plus a one-hour spike loading each. Pins the `local` adapter's endpoint path and payload shape |
-| OQ-2 | Is a GPU present on target machines? | Open | Phase 1b start | Decides 3B vs 7B and the achievable order cadence: 3–6 s vs 10–15 s on CPU, both under ~2 s on GPU. Resolved by an inventory of the target machines. Directly determines whether H1 can be validated at all |
+| OQ-1 | Which inference server on target machines — Ollama or llama.cpp server? | **Resolved 2026-08-02 — Ollama** | — | *(v1.6.)* Decided by what is installed and by a spike, not by preference. **Ollama 0.32.5** is installed and serving on `localhost:11434` with **14 instruct models already imported** (`qwen2.5:7b-instruct-q8_0`, `llama3.1:8b-instruct-q4_K_M`, and others). The v1.1 objection — that Ollama needs `ollama create` plus a Modelfile to import the shipped split 7B — is **moot**: nothing needs importing. The GBNF objection is also retired: Ollama's `format` parameter takes a JSON Schema and enforced AIC-ORD-1 **3/3 across two models** in the spike, which is the same guarantee GBNF was wanted for. Pins the `local` adapter to `POST {local.baseUrl}/api/generate` with `format` set to the embedded order schema (AIC-BE-1) |
+| OQ-2 | Is a GPU present on target machines? | **Resolved 2026-08-02 — Yes** | — | *(v1.6.)* Inventory of the development/verification host: **NVIDIA RTX 4070 Ti SUPER, 16 GB VRAM**, driver 610.74. That comfortably holds either shipped model (3B ≈ 1.9 GB, 7B ≈ 4.4 GB) with room for a 14B. Measured warm round trips on this host: **~1.7 s (qwen2.5 7B q8_0)** and ~4.5 s (llama3.1 8B q4_K_M) — see §Performance. H1 is therefore testable at the 20 s cadence, and the "CPU inference competes with the simulation for memory bandwidth" consequence in §Resource constraints does not apply on this host. **Scope caveat:** one machine is not a fleet inventory. If the commander is ever run on a host without a GPU, the CPU rows in §Performance govern and this answer does not transfer |
 | OQ-3 | Is `n8ro-llm` going to be installed later? | Open | v1.1 planning | If yes, the plugin should consume `n8ro-llm/generate` over the message bus instead of owning an HTTP client. Resolved by a roadmap answer from whoever owns that module. The `ILlmClient` seam is designed so this is an added adapter, not a redesign |
 | OQ-4 | Is the existing MCP stack (`bin/ai/run-full-stack.cmd`, `bin/n8ro-sim-bot.exe`) the sanctioned AI integration path? | **Resolved 2026-08-01 — No** | — | *(v1.4.)* Its tool surface was enumerated from the shipped binary. `n8ro-sim-bot.exe` registers exactly **two** `IToolHandler` implementations — `WorkbookDescribeApiHandler` and `WorkbookEvalHandler`, exposed as `workbook_describe_api` and `workbook_eval` over topics `sim/workbook/eval` / `eval_response`. There is **no entity-control tool of any kind**. (`n8ro-data-bot.exe`, by contrast, registers ~37 handlers, all authoring-domain create/edit/list/get against the *database* — not the running simulation.) Entity control is reachable through `workbook_eval` only in the sense that arbitrary Lua is, which disqualifies it for this purpose on four counts recorded in §Alternatives Option 2. **Alternative 2 therefore does not supersede Alternative 1**, and the plugin does not become a thin bridge |
 | OQ-5 | Is there an entitlement/licensing gate on AI-using plugins? | Open | Phase 1b deployment | `core/entitlement/AccessGate.h` and `LexActivator.dll` are present in the tree. Resolved by reading `AccessGate.h`'s contract and testing plugin load on a licensed machine. If gated, the plugin needs an entitlement check at `initialize()` |
@@ -1188,15 +1202,17 @@ Out-of-Scope row, not closed.
 
 ### Phase 1b — Local backend
 
-**Deliverables:** `local` adapter against the server chosen by OQ-1; constrained decoding; live smoke on the OQ-6 scenario; H1 and H2 measurements.
+**Deliverables:** *(v1.6 — OQ-1 and OQ-2 resolved, so these are concrete rather than conditional.)* the `local` adapter against **Ollama** per the pinned contract in AIC-BE-1; constrained decoding via Ollama's `format` parameter carrying the embedded AIC-ORD-1 schema; live smoke on the OQ-6 scenario; H1 and H2 measurements.
 
 **Validation gate:**
 - Live smoke passes all assertions.
-- Acceptance rate ≥ 95 % over a 200-order soak; schema rejections < 1 %.
-- p95 latency within the target for the chosen model and hardware.
-- H2 measured: prefix-stable vs perturbed-prefix p95 recorded, whatever the outcome.
+- Acceptance rate ≥ 95 % over a 200-order soak; **schema** rejections < 1 %.
+- *(v1.6)* `reject.shape` is reported separately and is **not** held to the < 1 % bar. Constrained decoding secures A4 and not A6 (§Corrections item 12), so shape rejections measure *prompt* quality rather than decoding quality. A shape rate that does not fall as the doctrine and conditional-rule wording improve is the signal that the prompt cannot carry those rules and the schema needs `if`/`then`/`else` — which would be a PRD revision, not a tuning pass.
+- p95 latency within the target for the chosen model and hardware. Baseline to beat on the verification host: **~1.7 s warm** (qwen2.5 7B q8_0, RTX 4070 Ti SUPER).
+- *(v1.6)* **The first order of a run completes rather than timing out.** Cold model load measured at 22–46 s against a 90 s timeout. Whether the adapter additionally warms the model at construction is a design call for this phase.
+- H2 measured: prefix-stable vs perturbed-prefix p95 recorded, whatever the outcome. Note that Ollama's own prompt-cache behaviour, not just the model's KV reuse, is part of what is being measured.
 - H1 assessed by a domain reviewer on paired commander-on / commander-off runs.
-- OQ-1, OQ-2, OQ-5, OQ-6 resolved.
+- **OQ-5** and **OQ-6** resolved. *(OQ-1 and OQ-2 resolved in v1.6 — see §Open questions.)*
 
 ### Phase 2 — Claude backend
 
@@ -1455,6 +1471,33 @@ Advisory. Gaps found while composing this PRD, not blockers.
 - **v1.2 note — the snapshot was specified from the Lua surface, not the C++ one.** Every field in the original §Exactly what is transmitted named a Lua verb, and two of them turned out to have no C++ equivalent. The lesson generalizes: for a C++ plugin, "which verb returns this?" is the wrong traceability question — "which header or schema record exposes this to *the plugin*?" is the right one. Appendix A now carries the Lua/C++ split explicitly so the next field added is checked against both columns.
 
 ## Changelog
+
+### v1.6 — 2026-08-02
+
+**Topics in this revision:**
+- **OQ-1 resolved — Ollama.** Not by preference but by what is installed plus a spike: Ollama 0.32.5 serving on `localhost:11434` with 14 instruct models already imported, so the shipped split GGUFs need no import. Its `format` parameter enforced the AIC-ORD-1 schema 3/3 across two models, retiring the GBNF argument for llama.cpp.
+- **OQ-2 resolved — Yes, on the verification host.** RTX 4070 Ti SUPER, 16 GB. Warm round trips measured at ~1.7 s (qwen2.5 7B q8_0) and ~4.5 s (llama3.1 8B q4_K_M). Scoped explicitly to one host: a fleet inventory this is not.
+- **Three findings from the spike**, all of which change a default or a stated expectation rather than an FR.
+
+**Sections updated:**
+- §Header — Status to Draft v1.6; revision-history entry.
+- §Corrections verified in-tree — **items 10, 11, 12 added**: cold load exceeds the timeout; `local.model` named a file where Ollama needs a tag; JSON Schema cannot express the conditional-presence rules.
+- §Performance → latency targets — **3 measured rows added** (warm 7B, warm 8B, cold load), each marked as a 3-sample observation rather than a distribution.
+- §FRs — AIC-BE-1: the endpoint and payload are **pinned** (`POST /api/generate`, `format` = the embedded schema, order returned as a string in `response`), which v1.1 promised would happen once OQ-1 resolved. Three acceptance criteria added: send the same schema object AIC-ORD-1 embeds rather than a copy; do not assume `format` enforces A6; size the timeout for a cold load.
+- §FRs — AIC-API-2: `commander.requestTimeoutS` 30 → **90**; `local.model` → **`qwen2.5:7b-instruct-q8_0`** (a tag, and the 7B now that a GPU is confirmed); `local.grammarEnabled`'s meaning pinned to Ollama's `format` rather than GBNF.
+- §Risks — the unmet-dependency row rescoped to "not current on this host, still certain elsewhere"; **2 rows added** (cold-load timeout; constrained decoding does not enforce conditional rules).
+- §Operational readiness → Dependencies — inference-server row rewritten to Installed/serving with the version and model count; **GPU row added**.
+- §Open questions — **OQ-1 and OQ-2 marked Resolved 2026-08-02** with the evidence in their rationales.
+- §Milestones → Phase 1b — deliverables made concrete rather than conditional; gate gains a first-order-completes item, separates `reject.shape` from the < 1 % `reject.schema` bar with the reason, and names the ~1.7 s baseline to beat.
+
+**Sections explicitly verified no-change:**
+- §One-liner · §Purpose and scope · §Problem statement · §Goals · §Success metrics · §Non-goals · §Key hypotheses · §Tenets · §Security posture · §Naming and path conventions · §Out of scope · **every FR except AIC-BE-1 and AIC-API-2** · §Scope authority · §Cross-service impact · §Source control · §Observability · §Rollback strategy · §Alternatives · §Rabbit holes · §Cost model · §Validation and test plan · §Review checklist · §Appendix A · §Appendix B · §Appendix C
+
+**New OQ entries:** none.
+**Resolved OQ entries:** **OQ-1**, **OQ-2**. Remaining open: OQ-3 (v1.1 planning), OQ-5 (Phase 1b deployment), OQ-6 (**Phase 1b start — the one item still gating**), OQ-8 (Phase 2 start).
+**Out-of-Scope additions:** none.
+**FR changes:** +0, ~2 modified (AIC-BE-1 pinned; AIC-API-2 defaults), −0.
+**UAC changes:** none — no FR's observable contract changed, only the values and the mechanism behind it.
 
 ### v1.5 — 2026-08-01
 
