@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EnvelopeFormat.h"
 #include "Order.h"
 #include "RejectReason.h"
 
@@ -33,12 +34,17 @@ struct StageAOutcome {
 // enumerates what must be checked; this orders those checks so the reason code is as specific as
 // the failure allows. Running the JSON-Schema pass first would collapse an out-of-range latitude,
 // an unknown posture, and a missing field all into `schema`, and the runbook needs to tell them
-// apart. So: size, parse, unknown properties, version, required/typed fields, enums, conditional
-// shape, ranges — and only then the schema document as a structural backstop for anything the
-// explicit checks did not think to look at.
+// apart. So: size, envelope, parse, unknown properties, version, required/typed fields, enums,
+// conditional shape, ranges — and only then the schema document as a structural backstop for
+// anything the explicit checks did not think to look at.
+//
+// `envelope` names how the backend wrapped the order (check A2). It arrives as a value so this
+// function keeps holding nothing: with EnvelopeFormat::Raw — the default, and what `stub` and
+// `replay` return — `body` is the order document itself and A2 is a no-op.
 [[nodiscard]] StageAOutcome validateStageA(
     const std::string& body,
-    const std::string& requestingEntityId);
+    const std::string& requestingEntityId,
+    EnvelopeFormat envelope = EnvelopeFormat::Raw);
 
 // Charset filter applied to every string that can reach a prompt or an order record.
 //

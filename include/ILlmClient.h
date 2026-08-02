@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EnvelopeFormat.h"
 #include "Snapshot.h"
 
 #include <memory>
@@ -55,6 +56,12 @@ public:
 
     // For the order record's `model` field. Empty when the adapter has no model concept.
     [[nodiscard]] virtual std::string modelName() const { return {}; }
+
+    // How this backend wraps the order document, for Stage-A check A2. Defaults to Raw, which is
+    // what `stub` and `replay` return: the body is the order. A networked adapter that wraps it
+    // overrides this, and the worker passes the answer to validateStageA - so the envelope knowledge
+    // travels as a value and Stage A never holds a client.
+    [[nodiscard]] virtual EnvelopeFormat envelopeFormat() const { return EnvelopeFormat::Raw; }
 
     [[nodiscard]] virtual LlmResult request(const LlmRequest& request) = 0;
 };

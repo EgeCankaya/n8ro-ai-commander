@@ -78,6 +78,50 @@ const std::vector<std::string>& allowedWaypointProperties() {
     return true;
 }
 
+// -- A2: the backend's response envelope --------------------------------------------------------
+//
+// Ollama's POST /api/generate answers with an object carrying the generated text as a JSON STRING
+// in `response`, alongside timing and token counters. The order document is therefore one level
+// down, and A3 must parse the unwrapped string rather than the body.
+//
+// Every failure here is `envelope`, never `parse`. The distinction is what the runbook reads: a
+// `parse` rejection says the model produced something that is not an order, while an `envelope`
+// rejection says the *backend* did not deliver one. Those need different responses, so they carry
+// different reasons.
+[[nodiscard]] bool unwrapOllamaGenerate(const std::string& body, std::string& out, std::string& error) {
+    const std::optional<JsonValue> parsed = JsonValue::parse(body);
+    if (!parsed.has_value() || !parsed->isObject()) {
+        error = "backend response is not a JSON object";
+        return false;
+    }
+
+    // Ollama reports a server-side problem as a 200 carrying an `error` string. Surfacing it
+    // verbatim is the difference between "model 'qwen2.5:7b' not found" and a bare rejection.
+    if (parsed->has("error")) {
+        const JsonValue node = parsed->get("error");
+        error = "backend reported an error: "
+            + (node.isString() ? sanitizeText(node.asString(), 200) : std::string("(non-string)"));
+        return false;
+    }
+
+    if (!parsed->has("response")) {
+        error = "backend response has no 'response' field";
+        return false;
+    }
+    const JsonValue node = parsed->get("response");
+    if (!node.isString()) {
+        error = "backend response's 'response' field is not a string";
+        return false;
+    }
+    out = node.asString();
+    if (out.empty()) {
+        // A well-formed envelope that delivered no order. Not the model's failure, so not `parse`.
+        error = "backend response's 'response' field is empty";
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 bool isSanitizedText(const std::string& text) {
@@ -109,10 +153,13 @@ std::string sanitizeText(const std::string& text, std::size_t maxChars) {
     return out;
 }
 
-StageAOutcome validateStageA(const std::string& body, const std::string& requestingEntityId) {
+StageAOutcome validateStageA(
+    const std::string& body, const std::string& requestingEntityId, EnvelopeFormat envelope) {
     // -- A0: size ------------------------------------------------------------------------------
     // Before the parse, deliberately. A 10 MB body is not an order and parsing it to discover that
-    // spends the worker's time on the adversary's terms.
+    // spends the worker's time on the adversary's terms. Measured against the body as received,
+    // envelope included — the cap is about what the worker was asked to chew on, not about what
+    // survived unwrapping.
     if (body.size() > kMaxResponseBodyBytes) {
         return reject(RejectReason::Range,
             "response body is " + std::to_string(body.size()) + " bytes, over the "
@@ -122,8 +169,17 @@ StageAOutcome validateStageA(const std::string& body, const std::string& request
         return reject(RejectReason::Parse, "response body is empty");
     }
 
+    // -- A2: unwrap the backend envelope --------------------------------------------------------
+    std::string document = body;
+    if (envelope == EnvelopeFormat::OllamaGenerate) {
+        std::string envelopeError;
+        if (!unwrapOllamaGenerate(body, document, envelopeError)) {
+            return reject(RejectReason::Envelope, envelopeError);
+        }
+    }
+
     // -- A3: one well-formed JSON object -------------------------------------------------------
-    const std::optional<JsonValue> parsed = JsonValue::parse(body);
+    const std::optional<JsonValue> parsed = JsonValue::parse(document);
     if (!parsed.has_value()) {
         // Also where bare NaN / Infinity land: neither is valid JSON, so they never reach the
         // numeric checks at all.
@@ -327,9 +383,33 @@ StageAOutcome validateStageA(const std::string& body, const std::string& request
     // The explicit checks above produce the precise reason codes the runbook needs. This catches
     // anything they did not think to look at, so the embedded schema stays a real validator rather
     // than decoration that only the model ever sees.
+    //
+    // Validated against the ONE BRANCH the posture selects, not against the whole oneOf document.
+    // Two reasons, and the second is the load-bearing one: the posture is already parsed by the
+    // time we get here, so the branch is known for free; and the SDK does not document which JSON
+    // Schema keywords its validator implements, so depending on `oneOf` support here would make
+    // Stage A's backstop silently conditional on an undocumented feature. The branch is a sub-value
+    // of the same built document — there is no second definition to drift.
+    //
+    // Validated against a NORMALIZED copy, and this is a deliberate asymmetry rather than a
+    // loophole. The branch's `required` array exists to compel a constrained DECODER to emit every
+    // conditional field; what Stage A ACCEPTS is governed by AIC-ORD-1's field table, which gives
+    // both fields a value in the inapplicable case ("empty otherwise", "0 otherwise"). An order
+    // that omits them means exactly that order. Holding acceptance to the emission rule instead
+    // would reject every order the `stub` adapter produces and, worse, every order in a log
+    // recorded by an earlier build — which would break AIC-DET-2's replay guarantee silently, at
+    // the one moment nobody is watching for it. A6 above has already enforced the values.
     {
+        JsonValue normalized = doc;
+        if (!normalized.has("targetEntityId")) {
+            (void)normalized.setString("targetEntityId", "");
+        }
+        if (!normalized.has("orbitRadiusM")) {
+            (void)normalized.setDouble("orbitRadiusM", 0.0);
+        }
+
         std::string schemaError;
-        if (!doc.validateAgainstSchema(orderJsonSchema(), &schemaError)) {
+        if (!normalized.validateAgainstSchema(orderSchemaBranch(order.posture), &schemaError)) {
             return reject(RejectReason::Schema,
                 "failed schema validation: " + sanitizeText(schemaError, 200));
         }

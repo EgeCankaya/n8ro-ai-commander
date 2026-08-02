@@ -1,5 +1,6 @@
 #include "AiCommanderPlugin.h"
 
+#include "LocalLlmClient.h"
 #include "PromptRenderer.h"
 #include "ReplayLlmClient.h"
 #include "StubLlmClient.h"
@@ -130,15 +131,45 @@ void AiCommanderPlugin::rebuildBackend() {
             runtime_.setClient(std::move(replay));
             break;
         }
-        case Backend::Local:
+        case Backend::Local: {
+            LocalClientConfig local;
+            local.baseUrl = config.localBaseUrl;
+            local.model = config.localModel;
+            local.temperature = config.localTemperature;
+            local.grammarEnabled = config.localGrammarEnabled;
+            local.timeoutS = config.requestTimeoutS;
+
+            // Constructed, not contacted. The server is first reached on the worker, at the first
+            // order — nothing here blocks initialize(), and no model is loaded to warm a cache that
+            // measurement showed pays for itself only by moving the cost (PRD §Corrections item 14).
+            N8RO_LOG_INFO(
+                std::string("ai-commander: local backend -> ") + local.baseUrl + " model='"
+                    + local.model + "' (an Ollama tag) temperature="
+                    + std::to_string(local.temperature) + " format="
+                    + (local.grammarEnabled ? "on" : "OFF - unconstrained decoding")
+                    + " timeoutS=" + std::to_string(local.timeoutS),
+                kLogCategory);
+            if (!local.grammarEnabled) {
+                // Worth a warning of its own: with `format` off the decoder enforces nothing, and
+                // Stage-A `shape` rejections go from near-zero to the majority of orders. That is a
+                // legitimate configuration for an H3 baseline and a broken one for a demo.
+                N8RO_LOG_WARNING(
+                    "ai-commander: local.grammarEnabled is false - the order schema is NOT sent as "
+                    "Ollama's `format`. Expect the majority of orders to be rejected `shape`. This "
+                    "is only meaningful as an unconstrained-decoding baseline.",
+                    kLogCategory);
+            }
+            runtime_.setClient(std::make_unique<LocalLlmClient>(local));
+            break;
+        }
         case Backend::Claude:
-            // Phase 1b and Phase 2. Deliberately not stubbed out with a silent fallback to `stub`:
-            // an operator who selected `local` and silently got canned orders would have no way to
-            // notice, and every downstream measurement would be meaningless.
+            // Phase 2. Deliberately not stubbed out with a silent fallback to `stub`: an operator
+            // who selected `claude` and silently got canned orders would have no way to notice, and
+            // every downstream measurement would be meaningless.
             N8RO_LOG_WARNING(
                 std::string("ai-commander: backend '") + toString(config.backend)
-                    + "' is not implemented in this build (Phase 1b/2). The commander will not "
-                      "issue orders. Set commander.backend to stub or replay.",
+                    + "' is not implemented in this build (Phase 2). The commander will not "
+                      "issue orders. Set commander.backend to stub, replay, or local.",
                 kLogCategory);
             runtime_.setClient(nullptr);
             return;
