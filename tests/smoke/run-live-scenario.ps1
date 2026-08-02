@@ -8,14 +8,26 @@
     snapshot comes from real component reads, Stage B runs against real entity state, and the Lua
     tier actually consumes the published order.
 
-    OQ-6 resolved to oppint_red_interceptor / RedSu35_01, which lives in the shipped seed scenario
-    "Mariana Shield". This script does NOT modify that scenario. It APPENDS a duplicate entry named
-    "Mariana Shield AI" whose RedSu35_01 points at the commander-aware Tier-1 script, so:
+    OQ-6 resolved to oppint_red_interceptor / RedSu35_01, in the shipped scenario "Mariana Shield".
 
-      * no shipped record is edited, and the change is reversible by removing one array element;
-      * the H1 pair is fair by construction - "Mariana Shield" is the commander-off control and
-        "Mariana Shield AI" the commander-on run, from byte-identical initial conditions;
-      * RedSu35_02 stays on stock Tier-1 logic in BOTH runs, giving a within-run control as well.
+    HOW THE COMMANDER GETS INTO THE SCENARIO. The first attempt appended a "Mariana Shield AI"
+    entry to data/resources/seed/realistic_scenario_seed_data.json, on the belief that the seed JSON
+    was the runtime source. It is not: the engine loads scenarios from binary DB records under
+    data/db/N8roSimSchema/Profiles/Scenario/*.n8ro.instance (observed - the run failed with
+    "cannot open file: .../Mariana Shield AI.n8ro.instance"). The seed JSON is an import source, and
+    those records are compressed binary that no text edit can produce. Creating a scenario variant
+    therefore needs the data-authoring tooling, which is a heavier dependency than this smoke should
+    carry.
+
+    So instead of a new scenario, this swaps the SCRIPT the existing one already points at:
+    data/resources/missions/oppint_red_interceptor.lua is backed up, replaced with the
+    commander-aware Tier-1 script, and restored in a finally block. "Mariana Shield" is then run
+    twice - once with the swap in place (commander-on) and once without (commander-off) - which is
+    the paired comparison the H1 gate item asks for, from identical initial conditions.
+
+    What is lost against the scenario-variant approach: both RedSu35_01 and RedSu35_02 share that
+    script, so there is no within-run control. The paired-run control remains, and it is the one the
+    gate specifies.
 
     Everything it touches in the release tree is backed up first and restored in a finally block,
     including on failure. The tree is left as it was found.
@@ -45,10 +57,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot    = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$seedPath    = Join-Path $ReleaseRoot "data\resources\seed\realistic_scenario_seed_data.json"
 $missionDir  = Join-Path $ReleaseRoot "data\resources\missions"
 $scriptSrc   = Join-Path $repoRoot "lua\ai_commander_interceptor.lua"
-$scriptDst   = Join-Path $missionDir "ai_commander_interceptor.lua"
+# The script the shipped scenario already points at. Swapped, not added to.
+$missionPath = Join-Path $missionDir "oppint_red_interceptor.lua"
 $doctrineSrc = Join-Path $repoRoot "data\doctrine.txt"
 $doctrineDst = Join-Path $ReleaseRoot "data\doctrine.txt"
 $orderLog    = Join-Path $ReleaseRoot "logs\ai-commander\orders.jsonl"
@@ -68,12 +80,12 @@ function Assert-That {
 
 Write-Host "=== AI Entity Commander - Phase 1b live scenario smoke ==="
 Write-Host "release root : $ReleaseRoot"
-Write-Host "scenario     : Mariana Shield AI (additive duplicate of Mariana Shield)"
-Write-Host "entity       : RedSu35_01  (RedSu35_02 stays on stock Tier-1 logic)"
-Write-Host "run seconds  : $RunSeconds"
+Write-Host "scenario     : Mariana Shield (shipped, unmodified)"
+Write-Host "entities     : RedSu35_01 and RedSu35_02, both on the swapped Tier-1 script"
+Write-Host "run seconds  : $RunSeconds per run"
 
-if (-not (Test-Path $seedPath))  { throw "No scenario seed at $seedPath" }
-if (-not (Test-Path $scriptSrc)) { throw "No reference Tier-1 script at $scriptSrc" }
+if (-not (Test-Path $missionPath)) { throw "No shipped mission script at $missionPath" }
+if (-not (Test-Path $scriptSrc))   { throw "No reference Tier-1 script at $scriptSrc" }
 
 Write-Host "`n-- preflight --"
 try {
@@ -83,48 +95,24 @@ try {
     Assert-That $false "inference server reachable at http://localhost:11434 ($($_.Exception.Message))"
 }
 
-$backup = Join-Path $workDir "seed-backup-$stamp.json"
-Copy-Item $seedPath $backup -Force
-Write-Host "  seed backed up to $backup"
+$backup = Join-Path $workDir "oppint_red_interceptor-backup-$stamp.lua"
+Copy-Item $missionPath $backup -Force
+Write-Host "  shipped mission script backed up to $backup"
 
 $seededDoctrine = $false
-$installedScript = $false
 
 try {
-    # -- 1. install the commander-aware Tier-1 script -------------------------------------------
+    # -- 1. swap in the commander-aware Tier-1 script --------------------------------------------
     Write-Host "`n-- wiring --"
-    if (-not (Test-Path $scriptDst)) { $installedScript = $true }
-    Copy-Item $scriptSrc $scriptDst -Force
-    Assert-That (Test-Path $scriptDst) "reference Tier-1 script installed into data/resources/missions"
+    Copy-Item $scriptSrc $missionPath -Force
+    Assert-That ((Get-Item $missionPath).Length -eq (Get-Item $scriptSrc).Length) `
+        "commander-aware Tier-1 script swapped in for oppint_red_interceptor.lua"
 
     if (-not (Test-Path $doctrineDst)) {
         Copy-Item $doctrineSrc $doctrineDst -Force
         $seededDoctrine = $true
     }
     Assert-That (Test-Path $doctrineDst) "doctrine present at data/doctrine.txt (prompt.doctrinePath default)"
-
-    # -- 2. append the AI scenario, without touching the shipped one ----------------------------
-    $seed = Get-Content $seedPath -Raw | ConvertFrom-Json
-    $source = $seed.entries | Where-Object { $_.name -eq "Mariana Shield" }
-    if (-not $source) { throw "seed carries no 'Mariana Shield' scenario" }
-
-    if ($seed.entries | Where-Object { $_.name -eq "Mariana Shield AI" }) {
-        Write-Host "  'Mariana Shield AI' already present; replacing it"
-        $seed.entries = @($seed.entries | Where-Object { $_.name -ne "Mariana Shield AI" })
-    }
-
-    # Deep copy through JSON so the duplicate shares no object with the shipped entry.
-    $clone = $source | ConvertTo-Json -Depth 40 | ConvertFrom-Json
-    $clone.name = "Mariana Shield AI"
-    $clone.description = "Phase 1b commander-on variant of Mariana Shield. RedSu35_01 runs the " +
-                         "commander-aware Tier-1 script; every other entity is unchanged."
-    $commanded = $clone.entities | Where-Object { $_.entityName -eq "RedSu35_01" }
-    if (-not $commanded) { throw "'Mariana Shield' carries no RedSu35_01" }
-    $commanded.missionScriptPath = "resources/missions/ai_commander_interceptor.lua"
-
-    $seed.entries = @($seed.entries) + @($clone)
-    $seed | ConvertTo-Json -Depth 40 | Set-Content -Path $seedPath -Encoding utf8
-    Assert-That $true "appended 'Mariana Shield AI' (shipped 'Mariana Shield' untouched)"
 
     function Invoke-Scenario {
         param([string]$Name, [int]$Seconds, [string]$Tag)
@@ -150,7 +138,7 @@ cd /d "%N8RO_RELEASE%"
 
     # -- 3. commander-on run ---------------------------------------------------------------------
     Write-Host "`n-- commander-on run --"
-    $log = Invoke-Scenario -Name "Mariana Shield AI" -Seconds $RunSeconds -Tag "commander-on"
+    $log = Invoke-Scenario -Name "Mariana Shield" -Seconds $RunSeconds -Tag "commander-on"
 
     Assert-That ($log -match 'ai-commander: registered the aiCommander namespace') `
         "plugin loaded and registered its namespace"
@@ -208,6 +196,8 @@ cd /d "%N8RO_RELEASE%"
     # -- 4. commander-off control run --------------------------------------------------------------
     if (-not $SkipControl) {
         Write-Host "`n-- commander-off control run (H1 pair) --"
+        # Restore the shipped script FIRST, so the control run is the scenario exactly as it ships.
+        Copy-Item $backup $missionPath -Force
         $control = Invoke-Scenario -Name "Mariana Shield" -Seconds $RunSeconds -Tag "commander-off"
         Assert-That ($control -match 'Interceptor committed: RedSu35_01') `
             "control run flies RedSu35_01 on stock Tier-1 logic"
@@ -217,11 +207,11 @@ cd /d "%N8RO_RELEASE%"
 }
 finally {
     Write-Host "`n-- restoring the release tree --"
-    Copy-Item $backup $seedPath -Force
-    Write-Host "  seed restored from $backup"
-    if ($installedScript -and (Test-Path $scriptDst)) {
-        Remove-Item $scriptDst -Force; Write-Host "  removed the installed Tier-1 script"
-    }
+    # Unconditional, and idempotent if the control run already did it. The shipped mission script is
+    # release-tree content; leaving a swapped copy behind would silently change every later run of
+    # this scenario, including interactive ones.
+    Copy-Item $backup $missionPath -Force
+    Write-Host "  shipped oppint_red_interceptor.lua restored from $backup"
     if ($seededDoctrine -and (Test-Path $doctrineDst)) {
         Remove-Item $doctrineDst -Force; Write-Host "  removed the seeded doctrine"
     }
