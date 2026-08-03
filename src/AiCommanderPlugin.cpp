@@ -1,5 +1,6 @@
 #include "AiCommanderPlugin.h"
 
+#include "ClaudeLlmClient.h"
 #include "LocalLlmClient.h"
 #include "PromptRenderer.h"
 #include "ReplayLlmClient.h"
@@ -174,17 +175,45 @@ void AiCommanderPlugin::rebuildBackend() {
             runtime_.setClient(std::make_unique<LocalLlmClient>(local));
             break;
         }
-        case Backend::Claude:
-            // Phase 2. Deliberately not stubbed out with a silent fallback to `stub`: an operator
-            // who selected `claude` and silently got canned orders would have no way to notice, and
-            // every downstream measurement would be meaningless.
+        case Backend::Claude: {
+            // Reaching this arm at all means `claude.enabled` is true: CommanderConfig rejects the
+            // combination of backend=claude and claude.enabled=false outright, so there is no code
+            // path from a disabled gate to a constructed hosted client. That rejection is the gate;
+            // this arm does not re-check it, because two checks would invite one of them to drift.
+            ClaudeClientConfig claude;
+            claude.baseUrl = config.claudeBaseUrl;
+            claude.model = config.claudeModel;
+            claude.maxTokens = config.claudeMaxTokens;
+            claude.apiKeyEnvVar = config.claudeApiKeyEnvVar;
+            claude.effort = config.claudeEffort;
+            claude.timeoutS = config.requestTimeoutS;
+
+            // MANDATORY EGRESS WARNING (§Threat model). Every byte of the prompt's volatile suffix
+            // — positions, ORBAT, team assignments, reported stores — leaves this machine and
+            // reaches a third party from here on. That is an authorized act, and an authorized act
+            // that leaves no trace in the log is indistinguishable from an unauthorized one, so it
+            // is stated at WARNING and it names the destination host.
             N8RO_LOG_WARNING(
-                std::string("ai-commander: backend '") + toString(config.backend)
-                    + "' is not implemented in this build (Phase 2). The commander will not "
-                      "issue orders. Set commander.backend to stub, replay, or local.",
+                std::string("ai-commander: EGRESS ENABLED - scenario state will be transmitted to ")
+                    + claude.baseUrl
+                    + ". Every order sends the per-entity snapshot (position, velocity, heading, "
+                      "team, reported tracks, reported stores) off this machine to a third-party "
+                      "service. This is on because claude.enabled=true and "
+                      "commander.backend=claude.",
                 kLogCategory);
-            runtime_.setClient(nullptr);
-            return;
+
+            N8RO_LOG_INFO(
+                std::string("ai-commander: claude backend -> ") + claude.baseUrl + " model='"
+                    + claude.model + "' maxTokens=" + std::to_string(claude.maxTokens)
+                    + " apiKeyEnvVar='" + claude.apiKeyEnvVar + "' (name only; the value is read at "
+                      "request time and never logged) effort='"
+                    + (claude.effort.empty() ? std::string("(none)") : claude.effort)
+                    + "' timeoutS=" + std::to_string(claude.timeoutS),
+                kLogCategory);
+
+            runtime_.setClient(std::make_unique<ClaudeLlmClient>(claude));
+            break;
+        }
     }
 
     // The prefix is rebuilt with the backend, so a doctrine or config change invalidates the
@@ -602,11 +631,19 @@ void AiCommanderPlugin::dispatchRequests(double simTimeS, std::int64_t frame) {
         // client pointer, and the destination slot. No IEntityManager, no IScenarioManager, no
         // MessageBusPacked, no ISimulationEngine, no ScriptingApiContext, no recorder, no roster.
         LatestWinsSlot<CandidateOrder>* slot = &state->completed;
-        auto work = [snapshot, prompt, client, slot]() mutable {
+
+        // The prefix/suffix boundary, captured BY VALUE like everything else the worker sees
+        // (AIC-BE-3, v1.8). A hosted adapter puts its cache breakpoint exactly here; every other
+        // adapter ignores it. It is read on the simulation thread — the renderer is not the
+        // worker's to touch — and crosses as a plain integer.
+        const std::size_t prefixLength = runtime_.promptRenderer().prefix().size();
+
+        auto work = [snapshot, prompt, client, slot, prefixLength]() mutable {
             // The verdict rides across the slot with the candidate. A Stage-A rejection must reach
             // the simulation thread both so the entity's requestInFlight flag clears — otherwise it
             // goes permanently silent — and so the rejection can be counted and recorded there.
-            (void)slot->publish(CommanderRuntime::runWorkerCall(std::move(snapshot), prompt, *client));
+            (void)slot->publish(
+                CommanderRuntime::runWorkerCall(std::move(snapshot), prompt, *client, prefixLength));
         };
 
         if (threadRunner_ != nullptr) {

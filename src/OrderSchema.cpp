@@ -238,7 +238,105 @@ JsonValue buildOrderSchema() {
     return schema;
 }
 
+// -- the hosted projection (AIC-BE-2, PRD v1.8 §Corrections item 19) -----------------------------
+//
+// Everything below computes the hosted document FROM the canonical one. Nothing below authors a
+// schema. If a branch is added above, it appears here without anyone remembering to add it — which
+// is the entire reason this is a projection and not a second document.
+
+// The keywords the hosted structured-output path does not accept. Removed wherever they appear, at
+// any depth.
+constexpr const char* kUnsupportedKeywords[] = {
+    "minimum", "maximum", "multipleOf", "minLength", "maxLength",
+};
+
+// Turns a PIN into the `const` that says the same thing.
+//
+// A pin is a bound whose two ends meet: `minimum == maximum` says "exactly this number",
+// `minLength == maxLength == 0` says "exactly the empty string". Those three pins are not
+// decoration — they are the mechanism the four-branch encoding uses to forbid a field rather than
+// merely to bound it, and dropping them without replacement would give back the 10/12 shape
+// rejections §Corrections item 13 measured.
+//
+// A length pin with a NON-zero length (`minLength == maxLength == 8`) pins a length, not a value,
+// and has no `const` equivalent. None exists in the canonical document today; if one is ever added
+// it is dropped like any other bound and A7 continues to enforce it.
+void pinToConst(JsonValue& node) {
+    if (node.has("minimum") && node.has("maximum")) {
+        const double low = node.get("minimum").asDouble();
+        const double high = node.get("maximum").asDouble();
+        if (low == high) {
+            if (node.get("type").asString() == "integer") {
+                (void)node.setInt64("const", static_cast<std::int64_t>(low));
+            } else {
+                (void)node.setDouble("const", low);
+            }
+        }
+    }
+    if (node.has("minLength") && node.has("maxLength")) {
+        if (node.get("minLength").asInt64() == 0 && node.get("maxLength").asInt64() == 0) {
+            (void)node.setString("const", "");
+        }
+    }
+}
+
+void projectNode(JsonValue& node) {
+    if (node.isArray()) {
+        // JsonValue has pushBack and no element assignment, so an array is rebuilt rather than
+        // edited in place. Order is preserved, which matters: the branch order is the order the
+        // canonical document declares and a reader diffing the two documents should see them line
+        // up.
+        JsonValue rebuilt = JsonValue::array();
+        for (std::size_t i = 0; i < node.size(); ++i) {
+            JsonValue child = node.at(i);
+            projectNode(child);
+            (void)rebuilt.pushBack(child);
+        }
+        node = rebuilt;
+        return;
+    }
+    if (!node.isObject()) {
+        return;
+    }
+
+    // Pin BEFORE the bounds are removed — the pin is derived from them.
+    pinToConst(node);
+    for (const char* keyword : kUnsupportedKeywords) {
+        node.remove(keyword);
+    }
+
+    // `oneOf` -> `anyOf`. The support list names `anyOf` and does not name `oneOf`, and the
+    // substitution is sound HERE specifically because the four branches are mutually exclusive by
+    // construction: every branch pins `posture` to a disjoint enum, so no document can satisfy two
+    // of them and "exactly one" and "at least one" cannot disagree. This is a property of THIS
+    // schema, not a general rewrite rule, and the round-trip test is what keeps it true.
+    if (node.has("oneOf")) {
+        JsonValue branches = node.get("oneOf");
+        node.remove("oneOf");
+        (void)node.set("anyOf", branches);
+    }
+
+    // A draft-07 declaration on a document that is no longer draft-07-complete would be a claim the
+    // projection cannot honour. Dropped rather than left to be interpreted.
+    node.remove("$schema");
+
+    for (const std::string& key : node.keys()) {
+        JsonValue child = node.get(key);
+        projectNode(child);
+        (void)node.set(key, child);
+    }
+}
+
 } // namespace
+
+const n8ro::core::JsonValue& orderJsonSchemaForStructuredOutputs() {
+    static const JsonValue projected = [] {
+        JsonValue copy = orderJsonSchema();  // by value: the canonical document is not touched
+        projectNode(copy);
+        return copy;
+    }();
+    return projected;
+}
 
 const n8ro::core::JsonValue& orderJsonSchema() {
     // Built once. The prompt's stable prefix embeds this document, and AIC-BE-3 requires the

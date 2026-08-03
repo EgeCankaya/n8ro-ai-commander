@@ -122,6 +122,86 @@ const std::vector<std::string>& allowedWaypointProperties() {
     return true;
 }
 
+// -- A2 (Claude): Anthropic's POST /v1/messages envelope -----------------------------------------
+//
+// `{ "id": …, "model": …, "content": [ {"type":"text","text":"<the order>"}, … ],
+//    "stop_reason": …, "stop_details": …, "usage": {…} }`
+//
+// Returns false on any envelope failure and fills `error`. `refusalOut` is set to true for the ONE
+// case that is not an envelope failure at all — the model declining — because that outcome has its
+// own reject reason and its own runbook row, and folding it into `envelope` would lose the
+// distinction between "the backend malfunctioned" and "the model said no".
+[[nodiscard]] bool unwrapClaudeMessages(
+    const std::string& body, std::string& out, std::string& error, bool& refusalOut) {
+    refusalOut = false;
+
+    const std::optional<JsonValue> parsed = JsonValue::parse(body);
+    if (!parsed.has_value() || !parsed->isObject()) {
+        error = "backend response is not a JSON object";
+        return false;
+    }
+
+    // An API-level error is a 200-carrying-`error` shape here too, and naming it beats a bare
+    // rejection for exactly the reason the Ollama path says so.
+    if (parsed->get("type").asString() == "error" || parsed->has("error")) {
+        const JsonValue node = parsed->get("error");
+        const std::string message = node.isObject() ? node.get("message").asString()
+                                  : node.isString() ? node.asString()
+                                                    : std::string();
+        error = "backend reported an error: "
+            + (message.empty() ? std::string("(no message)") : sanitizeText(message, 200));
+        return false;
+    }
+
+    // THE REFUSAL CHECK, AND IT COMES FIRST.
+    //
+    // Before `content` is touched, deliberately. On a refusal `content` is empty or holds a partial
+    // answer, and reading it first is precisely how a partial gets mistaken for a whole one.
+    //
+    // The guard is on `stop_reason` and NOT on `stop_details`. `stop_details` may be null even on a
+    // refusal, so a check written against it would fall through on some refusals and then read the
+    // content this check exists to protect against — a bug that would present as an occasional
+    // truncated order rather than as a failure, which is the worst way for it to present.
+    if (parsed->get("stop_reason").asString() == "refusal") {
+        refusalOut = true;
+        // stop_details is advisory. Report the category when it is there, say so when it is not,
+        // and never depend on it having been there.
+        const JsonValue details = parsed->get("stop_details");
+        const std::string category = details.isObject() ? details.get("category").asString()
+                                                        : std::string();
+        error = "the model declined the request (stop_reason 'refusal', category "
+            + (category.empty() ? std::string("unreported") : sanitizeText(category, 64)) + ")";
+        return false;
+    }
+
+    const JsonValue content = parsed->get("content");
+    if (!content.isArray()) {
+        error = "backend response has no 'content' array";
+        return false;
+    }
+
+    // The order is the first block of type "text". Scanned rather than indexed at [0]: the block
+    // list is documented as potentially carrying other block types, and hard-coding position zero
+    // would turn a leading non-text block into a spurious `envelope` rejection.
+    for (std::size_t i = 0; i < content.size(); ++i) {
+        const JsonValue block = content.at(i);
+        if (!block.isObject() || block.get("type").asString() != "text") {
+            continue;
+        }
+        out = block.get("text").asString();
+        if (out.empty()) {
+            error = "backend response's first text block is empty";
+            return false;
+        }
+        return true;
+    }
+
+    // A well-formed envelope that delivered no order document. Not the model producing something
+    // malformed, so not `parse`.
+    error = "backend response's 'content' array carries no text block";
+    return false;
+}
+
 } // namespace
 
 bool isSanitizedText(const std::string& text) {
@@ -175,6 +255,17 @@ StageAOutcome validateStageA(
         std::string envelopeError;
         if (!unwrapOllamaGenerate(body, document, envelopeError)) {
             return reject(RejectReason::Envelope, envelopeError);
+        }
+    } else if (envelope == EnvelopeFormat::ClaudeMessages) {
+        std::string envelopeError;
+        bool refused = false;
+        if (!unwrapClaudeMessages(body, document, envelopeError, refused)) {
+            // A refusal is not a malformed envelope, and giving it its own reason is the whole
+            // point of having fine-grained reasons: a climbing `reject.envelope` means the backend
+            // is broken, while a climbing `reject.refusal` means the prompt is asking for something
+            // the model will not do. Those need different responses, so they need different
+            // counters (PRD AIC-VAL-1, and RejectReason.h's own stated rationale).
+            return reject(refused ? RejectReason::Refusal : RejectReason::Envelope, envelopeError);
         }
     }
 

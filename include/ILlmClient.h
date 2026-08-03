@@ -3,6 +3,8 @@
 #include "EnvelopeFormat.h"
 #include "Snapshot.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -16,6 +18,19 @@ namespace arkheon::aicommander {
 struct LlmRequest {
     std::string prompt;
     OrderSnapshot snapshot;
+
+    // Byte offset into `prompt` at which the stable prefix ends and the volatile suffix begins
+    // (AIC-BE-3, v1.8). Zero means "no boundary declared"; every adapter without a cache concept
+    // ignores it and sends `prompt` whole.
+    //
+    // A length rather than a second string, deliberately. `prompt` stays the single record of what
+    // was sent — so promptHash is unaffected and the order record's format does not move — and an
+    // offset cannot desynchronise from the text the way a parallel copy of the prefix could.
+    //
+    // What it buys: a hosted adapter can place its cache breakpoint exactly at the boundary. A
+    // breakpoint at the END of the whole prompt would write a distinct cache entry per request and
+    // read none — paying the write premium to receive nothing, silently, with no counter moving.
+    std::size_t prefixLength = 0;
 };
 
 // What an adapter returns.

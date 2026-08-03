@@ -73,6 +73,7 @@ if not exist "$(N8RO_RELEASE)\lib\n8ro-core.lib" (
     <ClCompile Include="..\src\RejectReason.cpp" />
     <ClCompile Include="..\src\FallbackLadder.cpp" />
     <ClCompile Include="..\src\FrameCostHistogram.cpp" />
+    <ClCompile Include="..\src\ClaudeLlmClient.cpp" />
     <ClCompile Include="..\src\LocalLlmClient.cpp" />
     <ClCompile Include="..\src\RuntimeColumnProbe.cpp" />
     <ClCompile Include="..\src\OrderRecorder.cpp" />
@@ -92,6 +93,7 @@ if not exist "$(N8RO_RELEASE)\lib\n8ro-core.lib" (
     <ClCompile Include="FrameCostAndProbeTests.cpp" />
     <ClCompile Include="PipelineIntegrationTests.cpp" />
     <ClCompile Include="LocalAdapterTests.cpp" />
+    <ClCompile Include="ClaudeAdapterTests.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
