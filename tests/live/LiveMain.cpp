@@ -548,6 +548,33 @@ int main(int argc, char** argv) {
     report << "  schemaBytes " << orderJsonSchemaText().size() << "\n";
     std::cout << report.str() << std::flush;
 
+    // -- prefix: dump the deployed stable prefix and stop ----------------------------------------
+    //
+    // For OQ-8. The question is how many tokens the prefix is on ANTHROPIC's tokenizer, and there is
+    // no offline Claude tokenizer - the only authority is POST /v1/messages/count_tokens. So this
+    // mode writes the exact bytes the shipping prompt would carry, and count-prefix-tokens.ps1 sends
+    // them.
+    //
+    // It runs BEFORE every inference mode and returns immediately: no server, no network, no model.
+    // The dumped file is the prefix ALONE - it contains the system prompt, the vocabulary, the order
+    // schema, and the doctrine, and by construction no volatile suffix and therefore no scenario
+    // state whatsoever. That property is what the owner's authorization is scoped to, so it is worth
+    // stating where the file is produced rather than only where it is sent.
+    if (options.mode == "prefix") {
+        const std::string outPath = "prefix.txt";
+        std::ofstream out(outPath, std::ios::binary);
+        if (!out) {
+            std::cerr << "[FAIL] could not open " << outPath << " for writing\n";
+            return 1;
+        }
+        out.write(renderer.prefix().data(),
+                  static_cast<std::streamsize>(renderer.prefix().size()));
+        out.close();
+        std::cout << "[OK] wrote " << renderer.prefix().size() << " bytes to " << outPath
+                  << " (stable prefix only - no snapshot, no scenario state)\n";
+        return 0;
+    }
+
     if (options.mode == "cold" || options.mode == "all") {
         const std::string section = runColdCheck(options, config, renderer);
         std::cout << section << std::flush;
