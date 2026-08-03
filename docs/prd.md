@@ -9,9 +9,10 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 > **One-liner:** A `n8ro-sim` plugin that lets a language model issue tactical *intent* — posture, target, waypoint, rules of engagement — to entities in a running scenario, while every kinematic decision and every state mutation stays in the deterministic C++ and Lua tiers that already exist.
 
-**Date:** 2026-07-31 (revised 2026-08-02)
-**Status:** Draft v1.7.1
+**Date:** 2026-07-31 (revised 2026-08-03)
+**Status:** Draft v1.7.2
 **Revision history:**
+- v1.7.2 — **authorized a deployed-configuration source for the headless host**, resolving §Corrections item 17 and unblocking the two Phase 1b gate items it stranded. AIC-API-2 previously specified *what* the config surface is and left *how it arrives* entirely to `applyConfigFields()`, which only the UI host calls — so `commander.enabled` could not be turned on for an automated run, and the live-scenario smoke and H1 were both unreachable. The plugin now reads `data/config/plugins/ai-commander.cfg` at `initialize()` as its **default source**, through the same `tryParseConfigFields` all-or-nothing path. This adds **no config field** — it adds a *source* for the fields this FR already defines. The asymmetry it removes is the defect: the UI host has applied that file since Phase 0 and the shipped example config has told operators to put it there since Phase 0, so a stale file could already enable the commander on the UI path while the headless path silently ignored it. Fail-closed is unchanged and now carries a test: absent file → compiled defaults → disabled.
 - v1.7.1 — **corrected the branch partition** on the first live run of the shipping adapter. v1.7 split the schema by waypoint presence, which grouped `defend` with `engage` and `crank`; those postures agree about waypoints and disagree about targets, so the branch could not state the target rule and 2/12 live orders were rejected *"defend must not carry a targetEntityId"*. Partitioning by **whole constraint profile** yields four branches — transit, hold, targeted, defend — and measured **0 rejections in 24 live orders**. AIC-ORD-1's acceptance criterion is strengthened to assert branch bounds against the A6 predicates per posture, which is the check that would have caught v1.7's split. Prefix growth (4,738 → 14,074 bytes) recorded as a real cost and as evidence into OQ-8.
 - v1.7 — **restructured AIC-ORD-1's embedded schema and resolved OQ-5 and OQ-6**, on measurements taken at Phase 1b start. v1.6 predicted that Stage-A `shape` rejections would be non-trivial and would fall as prompt wording improved; both halves were tested and the second is false. The shipped prompt against the shipped schema produced **10/12 shape rejections**, because Ollama's `format` compels only what the schema's `required` array names, and this model **omits every optional field** rather than over-emitting as v1.6's models did. Adding a field-presence block to the prompt moved nothing; `if`/`then`/`else` was confirmed unhonoured; a schema expressed as **`oneOf` over two posture-discriminated branches produced 0/12 with the prompt untouched**. AIC-ORD-1 now specifies that shape. Separately, **OQ-5 resolves "No"** — the entitlement subsystem is absent from every sim binary and from the import library plugins link, so the contingency check it proposed could not have been written — and **OQ-6 resolves to `oppint_red_interceptor` / `RedSu35_01`** by owner pick.
 - v1.6 — **resolved OQ-1 and OQ-2** against the target machine and a live spike, unblocking Phase 1b. Ollama 0.32.5 is installed and serving on `localhost:11434` with 14 instruct models already imported, so the shipped split GGUFs need no import at all; its `format` parameter enforces the AIC-ORD-1 schema (3/3 valid across two models), which retires the GBNF concern. A GPU is present — RTX 4070 Ti SUPER, 16 GB — giving **~1.7 s warm** round trips on a 7B. Three findings folded in: model **cold start (22–46 s) exceeds `commander.requestTimeoutS`**, so the first order of a run times out as configured; `local.model`'s default was a GGUF *filename* where Ollama needs a *tag*; and JSON Schema cannot express AIC-ORD-1's conditional-presence rules, so Stage-A `shape` rejections are load-bearing rather than incidental.
@@ -94,6 +95,8 @@ predicted; one of those predictions did not survive contact. Each is load-bearin
 16. **The doctrine block was never deployed, and nothing said so.** *(v1.7.1)* `prompt.doctrinePath` defaults to `data/doctrine.txt`, which the plugin resolves against the **host's** working directory — the release root — and nothing ever placed the file there. Verified: `C:\N8RO\data\doctrine.txt` did not exist, and `readDoctrine` returned empty silently, so the prefix rendered `"(none provided)"`. **Consequence, and it reaches backwards:** every deployed run since Phase 0 has been running doctrine-less, including the one that produced item 9's measured `prefixBytes = 4,738`. That figure is a *doctrine-less* prefix, not the shipping one. With the doctrine loaded and the four-branch schema, the deployed prefix measures **17,756 bytes**. The failure mode is the worst kind: no counter moves, no rejection is logged, and only order *quality* degrades. Fixed on both sides — `initialize()` now logs a WARNING naming the resolved path when the file is missing and an INFO with its byte count when it loads, and the post-build event seeds it into the release tree **only if absent** (the file is edited by whoever tunes tactics; clobbering their edits on every rebuild would be worse than not seeding it).
 
 17. **The headless host does not apply per-plugin configuration, so the in-engine live smoke cannot be automated.** *(v1.7.1)* Phase 1a recorded this as a note in the example config; Phase 1b confirmed it and hit the consequence. A `data/config/plugins/ai-commander.cfg` carrying `commander.enabled=true` and `commander.backend=local` produced `backend=stub enabled=false` in the startup log of `n8ro-sim-local.exe`. Applying that file is the UI host's job, through the plugin config editor, which calls `applyConfigFields()`. **Consequence:** §Validation's live-scenario smoke — *"10-minute run on the OQ-6 scenario with `commander.backend = "local"`"* — is not reachable from the headless binary as the system stands, and the Phase 1b gate item that depends on it is **not satisfied**. This is the same shape as the v1.2 "TSAN clean" item: a gate item no available configuration can pass. It is recorded as unmet rather than restated into something that passes, and the two ways out — drive the run from the UI host manually, or give the plugin a documented way to take configuration on a headless run — are an owner decision, because the second one changes how configuration reaches a fail-closed switch.
+
+    **Resolved 2026-08-03 (v1.7.2): the second way out, authorized and specified in AIC-API-2.** The plugin reads `data/config/plugins/ai-commander.cfg` at `initialize()` as its default source, through the same all-or-nothing `tryParseConfigFields` path the host path uses. The reasoning that made this the right call rather than the risky one: **the asymmetry was the defect.** The UI host has applied that exact file since Phase 0, and the shipped example config has instructed operators to place it there since Phase 0 — so a stale file could *already* enable the commander on the UI path. What the headless host had was not a safety property; it was a blind spot that made one host silently ignore a file the other honoured. Fail-closed is untouched and now carries a test rather than an argument: absent file → compiled defaults → `commander.enabled == false`. The residual exposure is stated plainly rather than waved off — **a stale `ai-commander.cfg` left in a release tree will now take effect on a headless run as well as an interactive one.** That is bounded by the deployment checklist, which already requires the deployed default config to ship both `commander.enabled` and `claude.enabled` false, and by the startup log line this revision makes mandatory: every run now states which file it read and how many fields it applied, so an unexpected configuration is visible in the first ten lines of a log rather than inferred from behaviour.
 
 18. **Scenarios live in the database, not in the seed JSON.** *(v1.7.1)* Discovered while wiring the live smoke, and stated because it cost a wrong turn: `data/resources/seed/realistic_scenario_seed_data.json` is an *import source*, and the engine loads scenarios from binary records under `data/db/N8roSimSchema/Profiles/Scenario/*.n8ro.instance` (the run failed with *"cannot open file: .../Mariana Shield AI.n8ro.instance"* after the seed was edited). Those records are compressed binary that no text edit produces, so creating a scenario **variant** needs the data-authoring tooling. The live smoke therefore swaps the mission *script* the shipped scenario already points at, with backup and restore, rather than adding a scenario.
 
@@ -595,11 +598,29 @@ The system SHALL expose the following `PluginConfigField` set through `getConfig
 | `record.path` | Text | `logs/ai-commander/` | Rotated, size-capped |
 | `replay.path` | Text | *(empty)* | Required when `commander.backend = replay` |
 
+**How configuration reaches the plugin** *(v1.7.2)*. Two sources, with a defined precedence.
+
+1. **`applyConfigFields()`** — the host-driven path. The UI host calls it from the plugin config editor. It is the authority: an explicit application always wins.
+2. **`data/config/plugins/ai-commander.cfg`** — the **deployed default source**, read once at `initialize()`. The path is fixed and resolved against the host's working directory (the release root), matching how `prompt.doctrinePath` already resolves. It is deliberately **not** itself configurable: a config path that is configurable has no bootstrap.
+
+The file is the flat `key=value` format the release tree already uses for per-plugin configuration (`data/config/plugins/n8ro-skyfeed.cfg` is the shipped exemplar), extended to tolerate `#` comment lines, blank lines, and surrounding whitespace — because the example config this repository ships is largely comments and has instructed operators to copy it to that directory since Phase 0. An empty value is an empty string, not an absent field.
+
+Its contents are applied through the **same** `tryParseConfigFields` path `applyConfigFields()` uses, so all-or-nothing application, the `claude.enabled` gate, the `https://` check, and every range check hold identically whichever source the value arrived from. There is one commit path, not two.
+
+**Why this exists** *(v1.7.2, §Corrections item 17)*. `n8ro-sim-local.exe` never calls `applyConfigFields()`. Before this revision that made `commander.enabled` unreachable on the headless host, which is the host every automated run uses — so §Validation's live-scenario smoke and the H1 paired runs were both unsatisfiable, and the Phase 1b gate recorded them as unmet. The change removes an asymmetry rather than creating a risk class: the UI host has applied this exact file since Phase 0, so a stale file could *already* enable the commander there.
+
+**Fail-closed is unchanged.** No file means compiled defaults, and the compiled default for `commander.enabled` is `false`. The master switch still requires a positive act by an operator; v1.7.2 changes only which hosts can observe that act.
+
 **Acceptance criteria:**
 - `applyConfigFields` validates every field and returns `false` on any invalid value, leaving all prior values unchanged — partial application is not permitted.
 - `claude.baseUrl` not matching `https://` is rejected.
 - `commander.backend = "claude"` with `claude.enabled = false` is rejected with a logged reason.
 - `getConfigFields()` never returns an API key value.
+- *(v1.7.2)* `initialize()` reads `data/config/plugins/ai-commander.cfg` when present and applies it through `tryParseConfigFields`, **before** the backend is constructed — so the startup log reports the backend the run will actually use rather than a compiled default that has already been superseded.
+- *(v1.7.2)* **Fail-closed survives, asserted by test.** WITH no such file present, the plugin SHALL run on compiled defaults with `commander.enabled == false` and `commander.backend == stub`.
+- *(v1.7.2)* A file carrying one invalid field applies **nothing**, retains every prior value, and logs the reason naming the field — the same all-or-nothing semantics as the host path, because it is the same code path.
+- *(v1.7.2)* `initialize()` logs, at INFO, either the path it read and how many fields it applied, or that no file was found at that path. A missing file is INFO and not a warning: absent-and-disabled is the state §Operational readiness's deployment checklist *requires* of a default deploy, and warning on the correct state teaches operators to ignore warnings. This criterion exists because §Corrections item 16 is the record of what a silently-unresolved path costs — it hid for two phases.
+- *(v1.7.2)* An explicit `applyConfigFields()` overrides the file **in either call order**. IF the host applies configuration before `initialize()`, THEN the file SHALL NOT be read, so a host-supplied configuration is never silently replaced by a deployed default.
 
 **Trace:** UAC-AIC-API-2
 
@@ -960,6 +981,7 @@ All are exposed through `aiCommander.getStats()` as JSON and written to the orde
 
 - [ ] `dumpbin /exports` shows all three required exports
 - [ ] `commander.enabled = false` and `claude.enabled = false` in the deployed default config
+- [ ] *(v1.7.2)* `data/config/plugins/ai-commander.cfg` is either **absent** or carries `commander.enabled = false`. This checkbox became load-bearing in v1.7.2: that file now takes effect on the **headless** host as well as the interactive one, so a stale copy left from a demo enables the commander on every subsequent automated run. The startup log states which file was read and how many fields were applied — check that line rather than assuming
 - [ ] `aiCommander.lua` stub regenerated and the Lua language server re-pointed
 - [ ] Order-log directory exists and is writable; rotation cap set
 - [ ] Inference server reachable from the sim host (local backend only)
@@ -1540,6 +1562,35 @@ Advisory. Gaps found while composing this PRD, not blockers.
 - **v1.2 note — the snapshot was specified from the Lua surface, not the C++ one.** Every field in the original §Exactly what is transmitted named a Lua verb, and two of them turned out to have no C++ equivalent. The lesson generalizes: for a C++ plugin, "which verb returns this?" is the wrong traceability question — "which header or schema record exposes this to *the plugin*?" is the right one. Appendix A now carries the Lua/C++ split explicitly so the next field added is checked against both columns.
 
 ## Changelog
+
+### v1.7.2 — 2026-08-03
+
+Written at the Phase 1b close-out, before the code it authorizes. One decision, taken because the
+alternative was to leave two gate items permanently unreachable and call that a property.
+
+- **AIC-API-2 gains a second configuration source: `data/config/plugins/ai-commander.cfg`, read at
+  `initialize()` as the deployed default.** Precedence is defined — an explicit `applyConfigFields()`
+  wins, in either call order — and the file is applied through the *same* `tryParseConfigFields`
+  all-or-nothing path, so there is one commit path rather than two. **No config field is added.**
+  The FR's field table is unchanged; only how those fields arrive is widened.
+- **§Corrections item 17 resolved**, and the reasoning recorded rather than just the outcome. The
+  headless host's inability to apply per-plugin config was not a safety property — it was an
+  asymmetry. The UI host has applied that exact file since Phase 0, and the shipped example config
+  has told operators to put it there since Phase 0, so a stale file could **already** enable the
+  commander on the interactive path. What v1.7.2 changes is that both hosts now behave the same way,
+  and that the behaviour is logged.
+- **Fail-closed is unchanged and now carries a test rather than an argument.** Absent file →
+  compiled defaults → `commander.enabled == false`. A new acceptance criterion says so, and it is
+  asserted by the suite rather than by inspection of the default struct.
+- **The residual exposure is stated, not waved off.** A stale `ai-commander.cfg` in a release tree
+  now takes effect on headless runs too. Two things bound it: the §Operational readiness deployment
+  checklist, which gains an explicit row for that file, and a mandatory startup log line naming the
+  file read and the field count — so an unexpected configuration is visible in the first ten lines
+  of a log instead of inferred from behaviour. That line exists because §Corrections item 16 is this
+  document's own record of what an unlogged, silently-unresolved path costs: it hid for two phases.
+- **A missing file logs at INFO, not WARNING.** Absent-and-disabled is the state the deployment
+  checklist *requires* of a default deploy. Warning on the correct state teaches operators to ignore
+  warnings, which is how the next real warning gets missed.
 
 ### v1.7.1 — 2026-08-02
 
