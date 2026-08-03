@@ -10,8 +10,9 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 > **One-liner:** A `n8ro-sim` plugin that lets a language model issue tactical *intent* — posture, target, waypoint, rules of engagement — to entities in a running scenario, while every kinematic decision and every state mutation stays in the deterministic C++ and Lua tiers that already exist.
 
 **Date:** 2026-07-31 (revised 2026-08-03)
-**Status:** Draft v1.7.2
+**Status:** Draft v1.7.3
 **Revision history:**
+- v1.7.3 — **added Stage-B check B8 and the `loadout` reject reason**, resolving the one standing order-quality miss the Phase 1b gate recorded. A winchester aircraft with a close contact drew `engage` where doctrine says `rtb`; two focused doctrine iterations moved it not at all, which is §Rabbit holes' timebox signal rather than a reason to keep writing. B8 rejects `engage`/`crank` when the Tier-1-reported loadout for the order's snapshot window is **entirely dry** — at least one hardpoint reported and every one of them at `ammoCount == 0`. An **empty** reported loadout deliberately does **not** trigger it: that means "this script does not report stores", which §Validation requires to keep receiving orders, and B3 already rejects its targeted orders. This adds a reject reason, not a Lua function, posture, order field, or config field. The value of the change is that an unmeasurable quality complaint becomes a counted rejection with a runbook row behind it.
 - v1.7.2 — **authorized a deployed-configuration source for the headless host**, resolving §Corrections item 17 and unblocking the two Phase 1b gate items it stranded. AIC-API-2 previously specified *what* the config surface is and left *how it arrives* entirely to `applyConfigFields()`, which only the UI host calls — so `commander.enabled` could not be turned on for an automated run, and the live-scenario smoke and H1 were both unreachable. The plugin now reads `data/config/plugins/ai-commander.cfg` at `initialize()` as its **default source**, through the same `tryParseConfigFields` all-or-nothing path. This adds **no config field** — it adds a *source* for the fields this FR already defines. The asymmetry it removes is the defect: the UI host has applied that file since Phase 0 and the shipped example config has told operators to put it there since Phase 0, so a stale file could already enable the commander on the UI path while the headless path silently ignored it. Fail-closed is unchanged and now carries a test: absent file → compiled defaults → disabled.
 - v1.7.1 — **corrected the branch partition** on the first live run of the shipping adapter. v1.7 split the schema by waypoint presence, which grouped `defend` with `engage` and `crank`; those postures agree about waypoints and disagree about targets, so the branch could not state the target rule and 2/12 live orders were rejected *"defend must not carry a targetEntityId"*. Partitioning by **whole constraint profile** yields four branches — transit, hold, targeted, defend — and measured **0 rejections in 24 live orders**. AIC-ORD-1's acceptance criterion is strengthened to assert branch bounds against the A6 predicates per posture, which is the check that would have caught v1.7's split. Prefix growth (4,738 → 14,074 bytes) recorded as a real cost and as evidence into OQ-8.
 - v1.7 — **restructured AIC-ORD-1's embedded schema and resolved OQ-5 and OQ-6**, on measurements taken at Phase 1b start. v1.6 predicted that Stage-A `shape` rejections would be non-trivial and would fall as prompt wording improved; both halves were tested and the second is false. The shipped prompt against the shipped schema produced **10/12 shape rejections**, because Ollama's `format` compels only what the schema's `required` array names, and this model **omits every optional field** rather than over-emitting as v1.6's models did. Adding a field-presence block to the prompt moved nothing; `if`/`then`/`else` was confirmed unhonoured; a schema expressed as **`oneOf` over two posture-discriminated branches produced 0/12 with the prompt untouched**. AIC-ORD-1 now specifies that shape. Separately, **OQ-5 resolves "No"** — the entitlement subsystem is absent from every sim binary and from the import library plugins link, so the contingency check it proposed could not have been written — and **OQ-6 resolves to `oppint_red_interceptor` / `RedSu35_01`** by owner pick.
@@ -476,9 +477,23 @@ The system SHALL validate every order in two stages — syntactic checks on the 
 | B5 | Waypoint (when present) is within `safety.geofenceRadiusM` of the entity's current position | `geofence` |
 | B6 | Altitude within [`safety.minAltitudeHaeM`, `safety.maxAltitudeHaeM`]; speed within (0, `safety.maxSpeedMps`] | `clamp` |
 | B7 | Order serial is monotonically newer than the currently published order | `superseded` |
+| B8 | *(v1.7.3)* WHEN `posture` is `engage` or `crank`, the Tier-1-reported loadout for this order's snapshot window is not **entirely dry**. A loadout is entirely dry when at least one hardpoint was reported AND every reported hardpoint has `ammoCount == 0` | `loadout` |
+
+**B8, and why it is a new reason rather than a widened B3** *(v1.7.3)*. The Phase 1b gate recorded one standing order-quality miss: a **winchester** aircraft with a close contact draws `engage` where doctrine says `rtb`. Two focused doctrine iterations moved it not at all, which §Rabbit holes names as the timebox signal rather than a reason to keep writing. It is a quality miss and not a safety one — Tier 1 will not fire on an empty rail whatever the posture — but `oppint_red_interceptor` genuinely goes winchester and has a winchester egress path, so a ten-minute demo run shows an aircraft pursuing a contact it cannot shoot. Safe, and it reads as broken.
+
+The resolution is to make the validator catch it, which converts an unmeasurable quality complaint into a counted rejection with a runbook row behind it.
+
+It is a **new** reason rather than a widened `track` because the two carry different diagnoses and therefore need different responses: `reject.track` climbing means *the model is hallucinating target ids, or Tier 1 has stopped reporting the picture*; `reject.loadout` climbing means *the model is ordering shots the aircraft cannot take*. Folding the second into the first would destroy exactly the information this reason set exists to carry.
+
+**"Entirely dry" is defined negatively on purpose.** An **empty** reported loadout — no hardpoints reported at all — SHALL NOT trigger B8. That case means *this Tier-1 script does not report stores*, which §Validation requires to keep receiving orders, and it is already handled: a script that reports nothing also reports no tracks, so B3 rejects every targeted order for it. Rejecting on absence would break a documented path and buy nothing. Absence of information is not evidence of a dry rail, and the validator SHALL NOT invent it.
+
+B8 covers `engage` and `crank` only. `defend` is a reaction to an inbound munition rather than a shot, and `ingress` / `hold` / `rtb` carry no target.
 
 **Acceptance criteria:**
 - Every rejection increments a named counter and writes one `order.rejected` record carrying the reason and the raw body, truncated to 4 KB.
+- *(v1.7.3)* B8 rejects `engage` and `crank` when every reported hardpoint is dry, and SHALL NOT reject when no hardpoint was reported at all — asserted as two separate tests, because the second is the one a naive implementation gets wrong.
+- *(v1.7.3)* B8 runs **after** B3 and B4, so a hallucinated or friendly target on a dry aircraft is recorded as `track` or `fratricide` rather than `loadout`. The more specific diagnosis wins the record.
+- *(v1.7.3)* The loadout B8 validates is the one that **accompanied the order's snapshot**, not the one current at publication time — the same rule B3 already applies to tracks, and for the same reason: an aircraft that fired its last missile while inference was in flight must not retroactively invalidate an order that was correct when it was requested.
 - Stage B runs entirely within `onTickFrame` and completes within the per-frame budget.
 - A test corpus of at least 40 adversarial payloads — wrong types, out-of-range numbers, `NaN`, `Infinity`, extra properties, nested injection strings, missing conditionals, unknown enum members, hallucinated entity ids, friendly targets, stale timestamps, 10 MB bodies — is rejected 40/40 with the expected reason code.
 
@@ -971,6 +986,7 @@ All are exposed through `aiCommander.getStats()` as JSON and written to the orde
 | Orders rejected for `schema` | `aicmd.reject.schema` > 1 % | Confirm `local.grammarEnabled`; check the model name matches a chat-tuned instruct model; inspect `rawBody` in the order log | Implementer |
 | Orders rejected for `shape` | *(v1.7)* `aicmd.reject.shape` non-trivial | This is the signal that constrained decoding is **not** in force — with AIC-ORD-1's `oneOf` schema it measures near zero, so a climbing counter means `local.grammarEnabled` is false, the server is ignoring `format`, or the embedded schema was flattened. Inspect `rawBody`: an order missing `targetEntityId` or `orbitRadiusM` entirely is the flat-schema signature (§Corrections item 13). Do **not** respond by relaxing A6 | Implementer |
 | Orders rejected for `track` | `aicmd.reject.track` dominant | **First check `aicmd.tracks.reported`** *(v1.2)* — if it is 0, the Tier-1 script is not calling `aiCommander.reportTrack` and the model is being asked to pick targets it was never shown; this is a script bug, not a model failure. If it is non-zero, the model is hallucinating ids; verify `commander.maxTracksInPrompt` is not truncating the intended target | Implementer |
+| Orders rejected for `loadout` | *(v1.7.3)* `aicmd.reject.loadout` non-zero | The model is ordering `engage`/`crank` for an aircraft whose every reported hardpoint is dry. **This is the check working, not a fault** — it is the Phase 1b winchester miss being caught rather than shown. Expect it to appear late in an engagement, alongside `fallback.level` rising as the entity stops receiving offensive orders and Tier 1 flies its egress. It becomes a *finding* only if it dominates from the start of a run, which would mean Tier 1 is reporting `ammoCount = 0` for a loaded aircraft — check `reportLoadout`'s source rows before suspecting the model | Implementer |
 | Commander refuses to enable at startup | `aicmd.probe.runtimeColumns` = `fail` *(v1.2)* | A `componentTransform` runtime column no longer resolves — the release tree changed under the plugin. Read the startup log for the failing path and reconcile against `include/n8ro-sim/entity/TransformRuntimeColumns.h`. Do **not** work around it by defaulting velocity to zero | Implementer, P1 |
 | Frame budget exceeded | `aicmd.frame.p95Ms` alert | Reduce `commander.maxCommandedEntities` and `maxTracksInPrompt`; confirm no worker is touching SDK state | Implementer, P1 |
 | Simulation slows with local backend on CPU | Frame rate drop with no plugin metric change | Expected — the inference server is competing for memory bandwidth. Move inference to GPU or a second host | Owner (capacity decision) |
@@ -1562,6 +1578,35 @@ Advisory. Gaps found while composing this PRD, not blockers.
 - **v1.2 note — the snapshot was specified from the Lua surface, not the C++ one.** Every field in the original §Exactly what is transmitted named a Lua verb, and two of them turned out to have no C++ equivalent. The lesson generalizes: for a C++ plugin, "which verb returns this?" is the wrong traceability question — "which header or schema record exposes this to *the plugin*?" is the right one. Appendix A now carries the Lua/C++ split explicitly so the next field added is checked against both columns.
 
 ## Changelog
+
+### v1.7.3 — 2026-08-03
+
+One decision, taken because the alternatives were to accept a demo defect or to keep writing
+doctrine the evidence says will not move it.
+
+- **Stage-B check B8 and reject reason `loadout` added to AIC-VAL-1.** `engage`/`crank` is rejected
+  when the Tier-1-reported loadout for the order's snapshot window is **entirely dry**. The Phase 1b
+  gate's one standing order-quality miss — a winchester aircraft drawing `engage` where doctrine
+  says `rtb` — becomes a counted rejection with a runbook row instead of an unmeasurable complaint.
+- **Why the validator rather than more doctrine.** Two focused doctrine iterations moved the rate
+  not at all. §Rabbit holes names that as the timebox signal. Restating the same instruction louder
+  is not evidence-led, and the alternative it points to — reconsidering the RAG deferral — is a far
+  larger commitment than the miss justifies.
+- **Why a new reason rather than widening B3.** `reject.track` climbing and `reject.loadout`
+  climbing have different diagnoses and different responses. `RejectReason.h` states that rationale
+  in its own header comment; folding one into the other would destroy the information the
+  fine-grained reason set exists to carry.
+- **"Entirely dry" is defined so that absence is not evidence.** An empty reported loadout — no
+  hardpoints at all — does **not** trigger B8. That case means the Tier-1 script does not report
+  stores, which §Validation requires to keep receiving orders, and B3 already rejects its targeted
+  orders because a script reporting no loadout reports no tracks either. This distinction is the
+  part a naive reading of "reject when the loadout is empty" gets wrong, and it carries its own
+  test for that reason.
+- **The window rule matches B3's.** B8 validates the loadout that accompanied the order's
+  *snapshot*, not the one current at publication. An aircraft that fired its last missile while
+  inference was in flight must not retroactively invalidate an order that was correct when it was
+  requested.
+- **No FR surface is widened.** No Lua function, posture, order field, config field, or backend.
 
 ### v1.7.2 — 2026-08-03
 
