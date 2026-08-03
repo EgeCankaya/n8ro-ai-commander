@@ -28,13 +28,25 @@ Read it before changing anything here.
 Phase 1b measured, through the shipping adapter against Ollama 0.32.5 /
 `qwen2.5:7b-instruct-q8_0`: **100 % acceptance over a 200-order soak**, `reject.schema`
 **0.00 %**, `reject.shape` **0.00 %**, p95 **2,163 ms**, and the first order of a run
-completes from a cold model in 4,566 ms against a 90 s budget. Unit suite 87/87, also
-87/87 under AddressSanitizer; deployed-artifact smoke 25/25.
+completes from a cold model in 4,566 ms against a 90 s budget. Unit suite 98/98, also
+98/98 under AddressSanitizer; deployed-artifact smoke 30/30.
 
-Two gate items are **not** satisfied, and neither is a code defect: the in-engine live
-smoke and the H1 assessment both need the commander switched on inside the engine, and
-the headless host does not apply per-plugin configuration (PRD §Corrections item 17).
-Running that pair needs the UI host, or an owner decision about headless configuration.
+The two gate items that were previously unreachable have now **run** (PRD v1.7.4). The
+headless host applies `data/config/plugins/ai-commander.cfg` as of v1.7.2, so the
+commander can be switched on for an automated run; the H1 paired logs exist for review.
+
+**The in-engine live smoke failed one assertion: acceptance 50 %** (5 of 10) against a
+≥ 90 % bar. All three rejections were the Stage-B safety envelope refusing bad orders —
+two waypoints ~5,300 km away and one 600 m/s cruise speed. The likely cause is that the
+doctrine says *"egress toward the home field"* while carrying no coordinates by design,
+so a posture needing a destination has nothing to derive one from. It is **not** being
+resolved by widening the geofence: the bound is not what is wrong.
+
+Two caveats on that run, both in the PRD: the commanded entities are **destroyed at
+~85 s** by the scenario, so a "10-minute run" measures about 85 seconds of commanding on
+10 requests; and the reported p95 is the second-highest of five samples, so no percentile
+claim is made from it. `reject.shape` held at **0 %** against situations nobody authored.
+Plugin frame cost over **12,001 frames**: p50 0.0018 ms, max 0.262 ms against a 5 ms bar.
 
 **H2 was measured and is not supported** — a byte-stable prefix is worth 3.1 %, not the
 predicted ≥ 30 %, on a GPU where prompt evaluation is a small share of the round trip.

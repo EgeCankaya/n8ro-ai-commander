@@ -32,11 +32,16 @@
     Everything it touches in the release tree is backed up first and restored in a finally block,
     including on failure. The tree is left as it was found.
 
-    KNOWN PRECONDITION: the headless host does not apply per-plugin config. Observed at the Phase 1b
-    gate - a data/config/plugins/ai-commander.cfg carrying commander.enabled=true and
-    commander.backend=local still produced "backend=stub enabled=false" in the startup log. Until
-    that is resolved, the commander-on assertions below FAIL LOUDLY rather than silently measuring
-    the stub backend, and the run must be driven from the UI host instead.
+    HOW THE COMMANDER GETS TURNED ON (changed at the Phase 1b close-out, PRD v1.7.2). At the Phase
+    1b gate this script could not run: the headless host applies no per-plugin config, so a
+    data/config/plugins/ai-commander.cfg carrying commander.enabled=true still produced
+    "backend=stub enabled=false" in the startup log, and both this smoke and the H1 pair were
+    recorded as unmet gate items. The plugin now reads that file itself at initialize()
+    (AIC-API-2), so this script writes it, asserts it took effect, and removes it in the finally.
+
+    The "commander is ON" assertion below is still an ASSERTION rather than an assumption. A green
+    smoke over the stub backend's canned orders is worse than a red one, because it looks like
+    evidence.
 
 .PARAMETER ReleaseRoot
     The N8RO release tree. Defaults to N8RO_RELEASE_ROOT, then C:\N8RO.
@@ -99,6 +104,16 @@ $backup = Join-Path $workDir "oppint_red_interceptor-backup-$stamp.lua"
 Copy-Item $missionPath $backup -Force
 Write-Host "  shipped mission script backed up to $backup"
 
+# The deployed config now takes effect on this host (PRD v1.7.2), so it is release-tree state this
+# script is responsible for putting back exactly as it found it.
+$deployedCfg = Join-Path $ReleaseRoot "data\config\plugins\ai-commander.cfg"
+$cfgBackup   = Join-Path $workDir "ai-commander-cfg-backup-$stamp"
+$hadCfg      = Test-Path $deployedCfg
+if ($hadCfg) {
+    Copy-Item $deployedCfg $cfgBackup -Force
+    Write-Host "  pre-existing ai-commander.cfg backed up to $cfgBackup"
+}
+
 $seededDoctrine = $false
 
 try {
@@ -136,6 +151,20 @@ cd /d "%N8RO_RELEASE%"
 
     if (Test-Path $orderLog) { Remove-Item $orderLog -Force -ErrorAction SilentlyContinue }
 
+    # -- 2. turn the commander on -----------------------------------------------------------------
+    # This is what PRD v1.7.2 bought. commander.enabled is a positive act, and this script is
+    # taking it explicitly and reversibly rather than depending on a file someone left behind.
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $deployedCfg) | Out-Null
+    @"
+# Written by run-live-scenario.ps1 for the Phase 1b live gate. Removed in its finally block.
+commander.enabled=true
+commander.backend=local
+commander.cadenceS=20
+local.model=qwen2.5:7b-instruct-q8_0
+local.grammarEnabled=true
+"@ | Set-Content -Path $deployedCfg -Encoding ascii
+    Assert-That (Test-Path $deployedCfg) "deployed config written to data/config/plugins/ai-commander.cfg"
+
     # -- 3. commander-on run ---------------------------------------------------------------------
     Write-Host "`n-- commander-on run --"
     $log = Invoke-Scenario -Name "Mariana Shield" -Seconds $RunSeconds -Tag "commander-on"
@@ -147,11 +176,22 @@ cd /d "%N8RO_RELEASE%"
     # If this fails the run measured NOTHING - it measured the stub backend. Asserted rather than
     # assumed, because a green smoke over canned orders is worse than a red one.
     Assert-That ($log -match 'backend=local enabled=true') `
-        ("commander is ON with the local backend - if this fails the headless host did not apply " +
-         "per-plugin config and the run is void; drive it from the UI host instead")
+        ("commander is ON with the local backend - if this fails the plugin did not apply the " +
+         "deployed config (AIC-API-2, PRD v1.7.2) and the run is void")
+
+    Assert-That ($log -match 'applied 5 field\(s\) from the deployed config') `
+        "the deployed config was read and applied in full, by path and field count"
 
     Assert-That ($log -match 'doctrine loaded from') `
         "doctrine block was loaded (a missing one degrades order quality silently)"
+
+    # NOTE ON WHERE THE RUN-END STATS COME FROM. They are read out of the ORDER LOG, not stdout.
+    # The engine's stdout is block-buffered when redirected to a file, so the last buffer of a run
+    # is routinely lost - observed here: a clean 90 s run whose log ends at simulationTime 80.05 s
+    # with no shutdown lines at all, while the order log carries a t=90.1 s run-end record. Any
+    # assertion keyed to the TAIL of stdout is therefore unreliable by construction. The order log
+    # is the PRD's own record of a run (AIC-DET-1) and is written through the recorder, which is
+    # why every other assertion below already reads it.
 
     # Order-log assertions. The log is the PRD's own record of what happened (AIC-DET-1), so the
     # smoke reads it rather than re-deriving from stdout.
@@ -187,6 +227,33 @@ cd /d "%N8RO_RELEASE%"
 
         $byReason = $rejected | Group-Object reason | Sort-Object Count -Descending
         foreach ($group in $byReason) { Write-Host "  reject.$($group.Name): $($group.Count)" }
+
+        # Validation's live-smoke bar: no frame exceeding 5 ms of plugin cost. The run-end record
+        # carries the whole-run MAXIMUM, not a percentile - a p95 inside budget with one 40 ms
+        # outlier is still a dropped frame in a demo, so the maximum is the number that matters.
+        $runEnd = @($records | Where-Object { $_.event -eq 'commander.disabled' }) | Select-Object -Last 1
+        if ($runEnd) {
+            $stats = $runEnd.detail | ConvertFrom-Json
+            Write-Host ("  plugin frame cost: p50 {0} ms, p95 {1} ms, max {2} ms over {3} frames" -f `
+                $stats.frame.p50Ms, $stats.frame.p95Ms, $stats.frame.maxMs, $stats.frame.frames)
+            Assert-That ($stats.frame.maxMs -lt 5.0) `
+                "no frame exceeded 5 ms of plugin cost (max $($stats.frame.maxMs) ms)"
+            Assert-That ($stats.timeouts -eq 0) `
+                "the plugin's own timeout counter is zero ($($stats.timeouts))"
+
+            # Reported separately and NOT held to a bar, per the Phase 1b gate. The offline
+            # harness measured 0.00 % against six hand-written situations; this is the first
+            # measurement against situations nobody chose.
+            $shape  = if ($stats.rejectByReason.shape)  { $stats.rejectByReason.shape }  else { 0 }
+            $schema = if ($stats.rejectByReason.schema) { $stats.rejectByReason.schema } else { 0 }
+            $shapeRate  = if ($stats.requested) { 100.0 * $shape  / $stats.requested } else { 0 }
+            $schemaRate = if ($stats.requested) { 100.0 * $schema / $stats.requested } else { 0 }
+            Write-Host ("  reject.shape : {0} of {1} requested ({2} %)" -f $shape, $stats.requested, [math]::Round($shapeRate,2))
+            Write-Host ("  reject.schema: {0} of {1} requested ({2} %)" -f $schema, $stats.requested, [math]::Round($schemaRate,2))
+            Assert-That ($schemaRate -lt 1.0) "reject.schema < 1 % (got $([math]::Round($schemaRate,2)) %)"
+        } else {
+            Assert-That $false "run-end stats record present in the order log"
+        }
     } else {
         Assert-That $false "order log written to $orderLog"
     }
@@ -198,9 +265,17 @@ cd /d "%N8RO_RELEASE%"
         Write-Host "`n-- commander-off control run (H1 pair) --"
         # Restore the shipped script FIRST, so the control run is the scenario exactly as it ships.
         Copy-Item $backup $missionPath -Force
+        # And take the config away, so the control is genuinely commander-OFF. Validation asks the
+        # commander-off run to be indistinguishable from one with the plugin absent; leaving the
+        # config in place would leave the commander enabled against the stock script and measure
+        # something else entirely.
+        if (Test-Path $deployedCfg) { Remove-Item $deployedCfg -Force }
+
         $control = Invoke-Scenario -Name "Mariana Shield" -Seconds $RunSeconds -Tag "commander-off"
         Assert-That ($control -match 'Interceptor committed: RedSu35_01') `
             "control run flies RedSu35_01 on stock Tier-1 logic"
+        Assert-That ($control -match 'enabled=false') `
+            "control run really is commander-off, not merely running the stock script"
         Write-Host "  H1 is a JUDGEMENT, not an assertion: a domain reviewer compares the posture"
         Write-Host "  transitions in the two logs. Both are kept in $workDir for that review."
     }
@@ -212,6 +287,18 @@ finally {
     # this scenario, including interactive ones.
     Copy-Item $backup $missionPath -Force
     Write-Host "  shipped oppint_red_interceptor.lua restored from $backup"
+
+    # The config this script wrote now has teeth on every host (PRD v1.7.2). Leaving it behind
+    # would silently enable the commander on every later run of this tree, interactive ones
+    # included - which is the residual exposure v1.7.2 records, so this script must not create it.
+    if (Test-Path $deployedCfg) { Remove-Item $deployedCfg -Force }
+    if ($hadCfg -and (Test-Path $cfgBackup)) {
+        Copy-Item $cfgBackup $deployedCfg -Force
+        Write-Host "  pre-existing ai-commander.cfg restored"
+    } else {
+        Write-Host "  ai-commander.cfg removed; no commander config left in the release tree"
+    }
+
     if ($seededDoctrine -and (Test-Path $doctrineDst)) {
         Remove-Item $doctrineDst -Force; Write-Host "  removed the seeded doctrine"
     }
