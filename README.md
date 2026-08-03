@@ -22,7 +22,7 @@ Read it before changing anything here.
 |---|---|---|
 | 0 | Scaffold, repo, empty `aiCommander` namespace | **done** |
 | 1a | Full pipeline on the `stub` / `replay` backends | **done** (PR #1) |
-| 1b | `local` adapter against Ollama | **done bar one gate item** — see below |
+| 1b | `local` adapter against Ollama | **done** — every gate item has a result |
 | 2 | `claude` adapter | not started; needs owner authorization |
 
 Phase 1b measured, through the shipping adapter against Ollama 0.32.5 /
@@ -31,19 +31,29 @@ Phase 1b measured, through the shipping adapter against Ollama 0.32.5 /
 completes from a cold model in 4,566 ms against a 90 s budget. Unit suite 98/98, also
 98/98 under AddressSanitizer; deployed-artifact smoke 30/30.
 
-The two gate items that were previously unreachable have now **run** (PRD v1.7.4). The
-headless host applies `data/config/plugins/ai-commander.cfg` as of v1.7.2, so the
-commander can be switched on for an automated run; the H1 paired logs exist for review.
+The two gate items that were previously unreachable have now **run**, and the in-engine
+live smoke **passes — 17 checks, 0 failed** (PRD v1.7.6). The headless host applies
+`data/config/plugins/ai-commander.cfg` as of v1.7.2, so the commander can be switched on
+for an automated run; the H1 paired logs exist for review.
 
-**The in-engine live smoke rejects a low rate of orders, and the cause is now known.** Every
-rejection is the Stage-B safety envelope working. With `rawBody` delivered on Stage-B
-rejections (v1.7.5) the offending order names itself: `posture: hold` carrying
-`waypoint: −31.952876, 115.860450` — **Perth, Western Australia**, against an own-ship
-position near Guam. The model substitutes a memorised real-world coordinate for a waypoint
-whose correct value was own-ship position. Every field is well-formed and in range, so
-neither the schema nor the constrained decoder can catch it — **Stage B is the only thing
-that does.** A separate order in the same run had the geography right and the speed wrong
-(600 m/s against a 400 bound). Two independent low-rate lapses, not one systematic fault.
+**The phase's most useful finding.** The live runs reject a low rate of orders, every one of
+them the Stage-B safety envelope working. With `rawBody` delivered on Stage-B rejections
+(v1.7.5) the offending order names itself:
+
+```
+posture: hold,  reason: "Maintain orbit over friendly positions."
+waypoint: { latitudeDeg: -31.952876, longitudeDeg: 115.860450 }
+```
+
+**−31.952876, 115.860450 is Perth, Western Australia** — against an own-ship position near
+Guam. The model substitutes a memorised real-world coordinate for a waypoint whose correct
+value was own-ship position. **It reproduces:** a later run drew the same coordinate on a
+different entity, agreeing to four decimal places, on a value that appears nowhere in the
+prompt.
+
+Every field it emits is well-formed and in range, so neither the schema nor the constrained
+decoder can catch it — **Stage B is the only thing that does.** That is the clearest
+evidence this project has produced for why the validator is not optional.
 
 It is **not** resolved by widening the geofence. The bound is what caught it.
 
