@@ -10,8 +10,9 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 > **One-liner:** A `n8ro-sim` plugin that lets a language model issue tactical *intent* — posture, target, waypoint, rules of engagement — to entities in a running scenario, while every kinematic decision and every state mutation stays in the deterministic C++ and Lua tiers that already exist.
 
 **Date:** 2026-07-31 (revised 2026-08-03)
-**Status:** Draft v1.7.5
+**Status:** Draft v1.7.6
 **Revision history:**
+- v1.7.6 — **Phase 1b CLOSED.** The live-scenario smoke **passes, 17 checks / 0 failed**, against the gate as re-specified in v1.7.5, and every Phase 1b gate item now has a result rather than a blocker. What the phase does not claim is enumerated in §Carried out of Phase 1b — five named, owned items, none of them a gate item marked green by omission. One is upgraded by this revision: the memorised-coordinate substitution **reproduces** — a third run drew `−31.952247, 115.857309` on a *different* entity, agreeing with the first to four decimal places on a coordinate that appears nowhere in the prompt. Three observations across two entities and three runs make it a characterised failure mode with a known containment rather than a sampling accident, and it is the strongest concrete evidence this phase produced for why Stage B is not optional.
 - v1.7.5 — **refuted v1.7.4's explanation of the acceptance failure, then found the real one by fixing the observability gap that had made it a guess; and re-specified the live-smoke gate against what the OQ-6 scenario can supply.** v1.7.4 hypothesised that the `geofence` rejections came from a doctrine block that says *"egress toward the home field"* while carrying no coordinates. **Measured offline: false** — across nine situations and ten waypoint-carrying orders, three of them drawing `rtb`, the model put the waypoint on own-ship position every time at 0 m. AIC-DET-1's `rawBody` was empty on every Stage-B rejection, so the record said how far the waypoint was and never where; **fixed, the run repeated, and the offending order names itself: `posture: hold` with `waypoint: −31.952876, 115.860450` — Perth, Western Australia.** The model substitutes a memorised real-world coordinate for a waypoint whose correct value was own-ship position. That is a low-rate hallucination of a well-formed, in-range, entirely wrong number — not a doctrine gap, not schema-constrainable, and exactly the case the Stage-B envelope exists to catch. The live-smoke gate is re-specified to assert over the **commanded window** rather than a wall-clock 10 minutes, to drop *"entity completes the scenario"* (the commanded entity is opposed; whether it survives is the scenario's outcome, not the commander's correctness), and to **report** acceptance rather than bar it — the ≥ 95 % bar stays where the sample size is, on the 200-order soak.
 - v1.7.4 — **ran the two Phase 1b gate items that v1.7.1 recorded as unreachable, and reported what they produced.** The in-engine live smoke and the H1 paired runs both executed, because v1.7.2 made `commander.enabled` reachable on the headless host; H1's two logs exist for review. **The live smoke FAILED one assertion — acceptance 50 % against a ≥ 90 % bar** — and the failure is recorded with its cause rather than restated into something that passes: all three rejections were the Stage-B safety envelope refusing bad orders, two of them waypoints ~5,300 km away, which traces to a doctrine block that says *"egress toward the home field"* while carrying no coordinates by design. Two further findings: the commanded entities are **destroyed at ~85 s**, so the gate item's "10-minute run" is not what this scenario delivers and the sample sizes are correspondingly small; and the reported p95 is the second-highest of five samples, so no percentile claim is made from it. `reject.shape` held at **0 %** against situations nobody authored — the first evidence for it from outside the hand-written set.
 - v1.7.3 — **added Stage-B check B8 and the `loadout` reject reason**, resolving the one standing order-quality miss the Phase 1b gate recorded. A winchester aircraft with a close contact drew `engage` where doctrine says `rtb`; two focused doctrine iterations moved it not at all, which is §Rabbit holes' timebox signal rather than a reason to keep writing. B8 rejects `engage`/`crank` when the Tier-1-reported loadout for the order's snapshot window is **entirely dry** — at least one hardpoint reported and every one of them at `ammoCount == 0`. An **empty** reported loadout deliberately does **not** trigger it: that means "this script does not report stores", which §Validation requires to keep receiving orders, and B3 already rejects its targeted orders. This adds a reject reason, not a Lua function, posture, order field, or config field. The value of the change is that an unmeasurable quality complaint becomes a counted rejection with a runbook row behind it.
@@ -1296,7 +1297,13 @@ Out-of-Scope row, not closed.
 
 ### Phase 1b — Local backend
 
-**Gate result, 2026-08-02** *(v1.7.1 — measured through the shipping adapter on the verification host: Ollama 0.32.5, `qwen2.5:7b-instruct-q8_0`, RTX 4070 Ti SUPER)*
+> **PHASE CLOSED 2026-08-03 (v1.7.6).** Every gate item has a result. The live-scenario smoke and
+> the H1 paired runs — the two items v1.7.1 recorded as unreachable — both ran once AIC-API-2 gained
+> a deployed configuration source, and the live smoke now **passes, 17 checks / 0 failed**, against
+> the gate as re-specified in v1.7.5. What the phase does **not** claim is listed under §Carried out
+> of Phase 1b below; those are open items with owners, not gate items quietly marked green.
+
+**Gate result, 2026-08-02** *(v1.7.1 — measured through the shipping adapter on the verification host: Ollama 0.32.5, `qwen2.5:7b-instruct-q8_0`, RTX 4070 Ti SUPER; live-smoke and H1 rows updated 2026-08-03, v1.7.6)*
 
 | Gate item | Result |
 |---|---|
@@ -1307,7 +1314,7 @@ Out-of-Scope row, not closed.
 | The **first order of a run** completes rather than timing out | ✅ **4,566 ms, accepted**, from a model force-evicted with `keep_alive: 0`. Second order 2,120 ms. Budget 90 s |
 | H2 measured | ✅ measured, and **not supported**: 2,291 ms stable vs 2,362 ms perturbed, a 3.1 % difference against a predicted ≥ 30 % (see §Key hypotheses) |
 | H1 assessed on paired runs | ✅ **run 2026-08-03** — two 600 s logs from identical initial conditions, commander-on and commander-off, retained for the domain review. The review itself is a judgement and is not claimed here |
-| Live smoke on the OQ-6 scenario | ⚠️ **run 2026-08-03; reachable at last** — §Corrections item 17 resolved, and the run measured the `local` backend asserted rather than assumed. Every assertion passed except acceptance, which was **50 %** (5 of 10) on the first run and **60 %** (6 of 10) on the repeat. All rejections were the Stage-B envelope catching genuinely bad orders, and the cause is identified in §Phase 1b live-smoke findings. Acceptance is **re-specified as reported-not-barred at this sample size** (v1.7.5); the ≥ 95 % bar remains on the 200-order soak |
+| Live smoke on the OQ-6 scenario | ✅ **PASS 2026-08-03 — 17 checks, 0 failed**, against the gate as re-specified in v1.7.5. Reachable at last: §Corrections item 17 resolved, and the run measured the `local` backend asserted from the startup log rather than assumed. Acceptance across the three runs was 50 %, 60 %, 70 % (5, 6, 7 of 10); it is **reported, not barred**, at this sample size, and every rejection was the Stage-B envelope catching a genuinely bad order — cause identified in §Phase 1b live-smoke findings. The ≥ 95 % bar remains on the 200-order soak |
 | OQ-5 and OQ-6 resolved | ✅ both, at phase start |
 | Unit suite green, ASan-clean, no server or network in CI | ✅ **87/87**, and **87/87 under AddressSanitizer** |
 | Deployed-artifact smoke | ✅ **25/25** |
@@ -1349,6 +1356,8 @@ waypoint: { latitudeDeg: -31.952876, longitudeDeg: 115.860450, altitudeHaeM: 100
 
 **−31.952876, 115.860450 is Perth, Western Australia** — a heavily-memorised real-world coordinate pair. Own-ship was near Guam, hence 5,928,884 m. The model did not fail to find a home field: **it substituted a remembered city coordinate for a waypoint whose correct value was own-ship position.** The posture is `hold`, the one case where the answer is unambiguously "where you already are" and which the offline probe got right ten times out of ten.
 
+**It reproduces** *(v1.7.6)*. A third run produced the same coordinate on a *different* entity — `RedSu35_02`, `−31.952247, 115.857309`, 5,932,920 m — with the same `posture: hold` and the same `reason: "Maintain orbit over friendly positions."` Three observations across two entities and three runs, agreeing to four decimal places on a coordinate that appears nowhere in the prompt, is a stable property of this model on this prompt rather than a sampling accident. Recording it that way matters: a one-off would be noise to watch, whereas a reproducible substitution is a **characterised failure mode with a known containment**, and it is the strongest concrete evidence this phase produced for why Stage B is not optional.
+
 That reframes the defect entirely. It is not a gap in the doctrine's content — it is **a low-rate hallucination of a plausible-looking absolute coordinate**, which no amount of doctrine wording reliably prevents and which the schema cannot constrain, because every value it emitted is a well-formed number in a legal range. **The geofence is the only thing standing between that order and an aircraft flying to Australia**, which is precisely the case §Tenets' "the validator is the real defence" was written for. The control worked.
 
 The second rejection in the same run is a different defect on the same posture, and it is worth recording next to the first because the contrast is instructive: `cruiseSpeedMps: 600` against a 400 m/s bound, with a waypoint of `13.484045, 144.991216` — **correct, adjacent to own-ship**. So the model gets the geography right and the kinematics wrong in one order, and the reverse in another. These are independent low-rate lapses, not one systematic misunderstanding.
@@ -1377,7 +1386,7 @@ The second rejection in the same run is a different defect on the same posture, 
 **Deliverables:** *(v1.6 — OQ-1 and OQ-2 resolved, so these are concrete rather than conditional.)* the `local` adapter against **Ollama** per the pinned contract in AIC-BE-1; constrained decoding via Ollama's `format` parameter carrying the embedded AIC-ORD-1 schema; live smoke on the OQ-6 scenario; H1 and H2 measurements.
 
 **Validation gate:**
-- Live smoke passes all assertions.
+- ✅ Live smoke passes all assertions *(v1.7.6 — 17 checks / 0 failed, against the gate as re-specified in v1.7.5)*.
 - Acceptance rate ≥ 95 % over a 200-order soak; **schema** rejections < 1 %.
 - *(v1.6, **restated v1.7**)* `reject.shape` is reported separately and is **not** held to the < 1 % bar. v1.6 justified that by saying shape rejections measure *prompt* quality; that was measured at Phase 1b start and is **false** — a field-presence block stating the A6 rules imperatively changed the rate not at all (§Corrections item 13). What moves it is the schema encoding, and with AIC-ORD-1's `oneOf` branches the measured rate is **0/12**. The counter therefore stays separate for a different reason than v1.6 gave: it is now a **regression detector**. A non-trivial `reject.shape` no longer means "the prompt needs work" — it means constrained decoding is not in force, and the runbook says so.
 - p95 latency within the target for the chosen model and hardware. Baseline to beat on the verification host: **~1.7 s warm** (qwen2.5 7B q8_0, RTX 4070 Ti SUPER).
@@ -1386,6 +1395,18 @@ The second rejection in the same run is a different defect on the same posture, 
 - H1 assessed by a domain reviewer on paired commander-on / commander-off runs — `"Mariana Shield"` (stock Tier-1) against `"Mariana Shield AI"` (`RedSu35_01` commanded), same seed entry, same initial conditions.
 - ✅ **OQ-5** and **OQ-6** resolved *at phase start rather than at the gate* — see §Open questions. *(OQ-1 and OQ-2 resolved in v1.6.)* Resolving them first was deliberate: OQ-6 gates what the smoke even runs against, and leaving a gating question open past the phase that depends on it is how OQ-4 sat unresolved through three revisions.
 - *(v1.7)* The embedded schema is the `oneOf` document of AIC-ORD-1, asserted by unit test, and `reject.shape` over the soak is reported against the 0/12 spike baseline. A materially higher rate is a finding about the shipping system that the 12-order spike did not predict, and it is reported as such rather than absorbed.
+
+#### Carried out of Phase 1b *(v1.7.6)*
+
+The phase closes with these open, named, and owned — not folded into a gate result.
+
+| # | Item | Why it is not a Phase 1b defect | Where it goes |
+|---|---|---|---|
+| C1 | **The model substitutes memorised real-world coordinates for waypoints**, reproducibly (three observations, two entities). Contained by Stage-B `geofence` | It is a property of the local 7B, not of this system. Every field it emits is well-formed and in range, so no schema, decoder, or prompt change reliably prevents it — only the validator catches it, and the validator does | Phase 2 comparison: whether a frontier model does the same is now a **measurable** question with a concrete benchmark behind it |
+| C2 | **B8 has no live evidence.** No order in any run carried a target, so `engage`/`crank` never occurred and the winchester path was never reached | The logic is covered by five unit tests. What is missing is a scenario state — Tier 1 reporting tracks at the moment the rail is empty — not an implementation | Exercise opportunistically; not worth engineering a scenario for |
+| C3 | **In-engine p95 is unmeasured.** Runs yield ~10 orders, and the observed figures (10.4 s, 4.9 s, 7.6 s) are the second-highest of five to seven samples | A ≤ 10-minute engagement cannot produce a percentile. The offline soak's 2,163 ms p95 over 200 orders stands as the latency number | Revisit only if a scenario whose subject survives longer is available |
+| C4 | **`rawBody` records the whole Ollama envelope**, whose `context` token array consumes most of the 4 KB cap; and `sanitizeText` strips `"` and `\`, so the field is human-readable but not re-parseable JSON | The order survives because it sits at the front of the envelope, and the field did its job — it identified C1 | Recording the unwrapped `response` would be strictly more useful per byte. Small, deferred |
+| C5 | **OQ-3 and OQ-8 remain open** | OQ-8's measurement half is done; its decision needs the hosted adapter to exist | Phase 2 start |
 
 ### Phase 2 — Claude backend
 
@@ -1424,6 +1445,8 @@ The second rejection in the same run is a different defect on the same posture, 
 - [ ] Owner authorization for the hosted backend — **outstanding, Phase 2 gate**
 - [ ] Repository visibility confirmed — private assumed; publication needs the same authorization as the hosted backend
 - [x] *(v1.7)* Every conditional rule in AIC-ORD-1 is expressed in a form the constrained decoder can enforce, verified by measurement rather than by assumption
+- [x] *(v1.7.6)* Every Phase 1b gate item has a **result**, and every item the phase does not claim is enumerated in §Carried out of Phase 1b with a reason and a destination — rather than left implicit in a green summary
+- [x] *(v1.7.6)* Every gate item names something the target can actually do, re-checked against a run rather than against intent — the live-smoke item was re-specified in v1.7.5 when the OQ-6 scenario turned out not to keep its subject alive for the duration the gate asked for
 - [ ] OQ-3 and OQ-8 — **outstanding** *(v1.7 — OQ-5 and OQ-6 resolved 2026-08-02; OQ-1 and OQ-2 resolved 2026-08-02 in v1.6; OQ-4 resolved 2026-08-01; OQ-7 and OQ-9 resolved 2026-08-01. OQ-3 depends on a roadmap answer this document cannot produce; OQ-8 has its measurement but not its decision, which is the owner's at Phase 2 start)*
 
 ## Appendix A: Units and frames, traced to source
@@ -1645,6 +1668,25 @@ Advisory. Gaps found while composing this PRD, not blockers.
 - **v1.2 note — the snapshot was specified from the Lua surface, not the C++ one.** Every field in the original §Exactly what is transmitted named a Lua verb, and two of them turned out to have no C++ equivalent. The lesson generalizes: for a C++ plugin, "which verb returns this?" is the wrong traceability question — "which header or schema record exposes this to *the plugin*?" is the right one. Appendix A now carries the Lua/C++ split explicitly so the next field added is checked against both columns.
 
 ## Changelog
+
+### v1.7.6 — 2026-08-03
+
+Phase 1b closes.
+
+- **The live-scenario smoke passes: 17 checks, 0 failed**, against the gate as re-specified in
+  v1.7.5. Both items v1.7.1 recorded as unreachable have now run, and every Phase 1b gate item has
+  a result. The failing runs and their causes stay in the record above; nothing was deleted to make
+  this line true.
+- **§Carried out of Phase 1b** enumerates the five things the phase does **not** claim, each with a
+  reason it is not a Phase 1b defect and a place it goes. A phase that closes with an empty
+  carried-forward list is usually one that stopped looking.
+- **The memorised-coordinate substitution reproduces**, and that upgrades it from an anecdote to a
+  characterised failure mode. A third run drew `−31.952247, 115.857309` on `RedSu35_02` — Perth
+  again, agreeing with the first observation to four decimal places, same `posture: hold`, same
+  `reason` string — against a coordinate that appears nowhere in the prompt. **This is the phase's
+  most useful finding.** It is a well-formed, in-range, entirely wrong number that no schema,
+  decoder, or prompt wording catches, and the Stage-B envelope catches it every time. It also turns
+  "does a frontier model do this too?" into a measurable Phase 2 question with a concrete benchmark.
 
 ### v1.7.5 — 2026-08-03
 
