@@ -121,28 +121,38 @@ AIC_TEST(SchemaUnitsTraceToTheSchemaReference) {
 // The line that makes "the model is structurally forbidden to emit kinematics" a property of the
 // contract rather than a claim about the prompt.
 AIC_TEST(SchemaForbidsAdditionalProperties) {
-    const JsonValue& schema = orderJsonSchema();
-    AIC_EXPECT_TRUE(schema.has("additionalProperties"),
-                    "the order schema must declare additionalProperties");
-    AIC_EXPECT_FALSE(schema.get("additionalProperties").asBool(),
-                     "additionalProperties must be false - an unknown property is a rejection, "
-                     "not something quietly ignored");
+    // (v1.7) The document is oneOf over two branches, so the guarantee has to hold on EVERY branch:
+    // one permissive branch would be a hole the model could steer into by choosing its posture.
+    const JsonValue branches = orderJsonSchema().get("oneOf");
+    AIC_EXPECT_TRUE(branches.isArray() && branches.size() >= 2,
+                    "the order schema must be oneOf over posture-discriminated branches");
 
-    // And the same on the nested waypoint object, or a kinematic field could hide one level down.
-    const JsonValue waypoint = schema.get("properties").get("waypoint");
-    AIC_EXPECT_TRUE(waypoint.has("additionalProperties"),
-                    "the waypoint object must declare additionalProperties");
-    AIC_EXPECT_FALSE(waypoint.get("additionalProperties").asBool(),
-                     "waypoint.additionalProperties must be false");
+    for (std::size_t i = 0; i < branches.size(); ++i) {
+        const JsonValue branch = branches.at(i);
+        AIC_EXPECT_TRUE(branch.has("additionalProperties"),
+                        std::string("branch ") + std::to_string(i)
+                            + " must declare additionalProperties");
+        AIC_EXPECT_FALSE(branch.get("additionalProperties").asBool(),
+                         std::string("branch ") + std::to_string(i)
+                             + ": additionalProperties must be false - an unknown property is a "
+                               "rejection, not something quietly ignored");
+
+        // And the same on the nested waypoint object, where one exists, or a kinematic field could
+        // hide one level down.
+        if (branch.get("properties").has("waypoint")) {
+            const JsonValue waypoint = branch.get("properties").get("waypoint");
+            AIC_EXPECT_TRUE(waypoint.has("additionalProperties"),
+                            "the waypoint object must declare additionalProperties");
+            AIC_EXPECT_FALSE(waypoint.get("additionalProperties").asBool(),
+                             "waypoint.additionalProperties must be false");
+        }
+    }
     return true;
 }
 
 // The negative space of the schema is the requirement. Enumerate the fields the model must not be
 // able to express, and assert none of them is a property at either level.
 AIC_TEST(SchemaHasNoKinematicProperties) {
-    const JsonValue properties = orderJsonSchema().get("properties");
-    const JsonValue waypointProperties = properties.get("waypoint").get("properties");
-
     const char* forbidden[] = {
         "headingDeg", "heading", "pitchDeg", "pitch", "rollDeg", "roll",
         "velN", "velE", "velD", "velocity", "velocityNed",
@@ -150,12 +160,21 @@ AIC_TEST(SchemaHasNoKinematicProperties) {
         "hardpointName", "hardpoint", "fire", "requestFire", "weaponProfileName",
     };
 
-    for (const char* name : forbidden) {
-        AIC_EXPECT_FALSE(properties.has(name),
-                         std::string("the order schema must not expose a '") + name
-                             + "' property - kinematics belong to Tier 0/1");
-        AIC_EXPECT_FALSE(waypointProperties.has(name),
-                         std::string("waypoint must not expose a '") + name + "' property");
+    // (v1.7) Checked on every branch and on every branch's waypoint. A kinematic field reachable
+    // through one posture is reachable, full stop.
+    const JsonValue branches = orderJsonSchema().get("oneOf");
+    for (std::size_t i = 0; i < branches.size(); ++i) {
+        const JsonValue properties = branches.at(i).get("properties");
+        const JsonValue waypointProperties = properties.get("waypoint").get("properties");
+        for (const char* name : forbidden) {
+            AIC_EXPECT_FALSE(properties.has(name),
+                             std::string("branch ") + std::to_string(i)
+                                 + " must not expose a '" + name
+                                 + "' property - kinematics belong to Tier 0/1");
+            AIC_EXPECT_FALSE(waypointProperties.has(name),
+                             std::string("branch ") + std::to_string(i)
+                                 + "'s waypoint must not expose a '" + name + "' property");
+        }
     }
     return true;
 }
@@ -207,28 +226,44 @@ AIC_TEST(PostureAndRoeRoundTrip) {
 // The schema's enum lists and the C++ enums must agree, or the validator would accept a posture
 // the code cannot represent (or reject one it can).
 AIC_TEST(SchemaEnumsMatchTheCppEnums) {
-    const JsonValue postureEnum = orderJsonSchema().get("properties").get("posture").get("enum");
-    AIC_EXPECT_EQ(postureEnum.size(), static_cast<std::size_t>(6), "posture enum size");
-    for (std::size_t i = 0; i < postureEnum.size(); ++i) {
-        Posture parsed{};
-        const std::string value = postureEnum.at(i).asString();
-        AIC_EXPECT_TRUE(tryParsePosture(value, parsed),
-                        "schema posture '" + value + "' has no C++ counterpart");
-    }
+    // (v1.7) The posture vocabulary is now split across the branches. The union must still be
+    // exactly the six C++ postures, and no posture may appear twice - a posture in two branches
+    // would make the oneOf ambiguous and hand the model a way to pick which rules apply to it.
+    const JsonValue branches = orderJsonSchema().get("oneOf");
+    std::vector<std::string> seen;
+    for (std::size_t b = 0; b < branches.size(); ++b) {
+        const JsonValue postureEnum = branches.at(b).get("properties").get("posture").get("enum");
+        for (std::size_t i = 0; i < postureEnum.size(); ++i) {
+            Posture parsed{};
+            const std::string value = postureEnum.at(i).asString();
+            AIC_EXPECT_TRUE(tryParsePosture(value, parsed),
+                            "schema posture '" + value + "' has no C++ counterpart");
+            for (const std::string& already : seen) {
+                AIC_EXPECT_FALSE(already == value,
+                                 "posture '" + value + "' appears in more than one oneOf branch");
+            }
+            seen.push_back(value);
+        }
 
-    const JsonValue roeEnum = orderJsonSchema().get("properties").get("roe").get("enum");
-    AIC_EXPECT_EQ(roeEnum.size(), static_cast<std::size_t>(3), "roe enum size");
-    for (std::size_t i = 0; i < roeEnum.size(); ++i) {
-        Roe parsed{};
-        const std::string value = roeEnum.at(i).asString();
-        AIC_EXPECT_TRUE(tryParseRoe(value, parsed), "schema roe '" + value + "' has no C++ counterpart");
+        const JsonValue roeEnum = branches.at(b).get("properties").get("roe").get("enum");
+        AIC_EXPECT_EQ(roeEnum.size(), static_cast<std::size_t>(3),
+                      std::string("roe enum size on branch ") + std::to_string(b));
+        for (std::size_t i = 0; i < roeEnum.size(); ++i) {
+            Roe parsed{};
+            const std::string value = roeEnum.at(i).asString();
+            AIC_EXPECT_TRUE(tryParseRoe(value, parsed),
+                            "schema roe '" + value + "' has no C++ counterpart");
+        }
     }
+    AIC_EXPECT_EQ(seen.size(), static_cast<std::size_t>(6),
+                  "the branches together must cover all six postures exactly once");
     return true;
 }
 
-// The conditional-presence rules are the part of the contract most likely to drift, because they
-// live in code rather than in the JSON Schema (draft-07 cannot express "required when posture is
-// one of...").
+// The conditional-presence rules are the part of the contract most likely to drift. (v1.7: they
+// are now expressed in the JSON Schema too, as the oneOf branches - but Stage-A A6 remains the
+// enforcement, so these predicates and the schema must agree. LocalAdapterTests asserts the schema
+// half; this asserts the code half.)
 AIC_TEST(ConditionalPresenceRulesMatchTheContract) {
     AIC_EXPECT_TRUE(postureRequiresTarget(Posture::Engage), "engage requires a target");
     AIC_EXPECT_TRUE(postureRequiresTarget(Posture::Crank), "crank requires a target");

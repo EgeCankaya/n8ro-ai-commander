@@ -12,7 +12,7 @@ thread, and the order schema has no property for heading, velocity, or accelerat
 so "never produces raw kinematics" is enforced by the absence of vocabulary, not by a
 check someone might forget to write.
 
-**The specification is [`docs/prd.md`](docs/prd.md).** It is the contract: 16 functional
+**The specification is [`docs/prd.md`](docs/prd.md).** It is the contract: 17 functional
 requirements, each with acceptance criteria and a matching user-acceptance criterion.
 Read it before changing anything here.
 
@@ -20,10 +20,24 @@ Read it before changing anything here.
 
 | Phase | Scope | State |
 |---|---|---|
-| 0 | Scaffold, repo, empty `aiCommander` namespace | in progress |
-| 1a | Full pipeline on the `stub` / `replay` backends | not started |
-| 1b | `local` adapter (Ollama / llama.cpp) | blocked on OQ-1, OQ-2 |
-| 2 | `claude` adapter | needs owner authorization |
+| 0 | Scaffold, repo, empty `aiCommander` namespace | **done** |
+| 1a | Full pipeline on the `stub` / `replay` backends | **done** (PR #1) |
+| 1b | `local` adapter against Ollama | **done bar one gate item** — see below |
+| 2 | `claude` adapter | not started; needs owner authorization |
+
+Phase 1b measured, through the shipping adapter against Ollama 0.32.5 /
+`qwen2.5:7b-instruct-q8_0`: **100 % acceptance over a 200-order soak**, `reject.schema`
+**0.00 %**, `reject.shape` **0.00 %**, p95 **2,163 ms**, and the first order of a run
+completes from a cold model in 4,566 ms against a 90 s budget. Unit suite 87/87, also
+87/87 under AddressSanitizer; deployed-artifact smoke 25/25.
+
+Two gate items are **not** satisfied, and neither is a code defect: the in-engine live
+smoke and the H1 assessment both need the commander switched on inside the engine, and
+the headless host does not apply per-plugin configuration (PRD §Corrections item 17).
+Running that pair needs the UI host, or an owner decision about headless configuration.
+
+**H2 was measured and is not supported** — a byte-stable prefix is worth 3.1 %, not the
+predicted ≥ 30 %, on a GPU where prompt evaluation is a small share of the round trip.
 
 ## Prerequisites
 
@@ -66,6 +80,40 @@ dumpbin /exports "%N8RO_RELEASE_USER_SIM_PLUGINS%\ai-commander.dll"
 ```
 
 Expected: `create_plugin`, `destroy_plugin`, `get_plugin_signature`.
+
+## Tests
+
+| Suite | Command | Needs |
+|---|---|---|
+| Unit (87) | build `tests\ai-commander-tests.vcxproj`, run `tests\bin\release\ai-commander-tests.exe` **from the release root** | SDK only — **no server, no network** |
+| ASan | same, with `/p:EnableASAN=true /p:IntDir=x64\asan\ /p:OutDir=bin\asan\`. Run it from a shell that has sourced `dev\setup-dev.cmd`, or the ASan runtime DLL will not resolve | SDK only |
+| Deployed-artifact smoke (25) | `tests\smoke\run-smoke.ps1 -ReleaseRoot C:\N8RO` | a deployed DLL |
+| **Live** gate harness | build `tests\live\ai-commander-live-tests.vcxproj`, run from the repo root: `--mode all --orders 200` | **a running inference server** |
+| **Live** scenario smoke | `tests\smoke\run-live-scenario.ps1 -RunSeconds 600` | a server, and the commander enabled |
+
+The first three are the CI gate and are required to run with no inference server and no
+network. The two live suites are separate projects invoked by hand, deliberately — the
+PRD requires that separation rather than merely recommending it.
+
+## Running the local backend
+
+You need an [Ollama](https://ollama.com) server and a model **tag** — not a GGUF
+filename, which is what the default used to be and what fails with model-not-found:
+
+```bat
+ollama serve
+ollama list                       :: local.model must name one of these tags
+```
+
+Then point `local.baseUrl` at it and set `commander.backend=local`. Two things to check
+on the first run, both of which the plugin logs:
+
+- `doctrine loaded from '...' (N bytes)` — if instead you see a WARNING naming a path it
+  could not find, the prompt is running without doctrine and order quality is degraded
+  silently. The post-build event seeds `data/doctrine.txt` into the release tree if it is
+  absent; it never overwrites an edited one.
+- `backend=local enabled=true` — the headless `n8ro-sim-local.exe` does **not** apply
+  per-plugin config, so a `.cfg` file alone will not turn the commander on there.
 
 ## Conventions
 

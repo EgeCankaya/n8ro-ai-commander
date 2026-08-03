@@ -1,4 +1,14 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Phase 1b LIVE validation harness.
+
+  Deliberately a separate project from tests\ai-commander-tests.vcxproj. The PRD's CI requirement is
+  that the unit, stubbed-integration, and replay suites run on every build with no inference server
+  and no network; everything this binary does needs both. Keeping it out of that project is what
+  makes the requirement structural rather than a note in a README.
+
+  Never add this to a CI workflow. It is invoked by hand at the Phase 1b gate.
+-->
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Release|x64">
@@ -9,8 +19,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>18.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{3f1c60a4-77d5-4c1e-9b0a-5e2d84f6c913}</ProjectGuid>
-    <RootNamespace>aicommandertests</RootNamespace>
+    <ProjectGuid>{9c4e17b2-6a35-4f80-b1d7-08e3a5f24c6b}</ProjectGuid>
+    <RootNamespace>aicommanderlivetests</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -31,7 +41,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>$(ProjectDir)bin\release\</OutDir>
     <IntDir>$(Platform)\$(Configuration)\</IntDir>
-    <TargetName>ai-commander-tests</TargetName>
+    <TargetName>ai-commander-live-tests</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <PreBuildEvent>
@@ -53,7 +63,7 @@ if not exist "$(N8RO_RELEASE)\lib\n8ro-core.lib" (
       <LanguageStandard>stdcpp17</LanguageStandard>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <PreprocessorDefinitions>NDEBUG;WIN32_LEAN_AND_MEAN;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\include;$(ProjectDir);$(N8RO_RELEASE)\include\n8ro-core;$(N8RO_RELEASE)\include\n8ro-sim;$(N8RO_RELEASE)\include\n8ro-schema;$(N8RO_RELEASE)\include\n8ro-data;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\include;$(N8RO_RELEASE)\include\n8ro-core;$(N8RO_RELEASE)\include\n8ro-sim;$(N8RO_RELEASE)\include\n8ro-schema;$(N8RO_RELEASE)\include\n8ro-data;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -63,35 +73,26 @@ if not exist "$(N8RO_RELEASE)\lib\n8ro-core.lib" (
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup Label="Code under test">
-    <ClCompile Include="..\src\CommanderConfig.cpp" />
-    <ClCompile Include="..\src\CommanderRuntime.cpp" />
-    <ClCompile Include="..\src\EnvVar.cpp" />
-    <ClCompile Include="..\src\Order.cpp" />
-    <ClCompile Include="..\src\OrderSchema.cpp" />
-    <ClCompile Include="..\src\OrderValidatorStageA.cpp" />
-    <ClCompile Include="..\src\OrderValidatorStageB.cpp" />
-    <ClCompile Include="..\src\RejectReason.cpp" />
-    <ClCompile Include="..\src\FallbackLadder.cpp" />
-    <ClCompile Include="..\src\FrameCostHistogram.cpp" />
-    <ClCompile Include="..\src\LocalLlmClient.cpp" />
-    <ClCompile Include="..\src\RuntimeColumnProbe.cpp" />
-    <ClCompile Include="..\src\OrderRecorder.cpp" />
-    <ClCompile Include="..\src\PromptRenderer.cpp" />
-    <ClCompile Include="..\src\ReplayLlmClient.cpp" />
-    <ClCompile Include="..\src\Snapshot.cpp" />
-    <ClCompile Include="..\src\StubLlmClient.cpp" />
+    <ClCompile Include="..\..\src\CommanderConfig.cpp" />
+    <ClCompile Include="..\..\src\CommanderRuntime.cpp" />
+    <ClCompile Include="..\..\src\EnvVar.cpp" />
+    <ClCompile Include="..\..\src\FallbackLadder.cpp" />
+    <ClCompile Include="..\..\src\FrameCostHistogram.cpp" />
+    <ClCompile Include="..\..\src\LocalLlmClient.cpp" />
+    <ClCompile Include="..\..\src\Order.cpp" />
+    <ClCompile Include="..\..\src\OrderRecorder.cpp" />
+    <ClCompile Include="..\..\src\OrderSchema.cpp" />
+    <ClCompile Include="..\..\src\OrderValidatorStageA.cpp" />
+    <ClCompile Include="..\..\src\OrderValidatorStageB.cpp" />
+    <ClCompile Include="..\..\src\PromptRenderer.cpp" />
+    <ClCompile Include="..\..\src\RejectReason.cpp" />
+    <ClCompile Include="..\..\src\ReplayLlmClient.cpp" />
+    <ClCompile Include="..\..\src\RuntimeColumnProbe.cpp" />
+    <ClCompile Include="..\..\src\Snapshot.cpp" />
+    <ClCompile Include="..\..\src\StubLlmClient.cpp" />
   </ItemGroup>
-  <ItemGroup Label="Test cases">
-    <ClCompile Include="TestMain.cpp" />
-    <ClCompile Include="ConfigTests.cpp" />
-    <ClCompile Include="SchemaTests.cpp" />
-    <ClCompile Include="AdversarialCorpusTests.cpp" />
-    <ClCompile Include="ThreadingTests.cpp" />
-    <ClCompile Include="LadderAndReplayTests.cpp" />
-    <ClCompile Include="PromptRendererTests.cpp" />
-    <ClCompile Include="FrameCostAndProbeTests.cpp" />
-    <ClCompile Include="PipelineIntegrationTests.cpp" />
-    <ClCompile Include="LocalAdapterTests.cpp" />
+  <ItemGroup Label="Harness">
+    <ClCompile Include="LiveMain.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

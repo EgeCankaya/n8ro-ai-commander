@@ -210,7 +210,10 @@ CandidateOrder CommanderRuntime::runWorkerCall(
         return candidate;
     }
 
-    const StageAOutcome outcome = validateStageA(result.body, candidate.snapshot.entityId);
+    // A2 needs to know how this backend wrapped the order, and it takes that as a value rather than
+    // as a client — so Stage A stays a pure function and holds nothing live.
+    const StageAOutcome outcome =
+        validateStageA(result.body, candidate.snapshot.entityId, client.envelopeFormat());
     outAccepted = outcome.accepted;
     outReason = outcome.reason;
     outDetail = outcome.detail;

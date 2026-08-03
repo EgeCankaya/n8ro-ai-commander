@@ -32,7 +32,10 @@ struct CommanderConfig {
     double cadenceS = 20.0;               // Minimum simulation seconds between orders, per entity.
     int maxCommandedEntities = 4;         // Roster cap.
     int maxConcurrentRequests = 1;        // Worker fan-out; one IHttpClient per worker.
-    int requestTimeoutS = 30;             // Written to HttpRequest::timeoutS (SDK default is 15).
+    // Written to HttpRequest::timeoutS (SDK default is 15). Sized for a COLD MODEL LOAD, not for
+    // steady state: a warm 7B answers in ~1.7 s, but the first request after Ollama evicts the
+    // model measured 22-46 s. At 30 s the first order of every run timed out, reliably.
+    int requestTimeoutS = 90;
     double maxOrderAgeS = 45.0;           // Stage-B staleness bound.
     double orderValidityS = 120.0;        // Fallback ladder step 1.
     double releaseAfterS = 300.0;         // Fallback ladder step 3.
@@ -45,8 +48,13 @@ struct CommanderConfig {
 
     // -- local.* : Phase 1b adapter (not exercised in Phase 1a) ---------------------------------
     std::string localBaseUrl = "http://localhost:11434";
-    std::string localModel = "llama-3.2-3b-instruct-q4_k_m";
+    // An OLLAMA TAG, not a GGUF filename. The shipped .gguf files need no import, and naming one
+    // here fails with model-not-found — which surfaces as a generic transport rejection rather
+    // than as the configuration error it is.
+    std::string localModel = "qwen2.5:7b-instruct-q8_0";
     double localTemperature = 0.0;        // Greedy decoding; lowest run-to-run variance.
+    // Sends the embedded order schema as Ollama's `format` parameter. Not GBNF. It secures types,
+    // required fields and enums — but NOT the conditional-presence rules, which Stage-A A6 owns.
     bool localGrammarEnabled = true;
 
     // -- claude.* : Phase 2 adapter, behind its own independent authorization gate ---------------
