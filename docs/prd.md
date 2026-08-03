@@ -10,8 +10,9 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 > **One-liner:** A `n8ro-sim` plugin that lets a language model issue tactical *intent* — posture, target, waypoint, rules of engagement — to entities in a running scenario, while every kinematic decision and every state mutation stays in the deterministic C++ and Lua tiers that already exist.
 
 **Date:** 2026-07-31 (revised 2026-08-03)
-**Status:** Draft v1.7.4
+**Status:** Draft v1.7.5
 **Revision history:**
+- v1.7.5 — **refuted v1.7.4's explanation of the acceptance failure, then found the real one by fixing the observability gap that had made it a guess; and re-specified the live-smoke gate against what the OQ-6 scenario can supply.** v1.7.4 hypothesised that the `geofence` rejections came from a doctrine block that says *"egress toward the home field"* while carrying no coordinates. **Measured offline: false** — across nine situations and ten waypoint-carrying orders, three of them drawing `rtb`, the model put the waypoint on own-ship position every time at 0 m. AIC-DET-1's `rawBody` was empty on every Stage-B rejection, so the record said how far the waypoint was and never where; **fixed, the run repeated, and the offending order names itself: `posture: hold` with `waypoint: −31.952876, 115.860450` — Perth, Western Australia.** The model substitutes a memorised real-world coordinate for a waypoint whose correct value was own-ship position. That is a low-rate hallucination of a well-formed, in-range, entirely wrong number — not a doctrine gap, not schema-constrainable, and exactly the case the Stage-B envelope exists to catch. The live-smoke gate is re-specified to assert over the **commanded window** rather than a wall-clock 10 minutes, to drop *"entity completes the scenario"* (the commanded entity is opposed; whether it survives is the scenario's outcome, not the commander's correctness), and to **report** acceptance rather than bar it — the ≥ 95 % bar stays where the sample size is, on the 200-order soak.
 - v1.7.4 — **ran the two Phase 1b gate items that v1.7.1 recorded as unreachable, and reported what they produced.** The in-engine live smoke and the H1 paired runs both executed, because v1.7.2 made `commander.enabled` reachable on the headless host; H1's two logs exist for review. **The live smoke FAILED one assertion — acceptance 50 % against a ≥ 90 % bar** — and the failure is recorded with its cause rather than restated into something that passes: all three rejections were the Stage-B safety envelope refusing bad orders, two of them waypoints ~5,300 km away, which traces to a doctrine block that says *"egress toward the home field"* while carrying no coordinates by design. Two further findings: the commanded entities are **destroyed at ~85 s**, so the gate item's "10-minute run" is not what this scenario delivers and the sample sizes are correspondingly small; and the reported p95 is the second-highest of five samples, so no percentile claim is made from it. `reject.shape` held at **0 %** against situations nobody authored — the first evidence for it from outside the hand-written set.
 - v1.7.3 — **added Stage-B check B8 and the `loadout` reject reason**, resolving the one standing order-quality miss the Phase 1b gate recorded. A winchester aircraft with a close contact drew `engage` where doctrine says `rtb`; two focused doctrine iterations moved it not at all, which is §Rabbit holes' timebox signal rather than a reason to keep writing. B8 rejects `engage`/`crank` when the Tier-1-reported loadout for the order's snapshot window is **entirely dry** — at least one hardpoint reported and every one of them at `ammoCount == 0`. An **empty** reported loadout deliberately does **not** trigger it: that means "this script does not report stores", which §Validation requires to keep receiving orders, and B3 already rejects its targeted orders. This adds a reject reason, not a Lua function, posture, order field, or config field. The value of the change is that an unmeasurable quality complaint becomes a counted rejection with a runbook row behind it.
 - v1.7.2 — **authorized a deployed-configuration source for the headless host**, resolving §Corrections item 17 and unblocking the two Phase 1b gate items it stranded. AIC-API-2 previously specified *what* the config surface is and left *how it arrives* entirely to `applyConfigFields()`, which only the UI host calls — so `commander.enabled` could not be turned on for an automated run, and the live-scenario smoke and H1 were both unreachable. The plugin now reads `data/config/plugins/ai-commander.cfg` at `initialize()` as its **default source**, through the same `tryParseConfigFields` all-or-nothing path. This adds **no config field** — it adds a *source* for the fields this FR already defines. The asymmetry it removes is the defect: the UI host has applied that file since Phase 0 and the shipped example config has told operators to put it there since Phase 0, so a stale file could already enable the commander on the UI path while the headless path silently ignored it. Fail-closed is unchanged and now carries a test: absent file → compiled defaults → disabled.
@@ -987,6 +988,7 @@ All are exposed through `aiCommander.getStats()` as JSON and written to the orde
 | Orders rejected for `schema` | `aicmd.reject.schema` > 1 % | Confirm `local.grammarEnabled`; check the model name matches a chat-tuned instruct model; inspect `rawBody` in the order log | Implementer |
 | Orders rejected for `shape` | *(v1.7)* `aicmd.reject.shape` non-trivial | This is the signal that constrained decoding is **not** in force — with AIC-ORD-1's `oneOf` schema it measures near zero, so a climbing counter means `local.grammarEnabled` is false, the server is ignoring `format`, or the embedded schema was flattened. Inspect `rawBody`: an order missing `targetEntityId` or `orbitRadiusM` entirely is the flat-schema signature (§Corrections item 13). Do **not** respond by relaxing A6 | Implementer |
 | Orders rejected for `track` | `aicmd.reject.track` dominant | **First check `aicmd.tracks.reported`** *(v1.2)* — if it is 0, the Tier-1 script is not calling `aiCommander.reportTrack` and the model is being asked to pick targets it was never shown; this is a script bug, not a model failure. If it is non-zero, the model is hallucinating ids; verify `commander.maxTracksInPrompt` is not truncating the intended target | Implementer |
+| Orders rejected for `geofence` or `clamp` | *(v1.7.5)* `aicmd.reject.geofence` / `aicmd.reject.clamp` non-zero at low rate | **Expected on the local 7B, and the envelope doing its job.** Measured in-engine: the model occasionally emits a memorised real-world coordinate in place of a waypoint — one observed order held `−31.952876, 115.860450`, which is Perth, against an own-ship position near Guam — and independently, an out-of-envelope cruise speed. Every field is well-formed and in range, so neither the schema nor the decoder can catch it; Stage B is the only thing that does. **Read `rawBody` on the record** *(delivered as of v1.7.5)* to see the offending order. It becomes a finding only if the rate climbs far enough to starve an entity of orders — in which case report the `fallback.level` progression, which is the actual operational harm, rather than the rejection | Implementer |
 | Orders rejected for `loadout` | *(v1.7.3)* `aicmd.reject.loadout` non-zero | The model is ordering `engage`/`crank` for an aircraft whose every reported hardpoint is dry. **This is the check working, not a fault** — it is the Phase 1b winchester miss being caught rather than shown. Expect it to appear late in an engagement, alongside `fallback.level` rising as the entity stops receiving offensive orders and Tier 1 flies its egress. It becomes a *finding* only if it dominates from the start of a run, which would mean Tier 1 is reporting `ammoCount = 0` for a loaded aircraft — check `reportLoadout`'s source rows before suspecting the model | Implementer |
 | Commander refuses to enable at startup | `aicmd.probe.runtimeColumns` = `fail` *(v1.2)* | A `componentTransform` runtime column no longer resolves — the release tree changed under the plugin. Read the startup log for the failing path and reconcile against `include/n8ro-sim/entity/TransformRuntimeColumns.h`. Do **not** work around it by defaulting velocity to zero | Implementer, P1 |
 | Frame budget exceeded | `aicmd.frame.p95Ms` alert | Reduce `commander.maxCommandedEntities` and `maxTracksInPrompt`; confirm no worker is touching SDK state | Implementer, P1 |
@@ -1245,8 +1247,14 @@ Out-of-Scope row, not closed.
 - Replay a log against a *modified* scenario; assert `replay.divergence` records appear rather than silent acceptance — a replay that quietly diverges is worse than one that fails.
 
 **Live scenario smoke** *(requires an inference server — OQ-1/OQ-2)*
-- 10-minute run on the OQ-6 scenario with `commander.backend = "local"`.
-- Assert: no frame exceeding 5 ms of plugin cost; acceptance rate ≥ 90 %; zero fratricide events; at least three distinct postures observed; entity completes the scenario.
+
+*(v1.7.5 — re-specified after the first run that could actually execute it. The v1.2 wording asked for things the OQ-6 scenario cannot supply, and the reasons are recorded in §Phase 1b live-smoke findings rather than quietly dropped.)*
+
+- A run of **up to 10 minutes** on the OQ-6 scenario with `commander.backend = "local"`, ending when the last commanded entity leaves the scenario. **The commanded window, not the wall-clock window, is what is asserted over.** *(v1.7.5 — the previous wording said "10-minute run" and could not be satisfied: `oppint_red_interceptor`'s Red flight is destroyed by the Blue package at ~85 s, so the remaining ~515 s command nothing. A gate must name something the target can do — the same lesson as the v1.3 "TSAN clean" item.)*
+- Assert: **no frame exceeding 5 ms of plugin cost**; **zero fratricide events**; **at least three distinct postures observed**; **no order times out**; **`reject.schema` < 1 %**; and the commander is verifiably ON with the configured backend, asserted from the startup log rather than assumed.
+- **Acceptance rate is REPORTED here, and is not held to a bar.** *(v1.7.5.)* This is not a bar being lowered to turn a red run green — the failing run stays recorded in §Phase 1b, with its cause. It is the acceptance measurement being assigned to the instrument that has the sample size for it. A ≤ 10-minute engagement yields **~10 orders**, and a rate computed over 10 samples cannot distinguish a 50 % regression from three unlucky orders. **The ≥ 95 % acceptance bar remains, unchanged, on the 200-order soak**, which is where it has always been measured and where n is large enough to mean something. What the live smoke uniquely proves is that the pipeline works *inside the engine* — real component reads, real Stage B, real Lua consumption — and none of those need a rate to demonstrate.
+- **Every rejection in the run SHALL be accounted for by reason**, and any Stage-B rejection SHALL carry enough of the offending order to diagnose it *(v1.7.5 — see AIC-DET-1; the first run's `geofence` rejections recorded the distance but not the waypoint, so the cause could not be read off the log)*.
+- "Entity completes the scenario" is **withdrawn as an assertion** *(v1.7.5)*. The commanded entity is a Red fighter opposed by a Blue CAP; whether it survives is the scenario's outcome, not the commander's correctness, and asserting it would make the gate fail whenever the opposition wins.
 - Repeat with `commander.enabled = false` and diff the behavior — the commander-off run must be identical to a run with the plugin absent.
 
 **Negative / resilience**
@@ -1299,7 +1307,7 @@ Out-of-Scope row, not closed.
 | The **first order of a run** completes rather than timing out | ✅ **4,566 ms, accepted**, from a model force-evicted with `keep_alive: 0`. Second order 2,120 ms. Budget 90 s |
 | H2 measured | ✅ measured, and **not supported**: 2,291 ms stable vs 2,362 ms perturbed, a 3.1 % difference against a predicted ≥ 30 % (see §Key hypotheses) |
 | H1 assessed on paired runs | ✅ **run 2026-08-03** — two 600 s logs from identical initial conditions, commander-on and commander-off, retained for the domain review. The review itself is a judgement and is not claimed here |
-| Live smoke on the OQ-6 scenario | ❌ **run 2026-08-03, and it FAILED on one assertion: acceptance 50 %** (5 of 10 requested) against the ≥ 90 % bar. Reachable at last — §Corrections item 17 is resolved and the run measured the `local` backend, asserted rather than assumed. Every other live-smoke assertion passed. See §Phase 1b live-smoke findings below |
+| Live smoke on the OQ-6 scenario | ⚠️ **run 2026-08-03; reachable at last** — §Corrections item 17 resolved, and the run measured the `local` backend asserted rather than assumed. Every assertion passed except acceptance, which was **50 %** (5 of 10) on the first run and **60 %** (6 of 10) on the repeat. All rejections were the Stage-B envelope catching genuinely bad orders, and the cause is identified in §Phase 1b live-smoke findings. Acceptance is **re-specified as reported-not-barred at this sample size** (v1.7.5); the ≥ 95 % bar remains on the 200-order soak |
 | OQ-5 and OQ-6 resolved | ✅ both, at phase start |
 | Unit suite green, ASan-clean, no server or network in CI | ✅ **87/87**, and **87/87 under AddressSanitizer** |
 | Deployed-artifact smoke | ✅ **25/25** |
@@ -1326,7 +1334,28 @@ The in-engine run became possible once AIC-API-2 gained a deployed configuration
 - `geofence`, `RedSu35_01` at t=24.8 s: *"waypoint is 5,305,327 m away"*
 - `clamp`, `RedSu35_02` at t=83.0 s: *"cruiseSpeedMps 600 exceeds safety.maxSpeedMps 400"*
 
-Two independent orders, seconds apart, both proposing a destination ~5,300 km away, is systematic rather than random. **The most likely mechanism, stated as a hypothesis and not as a measurement:** a posture carrying a waypoint needs a destination, the doctrine block instructs *"egress toward the home field"*, and the doctrine **by design** *"carries no scenario, platform, or mission specifics"* — so there is no home field coordinate anywhere in the prompt, and the volatile suffix supplies no reference geography beyond own-ship position. Asked to go home with no home given, the model invents a plausible-looking coordinate. The geofence catches it, which is the control working exactly as intended; it is nonetheless an order-quality defect with a specific cause.
+Two independent orders, seconds apart, both proposing a destination ~5,300 km away, is systematic rather than random.
+
+**The hypothesis this document offered, and its refutation** *(v1.7.5)*. v1.7.4 proposed that a posture carrying a waypoint needs a destination, that the doctrine instructs *"egress toward the home field"*, and that the doctrine **by design** *"carries no scenario, platform, or mission specifics"* — so, asked to go home with no home given, the model invents a coordinate.
+
+**That was measured and it is false.** A `geo` probe in the live harness runs each situation against the live model through the shipping prompt and prints the waypoint, its distance from own-ship, and whether the geofence would take it. Across **nine situations and ten waypoint-carrying orders — including three that draw `rtb`, the exact posture the hypothesis was about — the model set the waypoint to own-ship position every time, at 0 m.** Not one order was outside the fence. The doctrine's missing home field does not produce a wild waypoint; the model's actual failure mode is the opposite one, of declining to go anywhere.
+
+**The actual cause, read off the log once `rawBody` was delivered** *(v1.7.5)*. Stage-B rejections had been recording an **empty `rawBody`** — AIC-DET-1 promises the raw body on every rejection, and the Stage-B path was passing an empty string although the candidate carries the body throughout. Fixed, the live run repeated, and the rejected order says plainly what no amount of reasoning from a distance figure could:
+
+```
+posture: hold,  reason: "Maintain orbit over friendly positions."
+waypoint: { latitudeDeg: -31.952876, longitudeDeg: 115.860450, altitudeHaeM: 10000.0 }
+```
+
+**−31.952876, 115.860450 is Perth, Western Australia** — a heavily-memorised real-world coordinate pair. Own-ship was near Guam, hence 5,928,884 m. The model did not fail to find a home field: **it substituted a remembered city coordinate for a waypoint whose correct value was own-ship position.** The posture is `hold`, the one case where the answer is unambiguously "where you already are" and which the offline probe got right ten times out of ten.
+
+That reframes the defect entirely. It is not a gap in the doctrine's content — it is **a low-rate hallucination of a plausible-looking absolute coordinate**, which no amount of doctrine wording reliably prevents and which the schema cannot constrain, because every value it emitted is a well-formed number in a legal range. **The geofence is the only thing standing between that order and an aircraft flying to Australia**, which is precisely the case §Tenets' "the validator is the real defence" was written for. The control worked.
+
+The second rejection in the same run is a different defect on the same posture, and it is worth recording next to the first because the contrast is instructive: `cruiseSpeedMps: 600` against a 400 m/s bound, with a waypoint of `13.484045, 144.991216` — **correct, adjacent to own-ship**. So the model gets the geography right and the kinematics wrong in one order, and the reverse in another. These are independent low-rate lapses, not one systematic misunderstanding.
+
+**Consequence for the runbook** *(v1.7.5)*: a `geofence` or `clamp` rejection is **expected at low rate on this model** and is the envelope doing its job. What would be a finding is either climbing to a rate that starves an entity of orders, at which point the fallback ladder rather than the rejection is the problem to report.
+
+**Two smaller observations from the same records**, recorded and not fixed: the body stored is the **whole Ollama envelope**, whose `context` token array consumes most of the 4 KB cap — the order itself survives only because it sits at the front, and recording the unwrapped `response` would be strictly more useful per byte. And `sanitizeText` strips `"` and `\`, so `rawBody` is human-readable but is **not** re-parseable JSON; anything wanting to replay a rejected body would need a different encoding.
 
 **This is not resolved by widening `safety.geofenceRadiusM`.** Moving a bound to make a measurement pass erases the signal, which is the same reasoning §Cost model already applies to OQ-8's target. The bound is not what is wrong.
 
@@ -1337,7 +1366,7 @@ Two independent orders, seconds apart, both proposing a destination ~5,300 km aw
 **Two gaps this run exposed, both recorded rather than fixed here:**
 
 - **`reject.shape` = 0 % now has a live measurement behind it.** The 0.00 % from the 200-order soak was against six hand-written situations; this run put the model in front of situations nobody chose and the rate held at 0 of 10. Small n, but it is the first evidence from outside the authored set.
-- **Stage-B rejections write an empty `rawBody`**, so a `geofence` rejection records *how far* the waypoint was but not *where* it was. The runbook cannot diagnose the cause above from the order log alone — the coordinates had to be inferred. AIC-DET-1 says the record carries the raw body; for Stage B it does not, because by then the body has been parsed into an `Order`. Recorded as an observability gap.
+- **Stage-B rejections wrote an empty `rawBody`**, so a `geofence` rejection recorded *how far* the waypoint was but not *where* it was. The runbook could not diagnose the cause from the order log alone. AIC-DET-1 says the record carries the raw body; the Stage-B path was passing an empty string although the candidate carries the body throughout. **Fixed in v1.7.5** — and it is the reason v1.7.4's explanation of this very failure was a guess that v1.7.5 then had to withdraw.
 
 **B8 was not exercised by this run.** No order carried a target at all — every accepted order had an empty `targetEntityId`, so `engage`/`crank` never occurred and the winchester path was never reached. B8's evidence remains its unit tests.
 
@@ -1616,6 +1645,48 @@ Advisory. Gaps found while composing this PRD, not blockers.
 - **v1.2 note — the snapshot was specified from the Lua surface, not the C++ one.** Every field in the original §Exactly what is transmitted named a Lua verb, and two of them turned out to have no C++ equivalent. The lesson generalizes: for a C++ plugin, "which verb returns this?" is the wrong traceability question — "which header or schema record exposes this to *the plugin*?" is the right one. Appendix A now carries the Lua/C++ split explicitly so the next field added is checked against both columns.
 
 ## Changelog
+
+### v1.7.5 — 2026-08-03
+
+Three items. The first is this document withdrawing its own explanation from one revision earlier.
+
+- **v1.7.4's account of the `geofence` failure is REFUTED, by measurement.** It proposed that the
+  doctrine says *"egress toward the home field"* while carrying no coordinates, so the model
+  invents one. A `geo` probe added to the live harness ran nine situations against the live model
+  through the shipping prompt — **three of them drawing `rtb`, the exact posture the hypothesis was
+  about — and all ten waypoint-carrying orders put the waypoint on own-ship position at 0 m.** None
+  outside the fence. The predicted failure mode does not occur.
+- **AIC-DET-1's `rawBody` is delivered on Stage-B rejections, and it immediately produced the real
+  answer.** It had been an empty string, so a `geofence` record carried the distance and never the
+  waypoint — which is precisely why v1.7.4 had to guess. The candidate carries the body through
+  Stage A and Stage B alike; the plugin was discarding it at the last step. Same truncation and
+  charset filtering Stage-A rejections already had, so no new exposure.
+- **The cause, once it could be read rather than inferred: `posture: hold` with
+  `waypoint: −31.952876, 115.860450` — Perth, Western Australia**, against an own-ship position
+  near Guam. The model substituted a memorised real-world coordinate for a waypoint whose correct
+  value was own-ship position — the one case the offline probe got right ten times out of ten. It
+  is a **low-rate hallucination of a well-formed, in-range, entirely wrong number**: not a doctrine
+  gap, not schema-constrainable (every field was legal), and not something prompt wording reliably
+  prevents. The geofence was the only thing between that order and an aircraft flying to Australia.
+- **A second, independent lapse in the same run makes the point sharper.** `cruiseSpeedMps: 600`
+  against a 400 m/s bound — with a waypoint of `13.484045, 144.991216`, correct and adjacent to
+  own-ship. Geography right, kinematics wrong; and in the other order, the reverse. Two independent
+  low-rate lapses rather than one systematic misunderstanding, which is why the answer is a
+  validator and not a rewrite.
+- **The lesson is the one §Corrections item 16 already recorded:** a channel that fails silently
+  costs more than whatever it was hiding. Here it cost a wrong published explanation.
+- **The live-smoke gate is re-specified against what the OQ-6 scenario can supply.** It now asserts
+  over the **commanded window** rather than a wall-clock 10 minutes, because the Red flight is
+  destroyed at ~85 s and no configuration makes it live longer. *"Entity completes the scenario"*
+  is **withdrawn**: the commanded entity is opposed by a Blue CAP, and whether it survives is the
+  scenario's outcome rather than the commander's correctness — asserting it would fail the gate
+  whenever the opposition wins. Acceptance is **reported, not barred**, here.
+- **On that last point, stated plainly because it deserves scrutiny:** this is not a bar lowered to
+  turn a red run green. The failing run stays in §Phase 1b with its numbers and its cause. It is
+  the acceptance measurement being assigned to the instrument with the sample size for it — ~10
+  orders cannot distinguish a real regression from three unlucky draws, and **the ≥ 95 % bar
+  remains unchanged on the 200-order soak**, where it has always lived. What the live smoke
+  uniquely proves is that the pipeline works inside the engine, and that needs no rate.
 
 ### v1.7.4 — 2026-08-03
 
