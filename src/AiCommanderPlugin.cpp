@@ -18,9 +18,11 @@
 #include <scripting/ScriptingApiContext.h>
 
 #include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <optional>
 #include <sstream>
+#include <system_error>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -47,6 +49,16 @@ constexpr std::string_view kPluginId = "ai-commander";
     std::ostringstream buffer;
     buffer << stream.rdbuf();
     return buffer.str();
+}
+
+// Resolves a host-working-directory-relative path to something an operator can act on. A log line
+// saying "no file at data/config/plugins/ai-commander.cfg" is only half an answer when the reader
+// does not know which directory that is relative to — which is precisely how Corrections item 16
+// stayed invisible for two phases.
+[[nodiscard]] std::string absoluteForLog(const std::string& path) {
+    std::error_code error;
+    const std::filesystem::path resolved = std::filesystem::absolute(path, error);
+    return error ? path : resolved.string();
 }
 
 // The production StageBWorldView: reads live state through IEntityManager on the simulation
@@ -199,6 +211,61 @@ void AiCommanderPlugin::rebuildBackend() {
     runtime_.promptRenderer().build(config, doctrine);
 }
 
+void AiCommanderPlugin::applyDeployedConfigFile() {
+    // R3 / AIC-API-2: the file is a DEFAULT source, never an override. If the host has already
+    // applied configuration, that application is the authority and this read does not happen —
+    // which is what makes "an explicit application always wins" true regardless of call order.
+    if (configExplicitlyApplied_) {
+        N8RO_LOG_INFO(
+            "ai-commander: configuration was applied by the host before initialize(); "
+            "the deployed config file was not read.",
+            kLogCategory);
+        return;
+    }
+
+    const std::string path = kDeployedConfigPath;
+    const std::optional<std::vector<n8ro::core::PluginConfigField>> parsed =
+        readDeployedConfigFile(path);
+    if (!parsed) {
+        // INFO, not WARNING. Absent-and-disabled is the state the deployment checklist REQUIRES of
+        // a default deploy; warning on the correct state teaches operators to ignore warnings.
+        N8RO_LOG_INFO(
+            std::string("ai-commander: no deployed config at '") + absoluteForLog(path)
+                + "'; using compiled defaults (commander.enabled=false).",
+            kLogCategory);
+        return;
+    }
+
+    const std::vector<n8ro::core::PluginConfigField>& fields = *parsed;
+    if (fields.empty()) {
+        N8RO_LOG_INFO(
+            std::string("ai-commander: deployed config at '") + absoluteForLog(path)
+                + "' carried no fields; using compiled defaults.",
+            kLogCategory);
+        return;
+    }
+
+    // Through applyConfigFields, not around it. One commit path means all-or-nothing application,
+    // the rebuild-on-backend-change, and the commander.enabled transition record happen here for
+    // free and cannot diverge from the host path. The failure is logged by applyConfigFields itself
+    // with the offending field named, so nothing is restated here.
+    if (applyConfigFields(fields)) {
+        N8RO_LOG_INFO(
+            std::string("ai-commander: applied ") + std::to_string(fields.size())
+                + " field(s) from the deployed config at '" + absoluteForLog(path) + "'.",
+            kLogCategory);
+    } else {
+        N8RO_LOG_WARNING(
+            std::string("ai-commander: the deployed config at '") + absoluteForLog(path)
+                + "' was rejected in full; compiled defaults remain in force.",
+            kLogCategory);
+    }
+
+    // applyConfigFields sets this as a side effect of running. Clear it: the file is a default
+    // source and must not masquerade as a host application to a LATER, genuine one.
+    configExplicitlyApplied_ = false;
+}
+
 void AiCommanderPlugin::initialize(n8ro::core::PluginContext& context) {
     shutdown_ = false;
     scriptingApiRegistered_ = false;
@@ -238,6 +305,11 @@ void AiCommanderPlugin::initialize(n8ro::core::PluginContext& context) {
 
     entityManager_ = scriptingContext.entityManager;
     world_ = std::make_unique<EngineWorldView>(entityManager_);
+
+    // BEFORE rebuildBackend(): the adapter must be constructed from the configuration that will
+    // actually govern the run, not from a compiled default that is superseded a line later
+    // (AIC-API-2, v1.7.2). It is also before the recorder opens, so record.path is honoured.
+    applyDeployedConfigFile();
 
     rebuildBackend();
 
@@ -625,6 +697,10 @@ std::vector<n8ro::core::PluginConfigField> AiCommanderPlugin::getConfigFields() 
 
 bool AiCommanderPlugin::applyConfigFields(
     const std::vector<n8ro::core::PluginConfigField>& fields) {
+    // Recorded even when the parse below fails: the host ASKED, and a host that asked and was
+    // refused must not then have a deployed default quietly applied in place of what it wanted.
+    configExplicitlyApplied_ = true;
+
     CommanderConfig parsed;
     std::string error;
     if (!tryParseConfigFields(fields, runtime_.config(), parsed, error)) {

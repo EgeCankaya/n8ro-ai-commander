@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -50,6 +51,12 @@ private:
     // backend changes, so switching takes effect without restarting the process (AIC-ARCH-3).
     void rebuildBackend();
 
+    // Reads the deployed config file as the DEFAULT source (AIC-API-2, v1.7.2), before the backend
+    // is built. Absent is not an error — it is the fail-closed default deploy. Whichever way it
+    // goes, the path is logged: Corrections item 16 is this project's own record of what an
+    // unlogged, silently-unresolved path costs.
+    void applyDeployedConfigFile();
+
     // The per-frame pipeline, in the order the design requires:
     //   drain completed orders -> Stage B -> publish  (newest information first)
     //   advance the fallback ladder
@@ -86,6 +93,12 @@ private:
     bool probeAttemptedThisRun_ = false;
     bool shutdown_ = false;
     bool loggedNoThreadRunner_ = false;
+
+    // Set the first time applyConfigFields() runs. Suppresses the deployed-file read, so a
+    // host-supplied configuration is never silently replaced by a deployed default — which makes
+    // "an explicit application always wins" true in BOTH call orders rather than only in the one
+    // this host happens to use today (AIC-API-2, v1.7.2).
+    bool configExplicitlyApplied_ = false;
 };
 
 } // namespace arkheon::aicommander
