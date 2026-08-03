@@ -21,6 +21,7 @@ const char* toString(RejectReason reason) {
         case RejectReason::Geofence:   return "geofence";
         case RejectReason::Clamp:      return "clamp";
         case RejectReason::Superseded: return "superseded";
+        case RejectReason::Loadout:    return "loadout";
     }
     return "none";
 }
@@ -34,6 +35,7 @@ bool isStageBReason(RejectReason reason) {
         case RejectReason::Geofence:
         case RejectReason::Clamp:
         case RejectReason::Superseded:
+        case RejectReason::Loadout:
             return true;
         default:
             return false;

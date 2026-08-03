@@ -481,6 +481,12 @@ void AiCommanderPlugin::drainCompletedOrders(double simTimeS, std::int64_t frame
         for (const TrackReport& track : candidate->snapshot.tracks) {
             request.reportedTrackIds.push_back(track.targetEntityId);
         }
+        // B8 takes the same window rule for the same reason: the stores as they were when the
+        // order was requested, not as they are now (AIC-VAL-1, v1.7.3).
+        request.reportedAmmoCounts.reserve(candidate->snapshot.loadout.size());
+        for (const LoadoutReport& hardpoint : candidate->snapshot.loadout) {
+            request.reportedAmmoCounts.push_back(hardpoint.ammoCount);
+        }
 
         const StageBOutcome outcome =
             validateStageB(candidate->order, request, config, *world_);

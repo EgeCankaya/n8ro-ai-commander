@@ -127,6 +127,31 @@ StageBOutcome validateStageB(
         }
     }
 
+    // -- B8: an offensive posture on an aircraft with nothing left to shoot ----------------------
+    // Deliberately AFTER B3/B4: a hallucinated or friendly target on a dry aircraft is a more
+    // specific complaint than a dry rail, and the more specific diagnosis should win the record.
+    //
+    // The asymmetry with B3 is the whole point of this check. An EMPTY reportedAmmoCounts means
+    // Tier 1 reported no stores at all, which is a script that does not call reportLoadout — not
+    // an aircraft that is out. That script is required to keep receiving orders, and its targeted
+    // orders are already refused by B3, because a script reporting no loadout reports no tracks
+    // either. Absence of information is not evidence, and the validator does not invent it.
+    if (order.posture == Posture::Engage || order.posture == Posture::Crank) {
+        bool anyRoundsRemaining = false;
+        for (const int ammoCount : request.reportedAmmoCounts) {
+            if (ammoCount > 0) {
+                anyRoundsRemaining = true;
+                break;
+            }
+        }
+        if (!request.reportedAmmoCounts.empty() && !anyRoundsRemaining) {
+            return reject(RejectReason::Loadout,
+                std::string("posture ") + toString(order.posture) + " ordered with every reported "
+                    + "hardpoint dry (" + std::to_string(request.reportedAmmoCounts.size())
+                    + " reported, 0 rounds remaining)");
+        }
+    }
+
     // -- B6: the safety envelope ----------------------------------------------------------------
     // Reject, do not clamp. A speed outside the envelope is not repaired down to the bound: the
     // model asked for something the operator did not authorize, and quietly granting a different

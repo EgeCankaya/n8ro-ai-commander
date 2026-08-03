@@ -54,6 +54,16 @@ struct StageBRequest {
     // merely because inference outlived the cadence window (ADR-3).
     std::vector<std::string> reportedTrackIds;
 
+    // B8. The remaining rounds per hardpoint Tier 1 reported for the window this order's snapshot
+    // came from — the same window rule B3 applies to tracks, and for the same reason: an aircraft
+    // that fired its last missile while inference was in flight must not retroactively invalidate
+    // an order that was correct when it was requested.
+    //
+    // EMPTY MEANS "NOTHING WAS REPORTED", NOT "NOTHING IS LOADED". Those are different situations
+    // and B8 treats them differently — see validateStageB. Only the counts are carried: B8 asks
+    // one question of them, and hardpoint names would be state the check has no use for.
+    std::vector<int> reportedAmmoCounts;
+
     // B7. The serial of the order currently published for this entity, and this order's serial.
     std::int64_t publishedSerial = -1;
     std::int64_t candidateSerial = 0;
