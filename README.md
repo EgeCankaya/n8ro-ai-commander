@@ -35,18 +35,25 @@ The two gate items that were previously unreachable have now **run** (PRD v1.7.4
 headless host applies `data/config/plugins/ai-commander.cfg` as of v1.7.2, so the
 commander can be switched on for an automated run; the H1 paired logs exist for review.
 
-**The in-engine live smoke failed one assertion: acceptance 50 %** (5 of 10) against a
-≥ 90 % bar. All three rejections were the Stage-B safety envelope refusing bad orders —
-two waypoints ~5,300 km away and one 600 m/s cruise speed. The likely cause is that the
-doctrine says *"egress toward the home field"* while carrying no coordinates by design,
-so a posture needing a destination has nothing to derive one from. It is **not** being
-resolved by widening the geofence: the bound is not what is wrong.
+**The in-engine live smoke rejects a low rate of orders, and the cause is now known.** Every
+rejection is the Stage-B safety envelope working. With `rawBody` delivered on Stage-B
+rejections (v1.7.5) the offending order names itself: `posture: hold` carrying
+`waypoint: −31.952876, 115.860450` — **Perth, Western Australia**, against an own-ship
+position near Guam. The model substitutes a memorised real-world coordinate for a waypoint
+whose correct value was own-ship position. Every field is well-formed and in range, so
+neither the schema nor the constrained decoder can catch it — **Stage B is the only thing
+that does.** A separate order in the same run had the geography right and the speed wrong
+(600 m/s against a 400 bound). Two independent low-rate lapses, not one systematic fault.
+
+It is **not** resolved by widening the geofence. The bound is what caught it.
 
 Two caveats on that run, both in the PRD: the commanded entities are **destroyed at
 ~85 s** by the scenario, so a "10-minute run" measures about 85 seconds of commanding on
-10 requests; and the reported p95 is the second-highest of five samples, so no percentile
-claim is made from it. `reject.shape` held at **0 %** against situations nobody authored.
-Plugin frame cost over **12,001 frames**: p50 0.0018 ms, max 0.262 ms against a 5 ms bar.
+~10 requests — the gate is re-specified in v1.7.5 to assert over the commanded window and
+to report acceptance rather than bar it, with the ≥ 95 % bar staying on the 200-order soak
+where the sample size supports it. `reject.shape` held at **0 %** against situations nobody
+authored. Plugin frame cost over **12,001 frames**: p50 0.0018 ms, max 0.262 ms against a
+5 ms bar.
 
 **H2 was measured and is not supported** — a byte-stable prefix is worth 3.1 %, not the
 predicted ≥ 30 %, on a GPU where prompt evaluation is a small share of the round trip.

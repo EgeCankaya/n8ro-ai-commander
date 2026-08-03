@@ -493,8 +493,13 @@ void AiCommanderPlugin::drainCompletedOrders(double simTimeS, std::int64_t frame
 
         if (!outcome.accepted) {
             runtime_.countRejection(outcome.reason);
+            // The raw body travels with the candidate whether or not Stage A accepted it, so a
+            // Stage-B rejection can carry it too. It used to pass an empty string here, which made
+            // AIC-DET-1's "carrying the reason and the raw body" false for every Stage-B reason:
+            // a `geofence` record said how FAR the waypoint was and never where it WAS, so the
+            // Phase 1b live-smoke failure had to be diagnosed by inference instead of read off.
             runtime_.recorder().recordRejected(simTimeS, frame, entityId,
-                candidate->snapshot.serial, outcome.reason, outcome.detail, std::string());
+                candidate->snapshot.serial, outcome.reason, outcome.detail, candidate->rawBody);
             if (config.backend == Backend::Replay) {
                 // A Stage-B rejection during replay means live state has diverged from the
                 // recorded run. That is the signal the reproduction guarantee has broken, and it

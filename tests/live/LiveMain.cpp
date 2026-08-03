@@ -16,13 +16,14 @@
 //           model (keep_alive: 0 forces the eviction, so "cold" means cold)
 //   h2    - prefix-stable vs perturbed-prefix p95, whatever the outcome
 //
-// Usage: ai-commander-live-tests.exe [--orders N] [--mode soak|cold|h2|all] [--model TAG]
+// Usage: ai-commander-live-tests.exe [--orders N] [--mode soak|cold|h2|geo|all] [--model TAG]
 //                                    [--base-url URL] [--no-format] [--out PATH]
 
 #include "CommanderConfig.h"
 #include "CommanderRuntime.h"
 #include "LocalLlmClient.h"
 #include "OrderSchema.h"
+#include "OrderValidatorStageB.h"
 #include "PromptRenderer.h"
 #include "RejectReason.h"
 #include "Snapshot.h"
@@ -304,6 +305,128 @@ std::string perturbPrefix(const std::string& prompt, int index) {
     return prompt.substr(0, marker) + padding + prompt.substr(marker);
 }
 
+// -- geo: WHERE does the model point? -------------------------------------------------------------
+//
+// The Phase 1b live smoke failed acceptance on two Stage-B `geofence` rejections, waypoints ~5,300
+// km from own-ship. The order log records how FAR a rejected waypoint was but not WHERE it was
+// (Stage-B rejections carry an empty rawBody), so the cause had to be inferred. This mode measures
+// it directly and offline: run each authored situation, and for every accepted order print the
+// waypoint, its distance from own-ship, and whether the default geofence would have taken it.
+//
+// The hypothesis under test: the doctrine says "egress toward the home field" and, by design,
+// carries no coordinates, and the volatile suffix supplies no reference geography beyond own-ship
+// position - so a posture needing a destination has nothing to derive one from and the model
+// invents a plausible-looking coordinate.
+// Situations that FORCE a waypoint-choosing posture. Deliberately separate from
+// buildSituations(): those six are the authored soak set the PRD's 200-order figures were measured
+// against, and widening them would silently break the comparison. These exist only here.
+//
+// The six authored situations turn out to draw `hold` as their only waypoint posture, and `hold`
+// is the easy case - the correct answer is "where you already are", which the model gets right at
+// range 0 m. `ingress` and `rtb` are the cases where the model has to produce a destination it was
+// never given, and they are what the live run actually rejected.
+std::vector<Situation> buildWaypointSituations() {
+    std::vector<Situation> situations;
+
+    {
+        // A contact far enough away that doctrine's "if there is a reason to be somewhere else,
+        // ingress there" applies. NOTE what the prompt can and cannot say about that contact:
+        // AIC-SEC-2 gives a track row exactly three scalars - id, rangeM, snrDb. No bearing. No
+        // position. So "ingress toward the contact" is a destination the prompt does not contain.
+        OrderSnapshot s = baseSnapshot();
+        s.simTimeS = 60.0;
+        s.tracks.push_back(TrackReport{"BlueF16_01", 128000.0, 9.0});
+        s.situationNote = "Contact held at long range; commit decision pending.";
+        canonicalizeSnapshot(s);
+        situations.push_back({"distant contact, must close", s});
+    }
+    {
+        // Winchester with NO live threat. Doctrine: "the answer to being out of missiles is to
+        // leave" and "egress toward the home field". The home field is not in the prompt either.
+        OrderSnapshot s = baseSnapshot();
+        s.simTimeS = 700.0;
+        s.loadout.clear();
+        s.loadout.push_back(LoadoutReport{"STA1", "R77_BVR", 0, 4});
+        s.situationNote = "winchester";
+        canonicalizeSnapshot(s);
+        situations.push_back({"winchester, no threat (rtb)", s});
+    }
+    {
+        // Task complete, stores intact - the other documented route to rtb.
+        OrderSnapshot s = baseSnapshot();
+        s.simTimeS = 900.0;
+        s.situationNote = "Assigned task complete; no further contacts assigned.";
+        canonicalizeSnapshot(s);
+        situations.push_back({"task complete (rtb)", s});
+    }
+    return situations;
+}
+
+std::string runGeoProbe(const Options& options, const CommanderConfig& config,
+                        const PromptRenderer& renderer, int repeats) {
+    LocalLlmClient client(clientConfigFrom(options, config));
+    std::vector<Situation> situations = buildSituations();
+    const std::vector<Situation> waypointCases = buildWaypointSituations();
+    situations.insert(situations.end(), waypointCases.begin(), waypointCases.end());
+
+    std::ostringstream out;
+    out.imbue(std::locale::classic());
+    out << "\n=== geo probe: where the model points ===\n";
+    out << "  geofence bound " << static_cast<long long>(config.geofenceRadiusM) << " m\n\n";
+
+    int withWaypoint = 0;
+    int outsideFence = 0;
+    double worstM = 0.0;
+
+    for (const Situation& situation : situations) {
+        for (int r = 0; r < repeats; ++r) {
+            const std::string prompt = renderer.render(situation.snapshot);
+            const CandidateOrder candidate =
+                CommanderRuntime::runWorkerCall(situation.snapshot, prompt, client);
+
+            out << "  " << std::left << std::setw(30) << situation.label << std::right;
+            if (!candidate.stageAAccepted) {
+                out << "  REJECTED " << toString(candidate.stageAReason) << "\n";
+                continue;
+            }
+
+            const Order& order = candidate.order;
+            out << "  " << std::setw(8) << toString(order.posture);
+            if (!postureRequiresWaypoint(order.posture)) {
+                out << "  (no waypoint for this posture)\n";
+                continue;
+            }
+
+            ++withWaypoint;
+            const double rangeM = slantRangeM(
+                situation.snapshot.latitudeDeg, situation.snapshot.longitudeDeg,
+                situation.snapshot.altitudeHaeM,
+                order.latitudeDeg, order.longitudeDeg, order.altitudeHaeM);
+            worstM = std::max(worstM, rangeM);
+
+            const bool inside = rangeM <= config.geofenceRadiusM;
+            if (!inside) {
+                ++outsideFence;
+            }
+            out << "  own(" << std::fixed << std::setprecision(3)
+                << situation.snapshot.latitudeDeg << ", " << situation.snapshot.longitudeDeg << ")"
+                << "  -> wp(" << order.latitudeDeg << ", " << order.longitudeDeg << ", "
+                << std::setprecision(0) << order.altitudeHaeM << " m)"
+                << "  range " << static_cast<long long>(rangeM) << " m  "
+                << (inside ? "inside" : "*** OUTSIDE THE FENCE ***") << "\n";
+        }
+    }
+
+    out << "\n  waypoint-carrying orders " << withWaypoint
+        << ", outside the fence " << outsideFence;
+    if (withWaypoint > 0) {
+        out << "  (" << std::fixed << std::setprecision(1)
+            << (100.0 * outsideFence / withWaypoint) << " %)";
+    }
+    out << "\n  furthest waypoint " << static_cast<long long>(worstM) << " m\n";
+    return out.str();
+}
+
 Tally runSoak(const Options& options, const CommanderConfig& config, const PromptRenderer& renderer,
               int orders, bool perturb) {
     LocalLlmClient client(clientConfigFrom(options, config));
@@ -427,6 +550,13 @@ int main(int argc, char** argv) {
 
     if (options.mode == "cold" || options.mode == "all") {
         const std::string section = runColdCheck(options, config, renderer);
+        std::cout << section << std::flush;
+        report << section;
+    }
+
+    if (options.mode == "geo" || options.mode == "all") {
+        std::cout << "\n-- geo probe --\n" << std::flush;
+        const std::string section = runGeoProbe(options, config, renderer, 2);
         std::cout << section << std::flush;
         report << section;
     }

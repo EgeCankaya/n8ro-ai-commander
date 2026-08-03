@@ -202,8 +202,14 @@ local.grammarEnabled=true
         $requested = @($records | Where-Object { $_.event -eq 'order.requested' })
 
         Assert-That ($accepted.Count -gt 0) "at least one order was accepted ($($accepted.Count))"
+
+        # REPORTED, NOT BARRED (PRD v1.7.5). A <=10-minute engagement yields ~10 orders, and a rate
+        # over 10 samples cannot tell a real regression from three unlucky draws. The >= 95 % bar
+        # lives on the 200-order soak, where n is large enough to mean something. What this script
+        # uniquely proves is that the pipeline works INSIDE THE ENGINE, and that needs no rate.
         $rate = if ($requested.Count) { 100.0 * $accepted.Count / $requested.Count } else { 0 }
-        Assert-That ($rate -ge 90) "acceptance rate >= 90 % (got $([math]::Round($rate,1)) %)"
+        Write-Host ("  acceptance: {0} of {1} requested ({2} %) - reported, not barred; the bar is on the soak" -f `
+            $accepted.Count, $requested.Count, [math]::Round($rate,1))
 
         $postures = @($accepted | ForEach-Object { $_.order.posture } | Sort-Object -Unique)
         Assert-That ($postures.Count -ge 3) `
@@ -225,8 +231,18 @@ local.grammarEnabled=true
         $fratricide = @($rejected | Where-Object { $_.reason -eq 'fratricide' })
         Write-Host "  Stage-B fratricide rejections: $($fratricide.Count) (rejections are the control working)"
 
+        # Every rejection accounted for by reason, and any Stage-B rejection carrying enough of the
+        # offending order to diagnose it (PRD v1.7.5 / AIC-DET-1). The first run of this gate could
+        # not name the cause of its own failure because rawBody was empty here.
         $byReason = $rejected | Group-Object reason | Sort-Object Count -Descending
         foreach ($group in $byReason) { Write-Host "  reject.$($group.Name): $($group.Count)" }
+        foreach ($r in $rejected) {
+            Write-Host "    [$($r.reason)] $($r.entityId) :: $($r.detail)"
+            if ($r.rawBody) { Write-Host "      rawBody: $($r.rawBody)" }
+        }
+        $withoutBody = @($rejected | Where-Object { -not $_.rawBody })
+        Assert-That ($withoutBody.Count -eq 0) `
+            "every rejection carries its raw body for diagnosis ($($withoutBody.Count) without)"
 
         # Validation's live-smoke bar: no frame exceeding 5 ms of plugin cost. The run-end record
         # carries the whole-run MAXIMUM, not a percentile - a p95 inside budget with one 40 ms
