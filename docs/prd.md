@@ -10,8 +10,9 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 > **One-liner:** A `n8ro-sim` plugin that lets a language model issue tactical *intent* — posture, target, waypoint, rules of engagement — to entities in a running scenario, while every kinematic decision and every state mutation stays in the deterministic C++ and Lua tiers that already exist.
 
 **Date:** 2026-07-31 (revised 2026-08-03)
-**Status:** Draft v1.7.3
+**Status:** Draft v1.7.4
 **Revision history:**
+- v1.7.4 — **ran the two Phase 1b gate items that v1.7.1 recorded as unreachable, and reported what they produced.** The in-engine live smoke and the H1 paired runs both executed, because v1.7.2 made `commander.enabled` reachable on the headless host; H1's two logs exist for review. **The live smoke FAILED one assertion — acceptance 50 % against a ≥ 90 % bar** — and the failure is recorded with its cause rather than restated into something that passes: all three rejections were the Stage-B safety envelope refusing bad orders, two of them waypoints ~5,300 km away, which traces to a doctrine block that says *"egress toward the home field"* while carrying no coordinates by design. Two further findings: the commanded entities are **destroyed at ~85 s**, so the gate item's "10-minute run" is not what this scenario delivers and the sample sizes are correspondingly small; and the reported p95 is the second-highest of five samples, so no percentile claim is made from it. `reject.shape` held at **0 %** against situations nobody authored — the first evidence for it from outside the hand-written set.
 - v1.7.3 — **added Stage-B check B8 and the `loadout` reject reason**, resolving the one standing order-quality miss the Phase 1b gate recorded. A winchester aircraft with a close contact drew `engage` where doctrine says `rtb`; two focused doctrine iterations moved it not at all, which is §Rabbit holes' timebox signal rather than a reason to keep writing. B8 rejects `engage`/`crank` when the Tier-1-reported loadout for the order's snapshot window is **entirely dry** — at least one hardpoint reported and every one of them at `ammoCount == 0`. An **empty** reported loadout deliberately does **not** trigger it: that means "this script does not report stores", which §Validation requires to keep receiving orders, and B3 already rejects its targeted orders. This adds a reject reason, not a Lua function, posture, order field, or config field. The value of the change is that an unmeasurable quality complaint becomes a counted rejection with a runbook row behind it.
 - v1.7.2 — **authorized a deployed-configuration source for the headless host**, resolving §Corrections item 17 and unblocking the two Phase 1b gate items it stranded. AIC-API-2 previously specified *what* the config surface is and left *how it arrives* entirely to `applyConfigFields()`, which only the UI host calls — so `commander.enabled` could not be turned on for an automated run, and the live-scenario smoke and H1 were both unreachable. The plugin now reads `data/config/plugins/ai-commander.cfg` at `initialize()` as its **default source**, through the same `tryParseConfigFields` all-or-nothing path. This adds **no config field** — it adds a *source* for the fields this FR already defines. The asymmetry it removes is the defect: the UI host has applied that file since Phase 0 and the shipped example config has told operators to put it there since Phase 0, so a stale file could already enable the commander on the UI path while the headless path silently ignored it. Fail-closed is unchanged and now carries a test: absent file → compiled defaults → disabled.
 - v1.7.1 — **corrected the branch partition** on the first live run of the shipping adapter. v1.7 split the schema by waypoint presence, which grouped `defend` with `engage` and `crank`; those postures agree about waypoints and disagree about targets, so the branch could not state the target rule and 2/12 live orders were rejected *"defend must not carry a targetEntityId"*. Partitioning by **whole constraint profile** yields four branches — transit, hold, targeted, defend — and measured **0 rejections in 24 live orders**. AIC-ORD-1's acceptance criterion is strengthened to assert branch bounds against the A6 predicates per posture, which is the check that would have caught v1.7's split. Prefix growth (4,738 → 14,074 bytes) recorded as a real cost and as evidence into OQ-8.
@@ -1297,11 +1298,48 @@ Out-of-Scope row, not closed.
 | p95 within target; baseline ~1.7 s warm | ✅ **p50 1,723 ms / p95 2,163 ms / p99 2,208 ms**. Above the 1.7 s baseline by ~25 %, and the cause is known: the prefix grew from 4,738 to 17,756 bytes carrying the four branches and the doctrine. Far inside the ≤ 20 s local-7B target |
 | The **first order of a run** completes rather than timing out | ✅ **4,566 ms, accepted**, from a model force-evicted with `keep_alive: 0`. Second order 2,120 ms. Budget 90 s |
 | H2 measured | ✅ measured, and **not supported**: 2,291 ms stable vs 2,362 ms perturbed, a 3.1 % difference against a predicted ≥ 30 % (see §Key hypotheses) |
-| H1 assessed on paired runs | ❌ **not done** — blocked with the live smoke below |
-| Live smoke on the OQ-6 scenario | ❌ **not satisfied.** The headless host does not apply per-plugin configuration, so `commander.enabled` cannot be turned on for an automated run (§Corrections item 17). The harness, the scenario wiring, and the assertions are written and exercised; every check that does not depend on the commander being enabled passes |
+| H1 assessed on paired runs | ✅ **run 2026-08-03** — two 600 s logs from identical initial conditions, commander-on and commander-off, retained for the domain review. The review itself is a judgement and is not claimed here |
+| Live smoke on the OQ-6 scenario | ❌ **run 2026-08-03, and it FAILED on one assertion: acceptance 50 %** (5 of 10 requested) against the ≥ 90 % bar. Reachable at last — §Corrections item 17 is resolved and the run measured the `local` backend, asserted rather than assumed. Every other live-smoke assertion passed. See §Phase 1b live-smoke findings below |
 | OQ-5 and OQ-6 resolved | ✅ both, at phase start |
 | Unit suite green, ASan-clean, no server or network in CI | ✅ **87/87**, and **87/87 under AddressSanitizer** |
 | Deployed-artifact smoke | ✅ **25/25** |
+
+#### Phase 1b live-smoke findings *(v1.7.4, 2026-08-03)*
+
+The in-engine run became possible once AIC-API-2 gained a deployed configuration source (v1.7.2). It measured `commander.backend = local` with `commander.enabled = true`, both asserted from the startup log rather than assumed. **One assertion failed and three findings came out of it that no offline harness could have produced.**
+
+| Live-smoke assertion | Result |
+|---|---|
+| Commander is ON with the `local` backend | ✅ `backend=local enabled=true`, config applied in full, by path and field count |
+| No frame exceeding 5 ms of plugin cost | ✅ **p50 0.0018 ms / p95 0.0025 ms / max 0.262 ms** over **12,001 frames** |
+| Acceptance ≥ 90 % | ❌ **50 %** — 10 requested, 5 accepted, 3 rejected, 2 unresolved at entity death |
+| Zero fratricide | ✅ 0 |
+| At least three distinct postures | ✅ `defend`, `hold`, `ingress` |
+| Entity completes the scenario | ❌ both commanded entities **destroyed at ~85 s** — by the scenario, not by the commander |
+| `reject.schema` | ✅ **0.00 %** (0 of 10) |
+| `reject.shape`, reported against no bar | ✅ **0.00 %** (0 of 10) |
+| No order timed out | ✅ 0, and the **first order of the run was accepted at 8,040 ms** from a genuinely cold model |
+
+**Finding 1 — the acceptance miss is the safety envelope refusing bad orders, and its cause is nameable.** All three rejections were Stage B: two `geofence` and one `clamp`.
+
+- `geofence`, `RedSu35_02` at t=22.7 s: *"waypoint is 5,311,394 m away, beyond safety.geofenceRadiusM 200000 m"*
+- `geofence`, `RedSu35_01` at t=24.8 s: *"waypoint is 5,305,327 m away"*
+- `clamp`, `RedSu35_02` at t=83.0 s: *"cruiseSpeedMps 600 exceeds safety.maxSpeedMps 400"*
+
+Two independent orders, seconds apart, both proposing a destination ~5,300 km away, is systematic rather than random. **The most likely mechanism, stated as a hypothesis and not as a measurement:** a posture carrying a waypoint needs a destination, the doctrine block instructs *"egress toward the home field"*, and the doctrine **by design** *"carries no scenario, platform, or mission specifics"* — so there is no home field coordinate anywhere in the prompt, and the volatile suffix supplies no reference geography beyond own-ship position. Asked to go home with no home given, the model invents a plausible-looking coordinate. The geofence catches it, which is the control working exactly as intended; it is nonetheless an order-quality defect with a specific cause.
+
+**This is not resolved by widening `safety.geofenceRadiusM`.** Moving a bound to make a measurement pass erases the signal, which is the same reasoning §Cost model already applies to OQ-8's target. The bound is not what is wrong.
+
+**Finding 2 — the "10-minute run" premise does not fit this scenario.** Both `RedSu35_01` and `RedSu35_02` were destroyed by Blue AMRAAMs at ~85 s (`pk=0.999999` and `pk=1.000000`). The remaining ~515 s of the 600 s run commanded nothing: the ladder walked `retained` → `released` for both entities and the run ended with `rosterSize: 2` and no live subject. So the run measured **~85 seconds of live commanding**, not ten minutes, and the sample sizes here are correspondingly small — 10 requests, 5 accepted. The gate item asks for a 10-minute run on the OQ-6 scenario; the OQ-6 scenario does not keep its Red flight alive for ten minutes against this Blue package. That is a defect in the gate item's phrasing, not in the system, and it is recorded rather than restated.
+
+**Finding 3 — the reported p95 is not a p95.** 10,363 ms is the second-highest of **five** samples (8,040 / 10,363 / 1,880 / 4,442 / 3,055 ms). At n=5 no percentile is meaningful. What the numbers do show is that in-engine latencies run materially above the offline harness's 2,163 ms p95, which is expected and has a mechanism — `commander.maxConcurrentRequests` is 1 and two entities share it, so requests serialize — but the in-engine figure is **not measured** to a useful precision by this run and no p95 claim is made from it.
+
+**Two gaps this run exposed, both recorded rather than fixed here:**
+
+- **`reject.shape` = 0 % now has a live measurement behind it.** The 0.00 % from the 200-order soak was against six hand-written situations; this run put the model in front of situations nobody chose and the rate held at 0 of 10. Small n, but it is the first evidence from outside the authored set.
+- **Stage-B rejections write an empty `rawBody`**, so a `geofence` rejection records *how far* the waypoint was but not *where* it was. The runbook cannot diagnose the cause above from the order log alone — the coordinates had to be inferred. AIC-DET-1 says the record carries the raw body; for Stage B it does not, because by then the body has been parsed into an `Order`. Recorded as an observability gap.
+
+**B8 was not exercised by this run.** No order carried a target at all — every accepted order had an empty `targetEntityId`, so `engage`/`crank` never occurred and the winchester path was never reached. B8's evidence remains its unit tests.
 
 **Order quality, reported separately from acceptance** because a run can be 100 % accepted and still be tactically wrong. Across six situations spanning every posture, five drew the appropriate posture — `defend` on an inbound munition, `crank` while a shot is being supported, `hold` with no contacts, `engage` on a closing pair with a full rail. The sixth is a standing miss: a **winchester** aircraft with a close contact draws `engage` where doctrine says `rtb`, and two focused doctrine iterations did not move it. It is an order-quality miss rather than a safety one — Tier 1 will not fire with an empty rail whatever the posture — and it is the input to the H1 review when that becomes possible.
 
@@ -1578,6 +1616,41 @@ Advisory. Gaps found while composing this PRD, not blockers.
 - **v1.2 note — the snapshot was specified from the Lua surface, not the C++ one.** Every field in the original §Exactly what is transmitted named a Lua verb, and two of them turned out to have no C++ equivalent. The lesson generalizes: for a C++ plugin, "which verb returns this?" is the wrong traceability question — "which header or schema record exposes this to *the plugin*?" is the right one. Appendix A now carries the Lua/C++ split explicitly so the next field added is checked against both columns.
 
 ## Changelog
+
+### v1.7.4 — 2026-08-03
+
+Written from the two gate runs v1.7.1 could not perform. The interesting content is a failure.
+
+- **The in-engine live smoke ran, and failed one assertion: acceptance 50 % against ≥ 90 %.**
+  Recorded as a failure with its cause, not restated into something that passes — the same
+  treatment v1.7.1 gave the items it could not run at all.
+- **All three rejections were the Stage-B safety envelope working**: two `geofence` on waypoints
+  ~5,300 km away, one `clamp` on a 600 m/s cruise speed against a 400 m/s bound. Two independent
+  orders seconds apart proposing the same wrong distance is systematic. The likely mechanism —
+  labelled a hypothesis, because the log does not carry the coordinates to prove it — is that the
+  doctrine says *"egress toward the home field"* and, by design, carries no coordinates, while the
+  volatile suffix supplies no reference geography beyond own-ship position. Asked to go home with
+  no home given, the model invents one.
+- **Explicitly NOT resolved by widening `safety.geofenceRadiusM`.** Moving a bound to make a
+  measurement pass erases the signal. The bound is not what is wrong.
+- **The gate item's "10-minute run" does not fit the OQ-6 scenario.** Both commanded entities are
+  destroyed at ~85 s by the Blue package, so the run commanded nothing for its remaining ~515 s and
+  the whole measurement rests on 10 requests. That is a defect in how the gate item was phrased,
+  recorded as such.
+- **No p95 claim is made from this run.** The 10,363 ms figure is the second-highest of five
+  samples. In-engine latency clearly exceeds the offline harness's 2,163 ms and there is a
+  mechanism for it — `maxConcurrentRequests` is 1 and two entities share it — but five samples do
+  not measure a percentile and this document will not pretend otherwise.
+- **`reject.shape` held at 0 % against situations nobody authored.** The 200-order soak's 0.00 %
+  was against six hand-written cases; this is the first evidence from outside that set. Small n,
+  and said to be small.
+- **Frame cost measured over 12,001 frames: p50 0.0018 ms, max 0.262 ms** against the 5 ms bar.
+  This is the one number in the run with a large sample behind it.
+- **Two gaps recorded rather than fixed.** B8 was never exercised — no order carried a target, so
+  `engage`/`crank` never occurred and its evidence remains its unit tests. And **Stage-B rejections
+  write an empty `rawBody`**, so a `geofence` rejection records how far the waypoint was but not
+  where; AIC-DET-1 promises the raw body and Stage B does not deliver it, because by then the body
+  has been parsed into an `Order`.
 
 ### v1.7.3 — 2026-08-03
 
