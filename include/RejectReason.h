@@ -33,6 +33,10 @@ enum class RejectReason {
     Geofence,    // B5. The waypoint is outside safety.geofenceRadiusM of the entity.
     Clamp,       // B6. Altitude or speed outside the configured safety envelope.
     Superseded,  // B7. A newer order has already been published for this entity.
+    // B8. engage/crank ordered for an aircraft whose reported stores are entirely dry. Note the
+    // asymmetry with Track: an EMPTY reported loadout does not produce this reason, because
+    // "Tier 1 reported nothing" is not "Tier 1 reported nothing left" (AIC-VAL-1, v1.7.3).
+    Loadout,
 };
 
 // Stable lowercase identifiers. These are a wire contract, not a display string: they appear in

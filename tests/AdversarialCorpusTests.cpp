@@ -553,3 +553,134 @@ AIC_TEST(StageBBoundariesAreInclusive) {
                      "an order just past maxOrderAgeS must be rejected");
     return true;
 }
+
+// -- AIC-VAL-1 B8 (v1.7.3): an offensive posture on an aircraft with nothing left to shoot --------
+//
+// This is the Phase 1b winchester miss, converted from an unmeasurable order-quality complaint
+// into a counted rejection. The model draws `engage` on a close contact with an empty rail; the
+// validator now refuses it and the runbook has a row keyed to the counter.
+
+AIC_TEST(StageBRejectsOffensivePosturesOnADryAircraft) {
+    const StageAOutcome engage = validateStageA(engageOrder("BlueF18_02"), kOwnId);
+    AIC_EXPECT_TRUE(engage.accepted, "the engage order must clear Stage A first");
+
+    const FakeWorld world = makeWorld();
+
+    // Every reported hardpoint dry. This is winchester as the reference Tier-1 script reports it:
+    // it reports every row, including rows whose ammoCount is zero.
+    StageBRequest dry = makeRequest();
+    dry.reportedAmmoCounts = {0, 0, 0, 0};
+    const StageBOutcome rejected = validateStageB(engage.order, dry, CommanderConfig{}, world);
+    AIC_EXPECT_FALSE(rejected.accepted, "engage on an entirely dry aircraft must be rejected");
+    AIC_EXPECT_TRUE(rejected.reason == RejectReason::Loadout,
+                    "the reason must be `loadout`, got '" + std::string(toString(rejected.reason))
+                        + "': " + rejected.detail);
+
+    // crank is the same class of order - it is a shot being supported.
+    Order crank = engage.order;
+    crank.posture = Posture::Crank;
+    const StageBOutcome crankOutcome = validateStageB(crank, dry, CommanderConfig{}, world);
+    AIC_EXPECT_TRUE(crankOutcome.reason == RejectReason::Loadout,
+                    "crank on an entirely dry aircraft must also reject `loadout`");
+
+    // One round anywhere is enough. B8 asks whether the aircraft can shoot at all, not whether
+    // this particular hardpoint carries the right weapon - the plugin has no weapon-matching
+    // seam and inventing one would be inventing capability it cannot observe.
+    StageBRequest oneLeft = makeRequest();
+    oneLeft.reportedAmmoCounts = {0, 1, 0, 0};
+    const StageBOutcome accepted = validateStageB(engage.order, oneLeft, CommanderConfig{}, world);
+    AIC_EXPECT_TRUE(accepted.accepted,
+                    "one remaining round anywhere must permit engage, got '"
+                        + std::string(toString(accepted.reason)) + "': " + accepted.detail);
+    return true;
+}
+
+// The part a naive reading of "reject when the loadout is empty" gets wrong, and the reason this
+// is a separate test rather than an assertion in the one above.
+//
+// An EMPTY reported loadout means "this Tier-1 script does not call reportLoadout" - not "this
+// aircraft is out of missiles". Validation requires such a script to keep receiving orders, and
+// its targeted orders are already refused by B3, because a script reporting no loadout reports no
+// tracks either. Rejecting on absence would break a documented path and buy nothing.
+AIC_TEST(StageBDoesNotTreatAnUnreportedLoadoutAsADryOne) {
+    const StageAOutcome engage = validateStageA(engageOrder("BlueF18_02"), kOwnId);
+    AIC_EXPECT_TRUE(engage.accepted, "the engage order must clear Stage A first");
+
+    const FakeWorld world = makeWorld();
+
+    StageBRequest silent = makeRequest();
+    silent.reportedAmmoCounts.clear();
+    const StageBOutcome outcome = validateStageB(engage.order, silent, CommanderConfig{}, world);
+    AIC_EXPECT_TRUE(outcome.accepted,
+                    "an unreported loadout must NOT reject - absence of information is not "
+                    "evidence of a dry rail. Got '" + std::string(toString(outcome.reason))
+                        + "': " + outcome.detail);
+    return true;
+}
+
+// B8 covers engage and crank only. `defend` is a reaction to an inbound munition rather than a
+// shot, and the waypoint postures carry no target at all - refusing them on stores would ground a
+// winchester aircraft that is trying to leave, which is the exact behaviour this check exists to
+// let Tier 1 perform.
+AIC_TEST(StageBLetsADryAircraftHoldDefendAndGoHome) {
+    const FakeWorld world = makeWorld();
+    StageBRequest dry = makeRequest();
+    dry.reportedAmmoCounts = {0, 0};
+
+    const StageAOutcome hold = validateStageA(baselineHoldOrder(), kOwnId);
+    AIC_EXPECT_TRUE(hold.accepted, "the baseline hold order must clear Stage A first");
+    const StageBOutcome holdOutcome = validateStageB(hold.order, dry, CommanderConfig{}, world);
+    AIC_EXPECT_TRUE(holdOutcome.accepted,
+                    "hold must be permitted on a dry aircraft, got '"
+                        + std::string(toString(holdOutcome.reason)) + "': " + holdOutcome.detail);
+
+    // defend carries a target but is not a shot.
+    const StageAOutcome engage = validateStageA(engageOrder("BlueF18_02"), kOwnId);
+    Order defend = engage.order;
+    defend.posture = Posture::Defend;
+    const StageBOutcome defendOutcome = validateStageB(defend, dry, CommanderConfig{}, world);
+    AIC_EXPECT_TRUE(defendOutcome.accepted,
+                    "defend must be permitted on a dry aircraft, got '"
+                        + std::string(toString(defendOutcome.reason)) + "': " + defendOutcome.detail);
+    return true;
+}
+
+// B8 runs after B3/B4, so the more specific diagnosis wins the record. A run whose `loadout`
+// counter climbed while the real fault was a hallucinated target would send the runbook's reader
+// to the wrong page.
+AIC_TEST(StageBPrefersTheMoreSpecificReasonOverLoadout) {
+    const FakeWorld world = makeWorld();
+    StageBRequest dry = makeRequest();
+    dry.reportedAmmoCounts = {0, 0};
+
+    // A target that was never reported, on a dry aircraft. Both checks would fire; B3 must win.
+    const StageAOutcome hallucinated = validateStageA(engageOrder("PhantomJet_01"), kOwnId);
+    AIC_EXPECT_TRUE(hallucinated.accepted, "the order must clear Stage A first");
+    const StageBOutcome trackOutcome =
+        validateStageB(hallucinated.order, dry, CommanderConfig{}, world);
+    AIC_EXPECT_TRUE(trackOutcome.reason == RejectReason::Track,
+                    "a hallucinated target on a dry aircraft must reject `track`, not `loadout`; got '"
+                        + std::string(toString(trackOutcome.reason)) + "'");
+
+    // A friendly target on a dry aircraft. B4 must win.
+    const StageAOutcome friendly = validateStageA(engageOrder("RedSu35_02"), kOwnId);
+    AIC_EXPECT_TRUE(friendly.accepted, "the order must clear Stage A first");
+    const StageBOutcome fratricideOutcome =
+        validateStageB(friendly.order, dry, CommanderConfig{}, world);
+    AIC_EXPECT_TRUE(fratricideOutcome.reason == RejectReason::Fratricide,
+                    "a friendly target on a dry aircraft must reject `fratricide`, not `loadout`; got '"
+                        + std::string(toString(fratricideOutcome.reason)) + "'");
+    return true;
+}
+
+// The reason strings are a wire contract - they appear in the JSONL order log, in the
+// aicmd.reject.<reason> counter names, and in the runbook. Renaming one breaks every saved log.
+AIC_TEST(LoadoutIsAStageBReasonWithItsWireName) {
+    AIC_EXPECT_EQ(std::string(toString(RejectReason::Loadout)), std::string("loadout"),
+                  "the `loadout` wire name is a contract, not a display string");
+    AIC_EXPECT_TRUE(isStageBReason(RejectReason::Loadout),
+                    "loadout is a Stage-B reason: it needs the snapshot's reported stores, which "
+                    "only the simulation thread assembles");
+    return true;
+}
+
