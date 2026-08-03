@@ -2,6 +2,7 @@
 
 #include <plugin/PluginConfigField.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -95,5 +96,37 @@ struct CommanderConfig {
     const CommanderConfig& base,
     CommanderConfig& out,
     std::string& error);
+
+// The fixed path of the deployed configuration file (AIC-API-2, v1.7.2), relative to the HOST's
+// working directory — the release root, which setup.cmd establishes. Deliberately not configurable:
+// a config path that is itself configurable has no bootstrap.
+inline constexpr const char* kDeployedConfigPath = "data/config/plugins/ai-commander.cfg";
+
+// Parses a deployed .cfg into the flat field list applyConfigFields already takes.
+//
+// Format is the one the release tree already uses for per-plugin configuration — flat `name=value`,
+// one per line, dotted names, no sections, empty values legal (data/config/plugins/n8ro-skyfeed.cfg
+// is the shipped exemplar) — extended to tolerate `#` comment lines, blank lines, and surrounding
+// whitespace, because docs/example-config/ai-commander.cfg is largely comments and has instructed
+// operators to copy it into that directory since Phase 0. Rejecting it would have made this
+// repository's own documented workflow produce a file the plugin refuses.
+//
+// Every field is emitted as Text. That is not laziness: tryParseConfigFields dispatches on the
+// field NAME and parses the value itself, never reading field.type — so a per-field type table here
+// would be a second copy of a mapping that already exists, and a second thing to drift.
+//
+// A line with no '=' is skipped rather than failing the parse. Validation is tryParseConfigFields's
+// job, and it is the one place that should refuse anything.
+[[nodiscard]] std::vector<n8ro::core::PluginConfigField> parseConfigFileText(const std::string& text);
+
+// Reads the deployed config at `path` and returns the fields it carries, or std::nullopt when no
+// file exists there.
+//
+// The nullopt-versus-empty distinction is load-bearing rather than stylistic: "there is no config
+// file" and "there is a config file that sets nothing" are different operator situations and log
+// differently. Collapsing them is how a typo'd path becomes indistinguishable from a deliberate
+// default deploy — which is exactly the failure §Corrections item 16 records for the doctrine path.
+[[nodiscard]] std::optional<std::vector<n8ro::core::PluginConfigField>> readDeployedConfigFile(
+    const std::string& path);
 
 } // namespace arkheon::aicommander

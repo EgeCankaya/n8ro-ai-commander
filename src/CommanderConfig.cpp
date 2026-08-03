@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
+#include <cstddef>
+#include <fstream>
+#include <sstream>
 #include <string_view>
 #include <system_error>
 
@@ -303,6 +306,55 @@ bool tryParseConfigFields(
 
     out = draft;
     return true;
+}
+
+std::vector<PluginConfigField> parseConfigFileText(const std::string& text) {
+    std::vector<PluginConfigField> fields;
+
+    std::size_t lineStart = 0;
+    while (lineStart <= text.size()) {
+        std::size_t lineEnd = text.find('\n', lineStart);
+        if (lineEnd == std::string::npos) {
+            lineEnd = text.size();
+        }
+        const std::string_view line =
+            trim(std::string_view(text).substr(lineStart, lineEnd - lineStart));
+        lineStart = lineEnd + 1;
+
+        // Blank and comment lines. `#` only — that is what the shipped example config uses, and a
+        // second comment character would be format invented rather than derived.
+        if (line.empty() || line.front() == '#') {
+            continue;
+        }
+
+        const std::size_t separator = line.find('=');
+        if (separator == std::string_view::npos) {
+            continue;
+        }
+
+        const std::string_view name = trim(line.substr(0, separator));
+        if (name.empty()) {
+            continue;
+        }
+
+        // An empty value is an empty string, not an absent field: `replay.path=` and
+        // `claude.effort=` are both meaningful in the shipped example, and both mean "empty".
+        const std::string_view value = trim(line.substr(separator + 1));
+        fields.push_back(PluginConfigField{
+            std::string(name), PluginConfigFieldType::Text, std::string(value)});
+    }
+
+    return fields;
+}
+
+std::optional<std::vector<PluginConfigField>> readDeployedConfigFile(const std::string& path) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) {
+        return std::nullopt;
+    }
+    std::ostringstream buffer;
+    buffer << stream.rdbuf();
+    return parseConfigFileText(buffer.str());
 }
 
 } // namespace arkheon::aicommander
