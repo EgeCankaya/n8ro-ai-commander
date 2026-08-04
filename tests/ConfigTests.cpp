@@ -112,6 +112,47 @@ AIC_TEST(ConfigRejectsPlainHttpClaudeBaseUrl) {
     return true;
 }
 
+// AIC-API-2 (v1.8.7): claude.maxTokens is bounded at BOTH ends. The upper bound is the new half
+// and it exists because the anticipated next act on this field is an operator raising it by hand:
+// past kMaxClaudeMaxTokens a completed response can exceed Stage-A A0's kMaxResponseBodyBytes and
+// be rejected `range`, which trades one silent length failure for a different one. The bound is
+// not a recommendation — the default stays 512, which this also pins.
+AIC_TEST(ConfigBoundsClaudeMaxTokensAtBothEnds) {
+    AIC_EXPECT_EQ(CommanderConfig{}.claudeMaxTokens, 512,
+                  "the default must stay 512 — no other value has been measured (PRD item 25)");
+
+    struct Row {
+        const char* value;
+        bool expectAccepted;
+        const char* why;
+    };
+    const Row rows[] = {
+        {"0", false, "zero output tokens cannot carry an order"},
+        {"-1", false, "a negative ceiling is meaningless"},
+        {"1", true, "the lower bound itself is legal"},
+        {"512", true, "the default must survive a round trip through the validator"},
+        {"8192", true, "the upper bound itself is legal"},
+        {"8193", false, "one over the bound must be rejected"},
+        {"64000", false, "the model's own API maximum is not this product's bound"},
+    };
+
+    for (const Row& row : rows) {
+        CommanderConfig parsed;
+        std::string error;
+        const bool applied = tryParseConfigFields(
+            one("claude.maxTokens", PluginConfigFieldType::Int, row.value),
+            CommanderConfig{}, parsed, error);
+
+        AIC_EXPECT_EQ(applied, row.expectAccepted,
+                      std::string("claude.maxTokens=") + row.value + ": " + row.why);
+        if (!row.expectAccepted) {
+            AIC_EXPECT_TRUE(error.find("claude.maxTokens") != std::string::npos,
+                            "the reason must name the field, got: " + error);
+        }
+    }
+    return true;
+}
+
 // The load-bearing property of applyConfigFields: application is all-or-nothing. A batch with one
 // bad field leaves EVERY prior value untouched, including the good fields in the same batch.
 // A partially applied config is a configuration nobody specified.
