@@ -22,7 +22,7 @@
 // Usage: ai-commander-live-tests.exe [--orders N] [--mode prefix|schema|soak|cold|h2|geo|all]
 //                                    [--backend local|claude] [--model TAG] [--base-url URL]
 //                                    [--claude-model ID] [--claude-base-url URL] [--key-env NAME]
-//                                    [--no-format] [--out PATH]
+//                                    [--max-tokens N] [--no-format] [--out PATH] [--csv PATH]
 //
 // `--backend claude` REACHES THE NETWORK and transmits the volatile suffix - position, velocity,
 // heading, team, reported tracks, loadout. It is authorization-gated (PRD §Phase 2). The default is
@@ -486,6 +486,13 @@ struct Options {
     std::string claudeBaseUrl = "https://api.anthropic.com";
     std::string apiKeyEnvVar = "ANTHROPIC_API_KEY";
 
+    // The output ceiling, in tokens. Defaults to the shipped `claude.maxTokens` so an unqualified
+    // run keeps measuring the shipped configuration. It is a harness flag because C7 needs a run
+    // whose ceiling does NOT censor the thing being measured: at 512 the Sonnet run's output-length
+    // distribution is right-censored exactly where the question lives, so the tail is observable
+    // only by raising this and re-running (PRD §Corrections item 25). Bounded like the config field.
+    int claudeMaxTokens = 512;
+
     // Per-order rows, for questions the aggregates cannot answer. The soak reports a p95 and a mean
     // output length; it cannot say whether the SAME orders that were slow were the ones that emitted
     // the most tokens, and that correlation is the whole of the C2 latency decomposition.
@@ -534,6 +541,7 @@ ClaudeClientConfig claudeConfigFrom(const Options& options, const CommanderConfi
     claude.baseUrl = options.claudeBaseUrl;
     claude.model = options.claudeModel;
     claude.apiKeyEnvVar = options.apiKeyEnvVar;
+    claude.maxTokens = options.claudeMaxTokens;
     claude.timeoutS = config.requestTimeoutS;
     // Left empty deliberately: `effort` is a prohibition on Haiku 4.5, not an omission. The adapter
     // suppresses it anyway; not setting it here means the harness never depends on that suppression.
@@ -948,6 +956,8 @@ int main(int argc, char** argv) {
             options.claudeBaseUrl = next();
         } else if (arg == "--key-env") {
             options.apiKeyEnvVar = next();
+        } else if (arg == "--max-tokens") {
+            options.claudeMaxTokens = std::atoi(next().c_str());
         } else if (arg == "--csv") {
             options.csvPath = next();
         } else {
@@ -958,6 +968,16 @@ int main(int argc, char** argv) {
 
     if (options.backend != "local" && options.backend != "claude") {
         std::cerr << "unknown backend: " << options.backend << " (expected 'local' or 'claude')\n";
+        return 2;
+    }
+
+    // The same bound the config surface enforces (AIC-API-2, PRD v1.8.7). The harness validates it
+    // rather than trusting the flag, because a probe that exceeds Stage-A A0's 64 KiB body cap would
+    // report `range` rejections and read exactly like the truncation it was built to remove.
+    if (options.claudeMaxTokens < 1
+        || options.claudeMaxTokens > arkheon::aicommander::kMaxClaudeMaxTokens) {
+        std::cerr << "--max-tokens must be within [1, "
+                  << arkheon::aicommander::kMaxClaudeMaxTokens << "]\n";
         return 2;
     }
 
@@ -985,6 +1005,9 @@ int main(int argc, char** argv) {
         report << "  base url    " << options.claudeBaseUrl << "\n";
         report << "  model       " << options.claudeModel << "  (Anthropic model id)\n";
         report << "  key from    $" << options.apiKeyEnvVar << "  (name only; value never logged)\n";
+        report << "  max tokens  " << options.claudeMaxTokens
+               << (options.claudeMaxTokens == 512 ? "  (shipped default)" : "  (RAISED - the shipped default is 512)")
+               << "\n";
         report << "  EGRESS      LIVE. Transmits the volatile suffix: position, velocity, heading,\n";
         report << "              team, reported tracks, loadout. Authorized PRD v1.8.3, scoped to\n";
         report << "              the synthetic LiveMain fixtures - NOT the real scenario.\n";
