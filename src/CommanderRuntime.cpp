@@ -170,7 +170,8 @@ void CommanderRuntime::setClient(std::unique_ptr<ILlmClient> client) {
 
 CandidateOrder CommanderRuntime::runWorkerCall(
     OrderSnapshot snapshot, const std::string& prompt, ILlmClient& client,
-    bool& outAccepted, RejectReason& outReason, std::string& outDetail, std::string& outRawBody) {
+    bool& outAccepted, RejectReason& outReason, std::string& outDetail, std::string& outRawBody,
+    std::size_t prefixLength) {
     // Everything this function can reach is its arguments. There is no `this`, no runtime, no
     // recorder, no entity manager — which is what makes AIC-ARCH-2's "the worker captures only a
     // POD snapshot and the ILlmClient" a property of the signature rather than a review note.
@@ -180,6 +181,7 @@ CandidateOrder CommanderRuntime::runWorkerCall(
     LlmRequest request;
     request.prompt = prompt;
     request.snapshot = std::move(snapshot);
+    request.prefixLength = prefixLength;
 
     const LlmResult result = client.request(request);
     candidate.latencyMs = result.latencyMs;
@@ -224,13 +226,14 @@ CandidateOrder CommanderRuntime::runWorkerCall(
 }
 
 CandidateOrder CommanderRuntime::runWorkerCall(
-    OrderSnapshot snapshot, const std::string& prompt, ILlmClient& client) {
+    OrderSnapshot snapshot, const std::string& prompt, ILlmClient& client,
+    std::size_t prefixLength) {
     bool accepted = false;
     RejectReason reason = RejectReason::None;
     std::string detail;
     std::string rawBody;
-    CandidateOrder candidate =
-        runWorkerCall(std::move(snapshot), prompt, client, accepted, reason, detail, rawBody);
+    CandidateOrder candidate = runWorkerCall(
+        std::move(snapshot), prompt, client, accepted, reason, detail, rawBody, prefixLength);
 
     // The verdict travels WITH the candidate rather than being discarded here. The worker cannot
     // touch the counters or the recorder — both are simulation-thread-only — so the only way a

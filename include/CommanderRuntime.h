@@ -135,16 +135,24 @@ public:
     // Deliberately static and free of runtime state: it takes only the snapshot BY VALUE and a
     // client pointer, which is what makes "the worker captures no SDK pointer" structural rather
     // than a convention. It touches no IEntityManager, no recorder, and no roster.
+    //
+    // `prefixLength` is the byte offset at which the stable prefix ends (AIC-BE-3, v1.8). Defaulted
+    // rather than required because only a hosted adapter has a use for it, and making it mandatory
+    // would force every existing caller — the replay suite, the integration suite, the live harness
+    // — to restate a value they have no concept of. Zero means "no boundary declared", which is
+    // exactly correct for all of them.
     [[nodiscard]] static CandidateOrder runWorkerCall(
         OrderSnapshot snapshot, const std::string& prompt, ILlmClient& client,
-        bool& outAccepted, RejectReason& outReason, std::string& outDetail, std::string& outRawBody);
+        bool& outAccepted, RejectReason& outReason, std::string& outDetail, std::string& outRawBody,
+        std::size_t prefixLength = 0);
 
     // The form the worker actually uses: packs the Stage-A verdict into the returned candidate so
     // it survives the thread boundary. Prefer this over the out-parameter overload — a caller that
     // drops those out-parameters silently loses every syntactic rejection from the counters and
     // the order log.
     [[nodiscard]] static CandidateOrder runWorkerCall(
-        OrderSnapshot snapshot, const std::string& prompt, ILlmClient& client);
+        OrderSnapshot snapshot, const std::string& prompt, ILlmClient& client,
+        std::size_t prefixLength = 0);
 
     void countRejection(RejectReason reason);
     void countAcceptance(std::int64_t latencyMs);

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Release|x64">
@@ -114,6 +114,7 @@ if not exist "$(N8RO_RELEASE)\data\doctrine.txt" (
     <ClInclude Include="include\FallbackLadder.h" />
     <ClInclude Include="include\FrameCostHistogram.h" />
     <ClInclude Include="include\ILlmClient.h" />
+    <ClInclude Include="include\ClaudeLlmClient.h" />
     <ClInclude Include="include\LocalLlmClient.h" />
     <ClInclude Include="include\Order.h" />
     <ClInclude Include="include\OrderRecorder.h" />
@@ -136,6 +137,7 @@ if not exist "$(N8RO_RELEASE)\data\doctrine.txt" (
     <ClCompile Include="src\EnvVar.cpp" />
     <ClCompile Include="src\FallbackLadder.cpp" />
     <ClCompile Include="src\FrameCostHistogram.cpp" />
+    <ClCompile Include="src\ClaudeLlmClient.cpp" />
     <ClCompile Include="src\LocalLlmClient.cpp" />
     <ClCompile Include="src\Order.cpp" />
     <ClCompile Include="src\OrderRecorder.cpp" />
