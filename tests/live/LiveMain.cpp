@@ -193,6 +193,56 @@ struct Tally {
     int responsesWithTokens = 0;
     int cacheHits = 0;
 
+    // Per-order rows, kept alongside the aggregates rather than instead of them.
+    struct Row {
+        std::int64_t latencyMs;
+        int tokensIn;
+        int tokensOut;
+        int cacheReadTokens;
+        bool accepted;
+        std::string situation;
+    };
+    std::vector<Row> rows;
+
+    // Least-squares fit of latencyMs against tokensOut. The INTERCEPT is the fixed cost of a
+    // request - everything that does not depend on how much the model wrote, which is where prefix
+    // processing lives - and the SLOPE is the marginal cost per output token. If the intercept is
+    // small, shrinking the prefix cannot buy much latency however much it buys in cost, and C2 and
+    // C3 are separate problems. That is the question this exists to answer, and it is not
+    // answerable from a p95 alone.
+    struct Fit { double intercept = 0.0; double slope = 0.0; double r2 = 0.0; int n = 0; };
+    [[nodiscard]] Fit fitLatencyOnOutput() const {
+        Fit fit;
+        std::vector<const Row*> usable;
+        for (const Row& row : rows) {
+            if (row.tokensOut > 0) { usable.push_back(&row); }
+        }
+        fit.n = static_cast<int>(usable.size());
+        if (fit.n < 3) { return fit; }
+
+        double sumX = 0.0, sumY = 0.0;
+        for (const Row* row : usable) {
+            sumX += row->tokensOut;
+            sumY += static_cast<double>(row->latencyMs);
+        }
+        const double meanX = sumX / fit.n;
+        const double meanY = sumY / fit.n;
+
+        double sxx = 0.0, sxy = 0.0, syy = 0.0;
+        for (const Row* row : usable) {
+            const double dx = row->tokensOut - meanX;
+            const double dy = static_cast<double>(row->latencyMs) - meanY;
+            sxx += dx * dx;
+            sxy += dx * dy;
+            syy += dy * dy;
+        }
+        if (sxx <= 0.0) { return fit; }
+        fit.slope = sxy / sxx;
+        fit.intercept = meanY - fit.slope * meanX;
+        fit.r2 = (syy > 0.0) ? (sxy * sxy) / (sxx * syy) : 0.0;
+        return fit;
+    }
+
     [[nodiscard]] double acceptancePct() const {
         return requested == 0 ? 0.0 : 100.0 * accepted / requested;
     }
@@ -228,6 +278,8 @@ void record(Tally& tally, const CandidateOrder& candidate, const std::string& si
     if (cacheReadTokens > 0) {
         ++tally.cacheHits;
     }
+    tally.rows.push_back({candidate.latencyMs, candidate.tokensIn, candidate.tokensOut,
+                          cacheReadTokens, candidate.stageAAccepted, situation});
     if (candidate.stageAAccepted) {
         ++tally.accepted;
         const std::string posture = toString(candidate.order.posture);
@@ -305,6 +357,68 @@ std::string formatCost(const Tally& tally, const std::string& model, double perO
     return out.str();
 }
 
+// The C2 latency decomposition, printed from per-order rows. Reports the fit and then says what it
+// does NOT establish, because a regression over one arm cannot distinguish "the prefix is cheap"
+// from "the prefix is expensive but constant" - only the second arm, with a different prefix, can.
+std::string formatLatencyDecomposition(const Tally& tally) {
+    std::ostringstream out;
+    out.imbue(std::locale::classic());
+    const Tally::Fit fit = tally.fitLatencyOnOutput();
+    if (fit.n < 3) {
+        return out.str();
+    }
+
+    out << "  -- latency decomposition (Carried out of Phase 2, C2) --\n";
+    out << "  latencyMs ~ intercept + slope x tokensOut, over " << fit.n << " orders\n";
+    out << "    intercept  " << std::fixed << std::setprecision(0) << fit.intercept
+        << " ms      <- fixed per-request cost; prefix processing lives here\n";
+    out << "    slope      " << std::setprecision(1) << fit.slope
+        << " ms/token   <- marginal cost of writing one more token\n";
+    out << "    r2         " << std::setprecision(3) << fit.r2 << "\n";
+
+    // Attribute the MEAN latency between the two terms, which is the form the C2 decision needs.
+    double meanOut = 0.0;
+    int counted = 0;
+    for (const Tally::Row& row : tally.rows) {
+        if (row.tokensOut > 0) { meanOut += row.tokensOut; ++counted; }
+    }
+    if (counted > 0) {
+        meanOut /= counted;
+        const double outPart = fit.slope * meanOut;
+        const double total = fit.intercept + outPart;
+        if (total > 0.0) {
+            out << "  at the mean output of " << std::setprecision(1) << meanOut << " tokens:\n";
+            out << "    fixed      " << std::setprecision(0) << fit.intercept << " ms  ("
+                << std::setprecision(0) << (100.0 * fit.intercept / total) << " %)\n";
+            out << "    generation " << std::setprecision(0) << outPart << " ms  ("
+                << std::setprecision(0) << (100.0 * outPart / total) << " %)\n";
+        }
+    }
+    out << "  NOTE: one arm cannot separate a cheap prefix from an expensive CONSTANT one - both\n"
+           "        land in the intercept. Comparing intercepts ACROSS two arms with different\n"
+           "        prefix sizes is what identifies the prefix term. Run --mode soak twice with\n"
+           "        different --doctrine and compare.\n";
+    return out.str();
+}
+
+void writeCsv(const std::string& path, const Tally& tally) {
+    if (path.empty()) {
+        return;
+    }
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        std::cerr << "[WARN] could not open " << path << " for the per-order CSV\n";
+        return;
+    }
+    out << "latencyMs,tokensIn,tokensOut,cacheReadTokens,accepted,situation\n";
+    for (const Tally::Row& row : tally.rows) {
+        out << row.latencyMs << "," << row.tokensIn << "," << row.tokensOut << ","
+            << row.cacheReadTokens << "," << (row.accepted ? 1 : 0) << ",\"" << row.situation
+            << "\"\n";
+    }
+    std::cout << "[OK] wrote " << tally.rows.size() << " per-order rows to " << path << "\n";
+}
+
 std::string formatTally(const std::string& title, const Tally& tally) {
     std::ostringstream out;
     out.imbue(std::locale::classic());
@@ -371,6 +485,11 @@ struct Options {
     std::string claudeModel = "claude-haiku-4-5";
     std::string claudeBaseUrl = "https://api.anthropic.com";
     std::string apiKeyEnvVar = "ANTHROPIC_API_KEY";
+
+    // Per-order rows, for questions the aggregates cannot answer. The soak reports a p95 and a mean
+    // output length; it cannot say whether the SAME orders that were slow were the ones that emitted
+    // the most tokens, and that correlation is the whole of the C2 latency decomposition.
+    std::string csvPath;
 };
 
 std::string readFile(const std::string& path) {
@@ -829,6 +948,8 @@ int main(int argc, char** argv) {
             options.claudeBaseUrl = next();
         } else if (arg == "--key-env") {
             options.apiKeyEnvVar = next();
+        } else if (arg == "--csv") {
+            options.csvPath = next();
         } else {
             std::cerr << "unknown argument: " << arg << "\n";
             return 2;
@@ -969,9 +1090,11 @@ int main(int argc, char** argv) {
         const std::string section = formatTally("soak (prefix-stable)", tally)
                                   + formatCost(tally, options.backend == "claude"
                                                           ? options.claudeModel : options.model,
-                                               0.00105);
+                                               0.00105)
+                                  + formatLatencyDecomposition(tally);
         std::cout << section << std::flush;
         report << section;
+        writeCsv(options.csvPath, tally);
     }
 
     if (options.mode == "h2" || options.mode == "all") {
