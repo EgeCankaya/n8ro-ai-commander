@@ -71,7 +71,21 @@ param(
     [string]$Backend = "local",
 
     [string]$ClaudeModel = "claude-haiku-4-5",
-    [string]$KeyEnvVar = "ANTHROPIC_API_KEY"
+    [string]$KeyEnvVar = "ANTHROPIC_API_KEY",
+
+    # WHERE THIS RUN'S EVIDENCE GOES, and why it is outside the repository (PRD v1.8.18,
+    # §Corrections item 35(f); §Source control, "Where run evidence lives").
+    #
+    # Order logs carry live scenario state - positions, ORBAT, team assignments, loadouts - which
+    # inherits the release tree's proprietary classification. `logs/` and `*.jsonl` are therefore
+    # security-relevant ignore rules, and tools/check-artifacts.ps1 fails the build on a tracked
+    # .jsonl. In-tree was never available.
+    #
+    # But "not in the repository" is not a location, and that gap cost this project real evidence:
+    # C11 - the largest open item in the PRD - rests on paired commander-on / commander-off logs
+    # described only as "retained for the domain review", which sat in %TEMP% for three days. This
+    # parameter is that location, written down once.
+    [string]$ArchiveRoot = (Join-Path ([Environment]::GetFolderPath('MyDocuments')) "N8RO AI Commander logs")
 )
 
 $ErrorActionPreference = "Stop"
@@ -87,6 +101,12 @@ $orderLog    = Join-Path $ReleaseRoot "logs\ai-commander\orders.jsonl"
 $stamp   = (Get-Date -Format "yyyyMMddTHHmmssZ")
 $workDir = Join-Path ([System.IO.Path]::GetTempPath()) "aic-live"
 New-Item -ItemType Directory -Force -Path $workDir | Out-Null
+
+# The durable home for this run's evidence. %TEMP% stays as the working directory - it is where the
+# engine's stdout is redirected while the run is in flight - but nothing is left there to be found
+# later by luck.
+$archiveDir = Join-Path $ArchiveRoot "$stamp-$Backend"
+New-Item -ItemType Directory -Force -Path $archiveDir | Out-Null
 
 $failures = New-Object System.Collections.Generic.List[string]
 $checks = 0
@@ -180,7 +200,25 @@ cd /d "%N8RO_RELEASE%"
         return (Get-Content $out -Raw)
     }
 
-    if (Test-Path $orderLog) { Remove-Item $orderLog -Force -ErrorAction SilentlyContinue }
+    # PRESERVED, NOT DELETED (PRD §Corrections item 35(f)).
+    #
+    # This line used to read:
+    #
+    #     if (Test-Path $orderLog) { Remove-Item $orderLog -Force -ErrorAction SilentlyContinue }
+    #
+    # It destroyed the previous run's order log at the START of every run, and it is why the
+    # 2026-08-03 local run's log does not exist to be reviewed. The run still needs to begin from
+    # an empty log - every order-count assertion below reads the whole file and would otherwise
+    # count a predecessor's orders - but "start empty" and "destroy the predecessor" are different
+    # requirements, and only the first one was ever needed.
+    #
+    # A run that overwrites its own predecessor's evidence makes every paired comparison a
+    # one-shot, which is precisely what H1 needs and cannot get.
+    if (Test-Path $orderLog) {
+        $rotated = Join-Path $archiveDir ("orders-previous-run-{0}.jsonl" -f $stamp)
+        Move-Item -Path $orderLog -Destination $rotated -Force
+        Write-Host "  previous order log preserved -> $rotated"
+    }
 
     # -- 2. turn the commander on -----------------------------------------------------------------
     # This is what PRD v1.7.2 bought. commander.enabled is a positive act, and this script is
@@ -357,7 +395,9 @@ local.grammarEnabled=true
         Assert-That ($control -match 'enabled=false') `
             "control run really is commander-off, not merely running the stock script"
         Write-Host "  H1 is a JUDGEMENT, not an assertion: a domain reviewer compares the posture"
-        Write-Host "  transitions in the two logs. Both are kept in $workDir for that review."
+        Write-Host "  transitions in the two logs. Both are archived to $archiveDir for that"
+        Write-Host "  review - a named, durable location rather than the %TEMP% directory the"
+        Write-Host "  v1.7.4 pair survived in by luck for three days (PRD Corrections item 35(f))."
     }
 }
 finally {
@@ -381,6 +421,35 @@ finally {
 
     if ($seededDoctrine -and (Test-Path $doctrineDst)) {
         Remove-Item $doctrineDst -Force; Write-Host "  removed the seeded doctrine"
+    }
+
+    # -- archive the run's evidence --------------------------------------------------------------
+    # In the FINALLY block deliberately. A run that failed halfway is the run whose logs someone
+    # most wants to read, and archiving only on the success path would discard exactly those. This
+    # is also the H1 pair's home: the commander-on and commander-off logs land side by side, which
+    # is the comparison C11 needs and the reason the convention exists at all.
+    Write-Host "`n-- archiving run evidence --"
+    $archived = 0
+    if (Test-Path $orderLog) {
+        Copy-Item $orderLog (Join-Path $archiveDir "orders.jsonl") -Force
+        $archived++
+    }
+    foreach ($tag in @("commander-on", "commander-off")) {
+        foreach ($suffix in @("", ".err")) {
+            $src = Join-Path $workDir "$tag-$stamp.log$suffix"
+            if (Test-Path $src) {
+                Copy-Item $src (Join-Path $archiveDir (Split-Path -Leaf $src)) -Force
+                $archived++
+            }
+        }
+    }
+    if ($archived -gt 0) {
+        Write-Host "  $archived file(s) -> $archiveDir"
+        Write-Host "  This is the H1 evidence location (PRD Corrections item 35(f)). It is OUTSIDE"
+        Write-Host "  the repository on purpose: order logs carry live scenario state, and both the"
+        Write-Host "  *.jsonl ignore rule and check-artifacts.ps1 exist to keep them out of it."
+    } else {
+        Write-Host "  nothing to archive (no order log and no engine log produced)"
     }
 }
 
