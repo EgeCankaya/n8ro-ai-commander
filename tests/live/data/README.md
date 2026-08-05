@@ -32,6 +32,15 @@ may be described as characterising the product rather than the fixtures.
 | `sonnet-maxtokens-8192.csv` | The ceiling-raised re-run that closed C7. **48/48 accepted.** Paired with the row above: same model, same fixtures, ceiling the only difference | `claude-sonnet-5` | 48 | fourth (v1.8.8) | v1.8.9 |
 | `c2-ttft-armA-full-doctrine.csv` | The TTFT run, arm A — 17,756 B prefix / 10,493 cached tokens. Different columns from the four above; see below | `claude-sonnet-5` | 48 | fifth (v1.8.11) | v1.8.12 |
 | `c2-ttft-armB-short-doctrine.csv` | The TTFT run, arm B — 10,976 B prefix / 8,291 cached tokens. Identical to arm A in every other respect | `claude-sonnet-5` | 48 | fifth (v1.8.11) | v1.8.12 |
+| `c3-quality-armA-prose-schema.csv` | C3's quality arm A — the prefix **as it shipped before v1.8.14**, 17,756 B. **120/120 accepted** | `claude-haiku-4-5` | 120 | fifth (v1.8.11) | v1.8.14 |
+| `c3-quality-armB-no-prose-schema.csv` | C3's quality arm B — prose schema excised, 8,750 B. **120/120 accepted.** This prefix is what **now ships** | `claude-haiku-4-5` | 120 | fifth (v1.8.11) | v1.8.14 |
+
+**The two C3 files are the evidence a shipped-code change rests on**, and they are the reason this
+directory exists at all. The decision rule they were judged against was written into the PRD
+(§Corrections item 30) and pushed to the remote **before** either arm ran — so the rule cannot have
+been chosen to fit them. Arm A is the prefix as it shipped up to v1.8.14; **arm B is the prefix that
+ships now**, byte-identical to it, including one blank line that was briefly removed as tidy-up and
+restored so that the artifact under test and the artifact in production stayed the same object.
 
 The two TTFT files come from `measure-ttft.ps1`, not from `--csv`, and carry a different schema:
 `arm, fixture, repeat, ttftMs, headersMs, totalMs, afterFirstMs, deltas, tokensIn, tokensOut,
