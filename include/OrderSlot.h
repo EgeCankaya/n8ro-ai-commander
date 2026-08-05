@@ -26,6 +26,14 @@ struct CandidateOrder {
     int tokensIn = 0;
     int tokensOut = 0;
 
+    // Prompt-cache accounting, carried across the slot for the same reason the Stage-A verdict is
+    // (AIC-BE-2 / AIC-BE-3, v1.8.18): the worker may not touch the recorder, the counters, or the
+    // log, so anything the simulation thread has to act on has to ride here or be lost. Dropping
+    // these at the boundary is exactly what kept AIC-BE-2's recording SHALL unmet for twelve
+    // revisions while the PRD reasoned about a guard reading a value that never arrived.
+    int cacheReadTokens = 0;
+    int cacheCreationTokens = 0;
+
     // Stage-A outcome, carried across the slot for the simulation thread to act on.
     bool stageAAccepted = false;
     RejectReason stageAReason = RejectReason::None;

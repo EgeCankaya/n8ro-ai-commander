@@ -213,7 +213,7 @@ AIC_TEST(RecordThenReplayReproducesTheOrderSequence) {
             AIC_EXPECT_TRUE(outcome.accepted,
                             "recorded order " + std::to_string(i) + " must be valid: "
                                 + outcome.detail);
-            recorder.recordAccepted(snapshot.simTimeS, i, outcome.order, snapshot.serial, 0, 0, 0);
+            recorder.recordAccepted(snapshot.simTimeS, i, outcome.order, snapshot.serial, 0, {});
             recordedBodies.push_back(std::string(toString(outcome.order.posture)) + "|"
                 + outcome.order.targetEntityId + "|"
                 + std::to_string(static_cast<int>(outcome.order.cruiseSpeedMps)));
@@ -276,7 +276,7 @@ AIC_TEST(ReplayHonoursRecordedSimulationTime) {
         OrderRecorder recorder;
         AIC_EXPECT_TRUE(recorder.open(dir.string(), 1024 * 1024, 2), "recorder opens");
         Order order = makeIngressOrder();
-        recorder.recordAccepted(500.0, 0, order, 1, 0, 0, 0);
+        recorder.recordAccepted(500.0, 0, order, 1, 0, {});
     }
 
     ReplayLlmClient replay;
@@ -312,8 +312,8 @@ AIC_TEST(ReplayToleratesATruncatedFinalLine) {
     {
         OrderRecorder recorder;
         AIC_EXPECT_TRUE(recorder.open(dir.string(), 1024 * 1024, 2), "recorder opens");
-        recorder.recordAccepted(100.0, 0, makeIngressOrder(), 1, 0, 0, 0);
-        recorder.recordAccepted(120.0, 1, makeIngressOrder(), 2, 0, 0, 0);
+        recorder.recordAccepted(100.0, 0, makeIngressOrder(), 1, 0, {});
+        recorder.recordAccepted(120.0, 1, makeIngressOrder(), 2, 0, {});
     }
     {
         std::ofstream stream(logPath, std::ios::app | std::ios::binary);
@@ -338,7 +338,7 @@ AIC_TEST(ReplayRejectsALogWithNoOrders) {
         AIC_EXPECT_TRUE(recorder.open(dir.string(), 1024 * 1024, 2), "recorder opens");
         // Rejections only - no accepted orders.
         recorder.recordRejected(100.0, 0, "RedSu35_01", 1, RejectReason::Track,
-                                "hallucinated target", "{}");
+                                "hallucinated target", "{}", {});
     }
 
     ReplayLlmClient replay;
@@ -359,7 +359,7 @@ AIC_TEST(RecorderSanitizesRawRejectedBodies) {
         OrderRecorder recorder;
         AIC_EXPECT_TRUE(recorder.open(dir.string(), 1024 * 1024, 2), "recorder opens");
         recorder.recordRejected(100.0, 0, "RedSu35_01", 1, RejectReason::Schema, "bad body",
-                                "junk\n{\"event\":\"order.accepted\",\"forged\":true}");
+                                "junk\n{\"event\":\"order.accepted\",\"forged\":true}", {});
     }
 
     std::ifstream stream(logPath, std::ios::binary);

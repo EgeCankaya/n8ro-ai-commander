@@ -50,6 +50,32 @@ struct LlmResult {
     // Token accounting, populated by adapters that report it (Phase 2). Zero elsewhere.
     int tokensIn = 0;
     int tokensOut = 0;
+
+    // Prompt-cache accounting (AIC-BE-2, v1.8.18). Zero on every adapter with no cache concept,
+    // exactly as tokensIn/tokensOut already are on LocalLlmClient.
+    //
+    // BOTH fields, and the reason is that ONE OF THEM IS NOT ENOUGH TO READ THE OTHER. A prompt
+    // block below the model's cache minimum does not cache and says nothing about it: no error, no
+    // rejection, no counter — it comes back with cacheCreationTokens == 0. A cold but eligible
+    // FIRST request of a run comes back with cacheCreationTokens > 0 (it wrote the block) and
+    // cacheReadTokens == 0 (there was nothing yet to read). So:
+    //
+    //     creation > 0, read == 0     cold start        correct, expected once per run
+    //     creation == 0, read >= min  steady-state hit  the 119-of-120 case in C3's arms
+    //     creation == 0, read == 0    NEVER CACHED      the failure the guard exists for
+    //
+    // Read `cacheReadTokens` alone and the first and third rows are the same observation. That is
+    // why PRD C4 stopped being "add it when a cheaper reason to touch this interface arrives" and
+    // became a precondition of C9 (§Corrections item 35(b)): a guard that cannot tell those apart
+    // either warns on the first request of every run — and gets muted, which is worse than absent
+    // because a muted guard still reads as a guard — or skips the first response and so cannot see
+    // a shortfall that begins there, which is the only way this failure ever begins.
+    //
+    // These are ints rather than an optional pair because "the adapter reported zero" and "the
+    // adapter has no cache concept" are separated at the CALL SITE by the backend, not here. See
+    // AiCommanderPlugin's guard call, which is reached only on the hosted path.
+    int cacheReadTokens = 0;
+    int cacheCreationTokens = 0;
 };
 
 // The single seam every backend sits behind (AIC-ARCH-3).

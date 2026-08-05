@@ -155,25 +155,42 @@ void OrderRecorder::recordRequested(
     writeLine(record.toString());
 }
 
+namespace {
+
+// Written unconditionally, zeros included (AIC-DET-1, v1.8.18). Omitting a zero would be the
+// obvious economy and it is the wrong one: on the hosted path a zero in BOTH cache fields is not
+// an absence of information, it is the observation AIC-BE-3's guard turns on — the block never
+// cached. A field that disappears exactly when it carries the interesting value is worse than no
+// field, and a reader diffing two order logs would see nothing where the regression is.
+void writeUsage(JsonValue& record, const OrderRecorder::TokenUsage& usage) {
+    (void)record.setInt64("tokensIn", usage.tokensIn);
+    (void)record.setInt64("tokensOut", usage.tokensOut);
+    (void)record.setInt64("cacheReadTokens", usage.cacheReadTokens);
+    (void)record.setInt64("cacheCreationTokens", usage.cacheCreationTokens);
+}
+
+} // namespace
+
 void OrderRecorder::recordAccepted(
     double publishedSimTimeS, std::int64_t frame, const Order& order, std::int64_t serial,
-    std::int64_t latencyMs, int tokensIn, int tokensOut) {
+    std::int64_t latencyMs, const TokenUsage& usage) {
     JsonValue record = baseRecord(publishedSimTimeS, frame, OrderEvent::OrderAccepted);
     (void)record.setString("entityId", order.entityId);
     (void)record.setInt64("serial", serial);
     (void)record.setInt64("latencyMs", latencyMs);
-    (void)record.setInt64("tokensIn", tokensIn);
-    (void)record.setInt64("tokensOut", tokensOut);
+    writeUsage(record, usage);
     (void)record.set("order", orderToJson(order));
     writeLine(record.toString());
 }
 
 void OrderRecorder::recordRejected(
     double simTimeS, std::int64_t frame, const std::string& entityId, std::int64_t serial,
-    RejectReason reason, const std::string& detail, const std::string& rawBody) {
+    RejectReason reason, const std::string& detail, const std::string& rawBody,
+    const TokenUsage& usage) {
     JsonValue record = baseRecord(simTimeS, frame, OrderEvent::OrderRejected);
     (void)record.setString("entityId", entityId);
     (void)record.setInt64("serial", serial);
+    writeUsage(record, usage);
     (void)record.setString("reason", toString(reason));
     (void)record.setString("detail", detail);
     // Truncated and charset-filtered. The raw body is attacker-influenced text, and this file is
