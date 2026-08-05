@@ -478,6 +478,34 @@ void AiCommanderPlugin::drainCompletedOrders(double simTimeS, std::int64_t frame
         // suppress this entity's requests for the rest of the run.
         state->requestInFlight = false;
 
+        // -- cost accounting, and AIC-BE-3's runtime guard -----------------------------------------
+        // Built HERE, above the Stage-A verdict, and the placement is the point. A truncated
+        // response is billed in full and rejects at STAGE A as `parse` or `envelope` — that is
+        // precisely the case PRD §Corrections item 27(d) measured: four Sonnet orders charged for
+        // 512 output tokens each that produced nothing. Building `usage` after the Stage-A block
+        // would leave the most expensive rejections in the run as the only ones with no cost on
+        // their record.
+        const OrderRecorder::TokenUsage usage{
+            candidate->tokensIn, candidate->tokensOut,
+            candidate->cacheReadTokens, candidate->cacheCreationTokens};
+
+        // Hosted path only. Every other adapter reports (0, 0) on every response — not because its
+        // cache regressed, but because it has no cache — and asking the guard about them would make
+        // it fire on every stub and replay run, which is the muted-guard failure in a new costume.
+        //
+        // The check is HERE, on the simulation thread, and not at startup: the values it compares
+        // exist only after a response, which is what made the startup comparison the PRD asserted
+        // from v1.3 to v1.8.15 unwritable rather than merely unwritten. It also runs BEFORE the
+        // Stage-A early-out, because a cache shortfall is a property of the request and is just as
+        // real on a response that failed to parse.
+        if (config.backend == Backend::Claude) {
+            const std::optional<std::string> warning = runtime_.cacheGuard().observe(
+                candidate->cacheReadTokens, candidate->cacheCreationTokens, config.claudeModel);
+            if (warning.has_value()) {
+                N8RO_LOG_WARNING(*warning, kLogCategory);
+            }
+        }
+
         // -- Stage A verdict, acted on here because the worker could not ---------------------------
         // A syntactic rejection must increment its counter and write its record just as a semantic
         // one does; the worker had neither the counters nor the recorder. Handling it here also
@@ -488,7 +516,7 @@ void AiCommanderPlugin::drainCompletedOrders(double simTimeS, std::int64_t frame
                 runtime_.countRejection(candidate->stageAReason);
                 runtime_.recorder().recordRejected(simTimeS, frame, entityId,
                     candidate->snapshot.serial, candidate->stageAReason,
-                    candidate->stageADetail, candidate->rawBody);
+                    candidate->stageADetail, candidate->rawBody, usage);
             }
             // reason == None means "no order was due" (a replay with nothing at this simulation
             // time, or an empty 204 body). Not a rejection, not an event — nothing to count.
@@ -528,7 +556,8 @@ void AiCommanderPlugin::drainCompletedOrders(double simTimeS, std::int64_t frame
             // a `geofence` record said how FAR the waypoint was and never where it WAS, so the
             // Phase 1b live-smoke failure had to be diagnosed by inference instead of read off.
             runtime_.recorder().recordRejected(simTimeS, frame, entityId,
-                candidate->snapshot.serial, outcome.reason, outcome.detail, candidate->rawBody);
+                candidate->snapshot.serial, outcome.reason, outcome.detail, candidate->rawBody,
+                usage);
             if (config.backend == Backend::Replay) {
                 // A Stage-B rejection during replay means live state has diverged from the
                 // recorded run. That is the signal the reproduction guarantee has broken, and it
@@ -546,8 +575,7 @@ void AiCommanderPlugin::drainCompletedOrders(double simTimeS, std::int64_t frame
         runtime_.countAcceptance(candidate->latencyMs);
         // `t` is PUBLICATION time, which is what replay keys on.
         runtime_.recorder().recordAccepted(simTimeS, frame, candidate->order,
-            candidate->snapshot.serial, candidate->latencyMs,
-            candidate->tokensIn, candidate->tokensOut);
+            candidate->snapshot.serial, candidate->latencyMs, usage);
     }
 }
 

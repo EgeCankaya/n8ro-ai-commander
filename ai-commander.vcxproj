@@ -107,6 +107,7 @@ if not exist "$(N8RO_RELEASE)\data\doctrine.txt" (
   <ItemGroup>
     <ClInclude Include="include\AiCommanderApiModule.h" />
     <ClInclude Include="include\AiCommanderPlugin.h" />
+    <ClInclude Include="include\CacheMinimumGuard.h" />
     <ClInclude Include="include\CommanderConfig.h" />
     <ClInclude Include="include\CommanderRuntime.h" />
     <ClInclude Include="include\EnvelopeFormat.h" />
@@ -132,6 +133,7 @@ if not exist "$(N8RO_RELEASE)\data\doctrine.txt" (
   <ItemGroup>
     <ClCompile Include="src\AiCommanderApiModule.cpp" />
     <ClCompile Include="src\AiCommanderPlugin.cpp" />
+    <ClCompile Include="src\CacheMinimumGuard.cpp" />
     <ClCompile Include="src\CommanderConfig.cpp" />
     <ClCompile Include="src\CommanderRuntime.cpp" />
     <ClCompile Include="src\EnvVar.cpp" />

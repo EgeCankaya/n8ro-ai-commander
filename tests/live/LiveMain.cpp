@@ -670,9 +670,25 @@ ClaudeClientConfig claudeConfigFrom(const Options& options, const CommanderConfi
 // - so selecting a backend is a construction detail and none of the measurement code changes shape.
 //
 // The concrete Claude pointer comes back alongside it, because `lastCacheReadTokens()` is on the
-// concrete type and there is no way to ask the interface. That is the right place for it: a cache
-// read count is a property of one backend, and widening ILlmClient to carry it would put a hosted
-// concern into the interface the stub, replay, and local adapters implement.
+// concrete type and there is no way to ask the interface.
+//
+// THAT SENTENCE USED TO CARRY AN ARGUMENT, AND THE ARGUMENT WAS WRONG (v1.8.18). It read: "That is
+// the right place for it: a cache read count is a property of one backend, and widening ILlmClient
+// to carry it would put a hosted concern into the interface the stub, replay, and local adapters
+// implement." Two things are wrong with it. It conflates ILlmClient's METHOD set with LlmResult's
+// FIELD set — nothing was added to the interface, and `LlmResult` already carried exactly this
+// shape of optional accounting, which LocalLlmClient.cpp leaves at zero "by design". And the cost
+// of keeping the value off the result was not hypothetical: it is why AIC-BE-2's recording SHALL
+// went unmet for twelve revisions, why no order log has ever contained a cached-token figure, and
+// why every such figure in the PRD came from THIS harness rather than from the product (PRD
+// §Corrections item 33(f), closed as C9 + C4 in item 35).
+//
+// It is left here as a correction rather than deleted, because "the comment that argued against
+// the change" is more useful to the next reader than a clean file.
+//
+// The pointer is still held, for a smaller and more honest reason: this harness writes a per-order
+// CSV whose column layout predates the widening, and `lastCacheReadTokens()` is the shortest path
+// to it. Production reads the same numbers off `CandidateOrder`, which is the path that matters.
 struct ClientHandle {
     std::unique_ptr<ILlmClient> client;
     ClaudeLlmClient* claude = nullptr;   // non-owning; null unless backend == "claude"

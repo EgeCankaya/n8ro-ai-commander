@@ -63,6 +63,7 @@ if not exist "$(N8RO_RELEASE)\lib\n8ro-core.lib" (
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup Label="Code under test">
+    <ClCompile Include="..\src\CacheMinimumGuard.cpp" />
     <ClCompile Include="..\src\CommanderConfig.cpp" />
     <ClCompile Include="..\src\CommanderRuntime.cpp" />
     <ClCompile Include="..\src\EnvVar.cpp" />
@@ -84,6 +85,7 @@ if not exist "$(N8RO_RELEASE)\lib\n8ro-core.lib" (
   </ItemGroup>
   <ItemGroup Label="Test cases">
     <ClCompile Include="TestMain.cpp" />
+    <ClCompile Include="CacheGuardTests.cpp" />
     <ClCompile Include="ConfigTests.cpp" />
     <ClCompile Include="SchemaTests.cpp" />
     <ClCompile Include="AdversarialCorpusTests.cpp" />

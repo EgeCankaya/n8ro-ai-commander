@@ -1,5 +1,6 @@
 ﻿#include "TestSupport.h"
 
+#include "CacheMinimumGuard.h"
 #include "ClaudeLlmClient.h"
 #include "EnvelopeFormat.h"
 #include "Order.h"
@@ -15,10 +16,13 @@
 #include <string>
 #include <vector>
 
+using arkheon::aicommander::CacheState;
 using arkheon::aicommander::ClaudeClientConfig;
 using arkheon::aicommander::ClaudeLlmClient;
 using arkheon::aicommander::EnvelopeFormat;
+using arkheon::aicommander::LlmRequest;
 using arkheon::aicommander::LlmResult;
+using arkheon::aicommander::classifyCacheState;
 using arkheon::aicommander::Posture;
 using arkheon::aicommander::RejectReason;
 using arkheon::aicommander::orderJsonSchema;
@@ -134,7 +138,11 @@ void setKey(const char* value) {
 }
 
 // A well-formed Anthropic Messages response carrying `inner` as its single text block.
-[[nodiscard]] std::string claudeEnvelope(const std::string& inner, int cacheReadTokens = 0) {
+//
+// `cacheCreationTokens` defaults to 0 so every pre-existing call site keeps its meaning, and the
+// cache tests below pass it explicitly. The pair is what the guard reads: see CacheMinimumGuard.h.
+[[nodiscard]] std::string claudeEnvelope(
+    const std::string& inner, int cacheReadTokens = 0, int cacheCreationTokens = 0) {
     JsonValue block = JsonValue::object();
     (void)block.setString("type", "text");
     (void)block.setString("text", inner);
@@ -145,6 +153,7 @@ void setKey(const char* value) {
     (void)usage.setInt64("input_tokens", 4500);
     (void)usage.setInt64("output_tokens", 78);
     (void)usage.setInt64("cache_read_input_tokens", cacheReadTokens);
+    (void)usage.setInt64("cache_creation_input_tokens", cacheCreationTokens);
 
     JsonValue root = JsonValue::object();
     (void)root.setString("id", "msg_test");
@@ -401,6 +410,110 @@ AIC_TEST(ClaudeCacheBreakpointSitsAtThePrefixBoundary) {
 
     AIC_EXPECT_TRUE(client.lastCacheReadTokens() == 4500,
         "cache_read_input_tokens should be recorded; it is the only way to tell a hit from a miss");
+    setKey("");
+    return true;
+}
+
+// -- AIC-BE-2's recording SHALL, unmet from v1.8 to v1.8.17 (PRD C9 + C4) ------------------------
+//
+// The field was parsed into a private member and stopped there: LlmResult carried no cache field,
+// so it never crossed runWorkerCall's boundary, never reached OrderRecorder, and never appeared in
+// an order log. Every cached-token figure in the PRD came from tests/live and none from the
+// product. This asserts the value is on the RESULT - the thing that actually crosses.
+AIC_TEST(ClaudeCacheTokensCrossOnTheResultNotOnlyOnTheAdapter) {
+    setKey(kSentinelKey);
+    ClaudeLlmClient client(testConfig());
+    auto fake = std::make_unique<FakeHttpClient>();
+    // A steady-state hit: 5,118 read, nothing written. C3's arm B, per hit.
+    fake->replies.push_back({true, 200, claudeEnvelope(orderText(Posture::Ingress), 5118, 0)});
+    (void)attachFake(client, std::move(fake));
+
+    LlmRequest request;
+    request.prompt = "PREFIX-BYTES|SUFFIX";
+    request.prefixLength = 13;
+    const LlmResult result = client.request(request);
+
+    AIC_EXPECT_EQ(result.cacheReadTokens, 5118,
+        "cache_read_input_tokens must be on LlmResult - a value reachable only through the "
+        "concrete adapter pointer is a value the worker boundary drops");
+    AIC_EXPECT_EQ(result.cacheCreationTokens, 0,
+        "a steady-state hit writes nothing");
+    AIC_EXPECT_EQ(result.tokensIn, 4500, "the existing token accounting must be undisturbed");
+    AIC_EXPECT_EQ(result.tokensOut, 78, "the existing token accounting must be undisturbed");
+    setKey("");
+    return true;
+}
+
+// The cold first request of a run, read off a real response body rather than constructed. This is
+// the observation that separates "warming normally" from "never cached", and before v1.8.18 the
+// adapter parsed no field that could carry it.
+AIC_TEST(ClaudeParsesCacheCreationTokensOnAColdFirstRequest) {
+    setKey(kSentinelKey);
+    ClaudeLlmClient client(testConfig());
+    auto fake = std::make_unique<FakeHttpClient>();
+    // Wrote 5,118, read 0 - what the first request of every run reports.
+    fake->replies.push_back({true, 200, claudeEnvelope(orderText(Posture::Ingress), 0, 5118)});
+    (void)attachFake(client, std::move(fake));
+
+    LlmRequest request;
+    request.prompt = "PREFIX-BYTES|SUFFIX";
+    request.prefixLength = 13;
+    const LlmResult result = client.request(request);
+
+    AIC_EXPECT_EQ(result.cacheCreationTokens, 5118,
+        "cache_creation_input_tokens was parsed by NOTHING before v1.8.18 (PRD C4), which is what "
+        "made a correct guard impossible: this value is the only thing distinguishing a cold "
+        "start from a block that never cached");
+    AIC_EXPECT_EQ(result.cacheReadTokens, 0, "a cold request reads nothing");
+
+    // And end to end: the classifier must call this cold, not a shortfall.
+    AIC_EXPECT_TRUE(
+        classifyCacheState(result.cacheReadTokens, result.cacheCreationTokens, "claude-haiku-4-5")
+            == CacheState::ColdWrite,
+        "a real cold-start response body must classify as ColdWrite");
+    setKey("");
+    return true;
+}
+
+// A response whose `usage` block carries neither cache field - which is what a non-caching
+// deployment returns, and what the shortfall looks like on the wire.
+AIC_TEST(ClaudeMissingCacheFieldsReadAsZeroAndClassifyAsShortfall) {
+    setKey(kSentinelKey);
+    ClaudeLlmClient client(testConfig());
+    auto fake = std::make_unique<FakeHttpClient>();
+
+    // Hand-built: a `usage` with the token counts and NO cache keys at all. The parser must treat
+    // an absent key as zero rather than leaving the field uninitialised or failing the request -
+    // token accounting must never be the thing that fails an otherwise good order.
+    JsonValue block = JsonValue::object();
+    (void)block.setString("type", "text");
+    (void)block.setString("text", orderText(Posture::Ingress));
+    JsonValue content = JsonValue::array();
+    (void)content.pushBack(block);
+    JsonValue usage = JsonValue::object();
+    (void)usage.setInt64("input_tokens", 4500);
+    (void)usage.setInt64("output_tokens", 78);
+    JsonValue root = JsonValue::object();
+    (void)root.setString("type", "message");
+    (void)root.set("content", content);
+    (void)root.setString("stop_reason", "end_turn");
+    (void)root.set("usage", usage);
+    fake->replies.push_back({true, 200, root.toString()});
+    (void)attachFake(client, std::move(fake));
+
+    LlmRequest request;
+    request.prompt = "PREFIX-BYTES|SUFFIX";
+    request.prefixLength = 13;
+    const LlmResult result = client.request(request);
+
+    AIC_EXPECT_EQ(result.cacheReadTokens, 0, "an absent cache key reads as zero");
+    AIC_EXPECT_EQ(result.cacheCreationTokens, 0, "an absent cache key reads as zero");
+    AIC_EXPECT_EQ(result.tokensIn, 4500, "the rest of usage must still parse");
+    AIC_EXPECT_TRUE(
+        classifyCacheState(result.cacheReadTokens, result.cacheCreationTokens, "claude-haiku-4-5")
+            == CacheState::Shortfall,
+        "no cache fields at all is the shortfall - this is precisely the silent failure that "
+        "produces no error, no rejection, and a 4.8x bill");
     setKey("");
     return true;
 }

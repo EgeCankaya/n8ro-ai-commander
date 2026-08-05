@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CacheMinimumGuard.h"
 #include "CommanderConfig.h"
 #include "FallbackLadder.h"
 #include "FrameCostHistogram.h"
@@ -129,6 +130,11 @@ public:
     [[nodiscard]] PromptRenderer& promptRenderer() { return promptRenderer_; }
     [[nodiscard]] OrderRecorder& recorder() { return recorder_; }
 
+    // AIC-BE-3's runtime half. Simulation-thread state, latched per run, reset() on scenario stop
+    // along with everything else here. Lives on the runtime rather than in the plugin so the check
+    // can be exercised without an engine, an entity manager, or a host.
+    [[nodiscard]] CacheMinimumGuard& cacheGuard() { return cacheGuard_; }
+
     // Runs one worker call synchronously. Used by the owned-thread fallback and by tests; the
     // production path hands this to IThreadRunner::submitBackgroundTask.
     //
@@ -173,6 +179,7 @@ private:
     std::unique_ptr<ILlmClient> client_;
     PromptRenderer promptRenderer_;
     OrderRecorder recorder_;
+    CacheMinimumGuard cacheGuard_;
 };
 
 } // namespace arkheon::aicommander

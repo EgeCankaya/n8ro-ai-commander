@@ -187,6 +187,13 @@ CandidateOrder CommanderRuntime::runWorkerCall(
     candidate.latencyMs = result.latencyMs;
     candidate.tokensIn = result.tokensIn;
     candidate.tokensOut = result.tokensOut;
+    // Copied BEFORE the early returns below, alongside latency and the token counts, and that
+    // placement is deliberate: a transport failure, a 204, and a non-2xx all return early, and a
+    // response that was billed but rejected is exactly the case PRD item 27(d) measured — four
+    // truncated Sonnet orders billed for 512 output tokens each that produced nothing. Accounting
+    // that only survives the accepted path is not accounting.
+    candidate.cacheReadTokens = result.cacheReadTokens;
+    candidate.cacheCreationTokens = result.cacheCreationTokens;
     outRawBody = result.body;
 
     // Stage A check A1: a transport failure is `completed == false`, distinct from a completed
@@ -269,6 +276,9 @@ void CommanderRuntime::reset() {
     entities_.clear();
     probeReport_ = ProbeReport{};
     frameCost_.reset();
+    // Unlatched deliberately: the warning is once per RUN, not once per process. A second scenario
+    // in the same session suffering the same cost regression has to be told about it too.
+    cacheGuard_.reset();
 }
 
 std::string CommanderRuntime::statsJson() const {

@@ -264,8 +264,27 @@ LlmResult ClaudeLlmClient::request(const LlmRequest& request) {
             // The number that answers OQ-8's second half. A prefix over the model's cache minimum
             // that still reports zero reads means something is invalidating it — a different
             // finding, and an unobservable one without this.
-            lastCacheReadTokens_ =
+            //
+            // It goes onto the RESULT now, not just into the member (AIC-BE-2, v1.8.18). Until
+            // then it stopped here: LlmResult carried no cache field, so the value never crossed
+            // runWorkerCall's boundary, never reached OrderRecorder, and never appeared in an order
+            // log — which meant every cached-token figure in the PRD came from tests/live and none
+            // from the product. PRD §Corrections item 33(f), closed as C9 in item 35.
+            result.cacheReadTokens =
                 static_cast<int>(usage.get("cache_read_input_tokens").asInt64());
+
+            // Parsed by nothing at all before v1.8.18 (PRD C4). It is NOT here for the write cost,
+            // which item 33 quantified at under 0.1 % of a run — it is here because it is the only
+            // thing that distinguishes a cold start from a block that never cached. Both states
+            // report cacheReadTokens == 0; only this field tells them apart. See the state table on
+            // LlmResult.
+            result.cacheCreationTokens =
+                static_cast<int>(usage.get("cache_creation_input_tokens").asInt64());
+
+            // Retained alongside the result field rather than replaced by it. tests/live reads it
+            // through the concrete pointer for the per-order CSV, and that path predates the
+            // widening; removing it would break the offline harness to tidy a duplicate.
+            lastCacheReadTokens_ = result.cacheReadTokens;
         }
     }
 

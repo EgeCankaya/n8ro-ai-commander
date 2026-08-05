@@ -58,13 +58,31 @@ public:
         const std::string& backend, const std::string& model,
         const std::string& snapshotHash, const std::string& promptHash);
 
+    // The four cost figures AIC-DET-1 puts on a record, passed as one value rather than as four
+    // positional ints (v1.8.18). They are all `int`, all plausible in any order, and two of them
+    // were added at once — a transposed pair would produce an order log that is wrong in a way no
+    // test asserts and no reader can spot, which is the same silent-wrongness this whole change is
+    // about. Named fields make the call sites read as what they are.
+    struct TokenUsage {
+        int tokensIn = 0;
+        int tokensOut = 0;
+        int cacheReadTokens = 0;
+        int cacheCreationTokens = 0;
+    };
+
     void recordAccepted(
         double publishedSimTimeS, std::int64_t frame, const Order& order, std::int64_t serial,
-        std::int64_t latencyMs, int tokensIn, int tokensOut);
+        std::int64_t latencyMs, const TokenUsage& usage);
 
+    // `usage` is new here (v1.8.18) and it is the half of AIC-DET-1's widening that was not asked
+    // for by C4 or C9. A rejected order is still billed: PRD §Corrections item 27(d) records four
+    // truncated Sonnet orders charged for 512 output tokens each that produced nothing, against a
+    // rejected record that carried no token field at all. An order log that prices only the orders
+    // which survived validation understates the bill by exactly the orders worth asking about.
     void recordRejected(
         double simTimeS, std::int64_t frame, const std::string& entityId, std::int64_t serial,
-        RejectReason reason, const std::string& detail, const std::string& rawBody);
+        RejectReason reason, const std::string& detail, const std::string& rawBody,
+        const TokenUsage& usage);
 
     void recordFallback(
         double simTimeS, std::int64_t frame, const std::string& entityId,
