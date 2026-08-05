@@ -10,8 +10,9 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 > **One-liner:** A `n8ro-sim` plugin that lets a language model issue tactical *intent* — posture, target, waypoint, rules of engagement — to entities in a running scenario, while every kinematic decision and every state mutation stays in the deterministic C++ and Lua tiers that already exist.
 
 **Date:** 2026-07-31 (revised 2026-08-05)
-**Status:** Draft v1.8.15
+**Status:** Draft v1.8.16
 **Revision history:**
+- v1.8.16 — **§Corrections items 33 and 34: the ≤ 2.5 s latency target is RETIRED, and a tail observation is filed against C3 rather than left out.** An owner decision after C2 closed; no new request. **(33)** The target was set in v1.2 against **no hosted measurement of any kind** and C2 showed it unreachable — on Sonnet, response headers alone are mean 3,157 ms / p95 6,917 ms. It is replaced by the property the architecture actually needs: **hard bound `p99 < commander.cadenceS`, design intent `p99 < 0.5 × cadenceS`**. On the shipped prefix over 240 Haiku orders: p50 2,787 / p95 5,895 / **p99 10,578** ms — **hard bound MET with 47 % margin, design intent marginally MISSED at 52.9 %**, reported as two verdicts because they are two things. **No new absolute number is chosen** — a bound from n=120 is what C8 exists to warn against. **And a correction: this document has called the cadence margin comfortable on a p99 of 7,099 ms; on the prefix that ships it is 10,578 ms.** **(34, → C9)** The C3 reduction is associated with a **worse tail — p99 7,466 → 10,578 ms**, every percentile moving the same way. C2's headers comparison bounds a prefix delta of this size at −103 ms [−940, +733] and arm B's p50 shift sits inside it, but the tail is unmeasurable at n=120. **Filed, not decided** — needs repeats, and no action follows. Recorded so C3's −16.6 % saving is not reported without it.
 - v1.8.15 — **§Corrections item 32: C1 RAN. The hosted backend works inside the engine, on real scenario state — the run held across four grants.** 19 checks, 0 failed, on `oppint_red_interceptor` in the shipped "Mariana Shield" with its commander-off control. Both entities commanded, 3 distinct postures, **0 timeouts**, `reject.schema`/`reject.shape` **0 %**, frame cost max **2.87 ms** over 12,001 frames, release tree left clean. **C3's change is confirmed on the product** — a real in-engine request read **5,118 cached tokens**. **The most valuable observation is a rejection:** Stage B refused `cruiseSpeedMps 450` against a 400 bound, which is Goal 3 demonstrated on the product rather than on a corpus. **And two harness numbers are corrected:** the acceptance rate counted **two still-in-flight requests** in its denominator (10/13 = 76.9 % printed; **10/11 resolved**, and no rate at n=11), and the "p95" over **ten** samples was **the maximum** — the exact error v1.7.4's Finding 3 recorded, still being printed four revisions later. Both fixed in the script. **C1 CLOSES.** ≈$0.02.
 - v1.8.14 — **§Corrections item 31: C3's quality half ran, both arms accepted 120/120, the pre-registered rule fired, and the prose schema is REMOVED FROM THE SHIPPED PREFIX** — the first shipped-code change any Phase 3 diagnostic has produced. Prefix **17,756 → 8,750 bytes**; cost **$1.05 → $0.88** per four-ship-hour (**−16.6 %**); headroom against the ≤ $1.10 target **4 % → 20 %**; `reject.schema` and `reject.shape` **0.00 %** in both arms. Arm B's 120/120 bounds true acceptance at **≥ 97.53 %** against the ≥ 95 % gate. **What it does not license, as item 30 said in advance:** the arms cannot distinguish 100 % from 99 %, and **acceptance is not quality**. **A new constraint:** the cached block falls to **5,075 tokens** against Haiku's 4,096 minimum — margin **86 % → 24 %** — so item 22's *"a page of doctrine can be deleted without consequence"* is **no longer true** past ~980 tokens. **C3 CLOSES.** ≈$0.32 against ≈$0.40 estimated.
 - v1.8.13 — **§Corrections item 30: C3's quality arm, PRE-REGISTERED. No request has been made at the time of this revision.** Exact Clopper–Pearson bounds at n=120/arm: **120/120 bounds the true acceptance at ≥97.53 %** and **119/120 at ≥96.11 %** — both clear the ≥95 % gate; **118/120 bounds it at 94.85 % and does not.** Resolvable difference between arms ≈**2.5 percentage points**, so the run can rule out a gate-breaching quality cost and **cannot distinguish 100 % from 99 %** — stated in advance so a null cannot later be read as more than it is. **Decision rule fixed now:** ≥119/120 with eject.schema/eject.shape at 0.00 % → the prose-schema removal is safe to make; ≤118/120 → not made; **any schema or shape rejection → not made regardless of count.** Every prior arm in this project was assessed for power *after* its result, and twice the answer was no.
@@ -422,6 +423,51 @@ predicted; one of those predictions did not survive contact. Each is load-bearin
 
     **C1 CLOSES.**
 
+33. **The ≤ 2.5 s latency target is retired, and the reasoning is written out because "we measured it and then moved the target" is the shape of a bad argument.** *(v1.8.16 — an owner decision, taken after C2 closed. No new request; the figures below are re-analysis of the C3 arms already on disk.)*
+
+    **(a) Why this is not the thing v1.3 refused.** v1.3 declined to move the *cost* target to match a measurement, on the grounds that "moving a target to match a measurement would erase the signal." **That refusal was right and it still is.** The distinction is what the target has already yielded:
+
+    - v1.3's cost target was moved-to-fit **before** the question it posed (OQ-8) had an answer. Softening it would have destroyed the only mechanism that was going to force the measurement.
+    - **The latency target has now yielded everything it can.** It produced the p95 miss, the C2 decomposition, two failed instruments, and finally the finding that the fixed term exceeds the target on its own. **A target that has been fully cashed out is not the same object as a target that is still doing work.**
+
+    **This is still the weakest reasoning in this document**, and it is written at length rather than in a clause so that a reader can disagree with it on the merits.
+
+    **(b) What replaced it, and what it is derived from.** The target was **`p95 ≤ 2.5 s`, set in v1.2 against no hosted measurement of any kind** — an absolute number chosen before anyone had made a single hosted request. The replacement is derived from the architecture instead of from a sample:
+
+    > **Hard bound: `p99 < commander.cadenceS`. Design intent: `p99 < 0.5 × cadenceS`.**
+
+    The hard bound is a *correctness* property. If p99 exceeds the cadence, the next request is issued before the previous one returns, the latest-wins slot carries an order in flight continuously, and the commander is permanently one cycle behind — the fallback ladder stops being a backstop and becomes load-bearing. **That is the failure this metric exists to prevent, and an absolute millisecond count was never a measurement of it.**
+
+    **(c) The verdict, reported as two things because they are two things.** Over 240 Haiku orders on the **currently shipping** prefix: p50 **2,787 ms**, p95 **5,895 ms**, **p99 10,578 ms**, max **11,094 ms**.
+
+    | | | |
+    |---|---|---|
+    | Hard bound `p99 < 20,000 ms` | **10,578 ms = 52.9 %** | **MET**, 47 % margin |
+    | Design intent `p99 < 10,000 ms` | 10,578 ms | **marginally MISSED** |
+
+    **Zero timeouts across every run of every phase, including the in-engine C1 run.** The design intent is missed by 6 %, and it is reported as missed rather than rounded to a pass.
+
+    **(d) No new absolute number is chosen, deliberately.** The obvious move is to replace 2.5 s with a measured p95 and call it a target. **That is exactly what C8 exists to warn against** — a bound sized from one run is sized against noise, and this document has now watched a p95 move 26 % between two runs of an identical configuration (v1.8.5). **A number picked from n=120 would be a sample statistic wearing a requirement's clothes.** The absolute figures above are reported as *measurements*, and the *gate* is the ratio.
+
+    **(e) And a correction to something this document said two revisions ago.** v1.8.4 recorded p99 at **7,099 ms** and this document has repeatedly called the cadence margin comfortable on that basis. **On the prefix that ships after C3, p99 is 10,578 ms** — 53 % of the cadence, not 35 %. The margin is real and it is thinner than every prior statement about it implied.
+
+34. **The C3 prefix reduction is associated with a worse latency tail, and it is neither attributable nor dismissible.** *(v1.8.16 — re-analysis of the two C3 arms. No new request.)* Opened as **C9**.
+
+    | | arm A — old prefix | arm B — shipped prefix | |
+    |---|---|---|---|
+    | p50 | 2,580 ms | 2,787 ms | +8 % |
+    | p95 | 4,979 ms | 5,895 ms | +18 % |
+    | **p99** | **7,466 ms** | **10,578 ms** | **+42 %** |
+    | max | 7,839 ms | 11,094 ms | +42 % |
+
+    **Every percentile moved the same way, which is the part that stops this being an easy dismissal.** v1.8.5 dismissed a prefix-vs-latency signal because it was *inconsistent* — p50 down 16 %, p95 up 54 %. This one is consistent in direction, and consistency is weaker evidence of noise, not stronger.
+
+    **What argues it is noise anyway, with a number.** C2's headers comparison measured a prefix delta of comparable size (2,202 cached tokens against the ~2,470 here) at **−103 ms, 95 % interval [−940, +733]** (item 29(e)). **Arm B's p50 shift of +207 ms sits inside that interval.** And the tail cannot be measured at this n at all: p99 over 120 samples is the second-highest observation, which is the error item 32(d) has just finished correcting in another instrument.
+
+    **What is not established either way.** A tail effect from a smaller cached prefix is not implausible — a shorter prefix changes what the service caches and how it schedules. **Nothing here measures that**, and the arms were built to compare *acceptance*, not latency; the latency columns are a by-product being read after the fact, which is its own hazard.
+
+    **So it is filed rather than decided.** Settling it needs **repeats of the same configuration**, not a larger single sample — the same shape as C8, and for the same reason. **No action follows**: the hard bound is met with 47 % margin, no run has ever timed out, and C3's cost saving is measured and real. **What would be wrong is to record the −16.6 % saving and quietly not record this beside it.**
+
 ## Problem statement
 
 > **When** an operator wants an entity in a running N8RO scenario to behave adaptively — to change posture, re-prioritize targets, or break off — **they must** hand-author that judgment ahead of time as a deterministic Lua ladder, **which means** every scenario's tactical repertoire is frozen at authoring time and every new situation requires a scripting change by someone who knows both the tactics and the Lua API.
@@ -452,7 +498,7 @@ The commander's job is to replace exactly that cascade — the posture selection
 | Metric | Baseline (current) | Target | How measured | Timeline |
 |---|---|---|---|---|
 | Plugin cost per `onTickFrame` | N/A — no implementation | p95 < 0.5 ms, p99 < 2.0 ms | Plugin-owned timing histogram, dumped via `aiCommander.getStats()` | Phase 1a gate |
-| Order round-trip latency (request → accepted) | N/A | Local 3B CPU: p95 ≤ 8 s. Local 7B CPU: p95 ≤ 20 s. Claude Haiku 4.5: p95 ≤ 2.5 s | Worker-side timer recorded per order in the order log | Phase 1b / Phase 2 gates |
+| Order round-trip latency (request → accepted) | N/A | **Local 3B CPU: p95 ≤ 8 s. Local 7B CPU: p95 ≤ 20 s. Hosted: `p99 < commander.cadenceS`, design intent `p99 < 0.5 × cadenceS`** *(v1.8.16 — replaces "Claude Haiku 4.5: p95 ≤ 2.5 s", which was set in v1.2 against no hosted measurement of any kind and is unreachable; §Corrections item 33)* | Worker-side timer recorded per order in the order log | Phase 1b / Phase 2 gates |
 | Order acceptance rate (accepted ÷ requested) | N/A | ≥ 95 % over a 200-order soak, per backend | Rejection counters broken out by cause | Phase 1b gate |
 | Parse/schema rejection rate | N/A | < 1 % with constrained decoding | Counter `reject.schema` ÷ requested | Phase 1b gate |
 | Replay reproducibility | N/A | 100 % identical order sequence + content across two replays of one log | Replay determinism test (see Validation) | Phase 1a gate |
@@ -467,6 +513,17 @@ The commander's job is to replace exactly that cascade — the posture selection
 |---|---|---|---|
 | Cost per four-ship scenario-hour | ≤ $1.10 | **$1.05** ($0.001464/order, cached at a 240/240 hit rate) | **MET**, 4 % headroom |
 | Order round-trip p95 | ≤ 2.5 s | **4,615 ms** (p50 2,602 · p99 7,099) | **MISSED** by 85 % |
+
+***(v1.8.16 — the ≤ 2.5 s target is RETIRED, and the row above is left as the historical record of the gate it failed.)*** It was set in v1.2 against no hosted measurement, and C2 showed it unreachable: on Sonnet, **time to response headers alone — before one token exists — is mean 3,157 ms and p95 6,917 ms** (§Corrections item 29(f)). The replacement is the property the architecture actually requires, measured on the **currently shipping** prefix over 240 Haiku orders:
+
+| | Measured (arm B, the shipped prefix) | vs 20 s cadence | |
+|---|---|---|---|
+| p50 | 2,787 ms | 13.9 % | |
+| p95 | 5,895 ms | 29.5 % | |
+| **p99** | **10,578 ms** | **52.9 %** | **inside the hard bound, over the design intent** |
+| max | 11,094 ms | 55.5 % | |
+
+**Hard bound `p99 < cadenceS`: MET with 47 % margin. Design intent `p99 < 0.5 × cadenceS`: marginally missed at 52.9 %.** Reported as two separate verdicts because they mean different things — the first is a correctness property and the second is engineering comfort. **Timeouts across every run of every phase, including the in-engine C1 run: zero.**
 | Order acceptance rate | ≥ 95 % | **100 %** (240/240) | **MET** |
 | Parse/schema rejection rate | < 1 % | **0.00 %** | **MET** |
 
@@ -1859,6 +1916,7 @@ The phase closes with these open, named, and owned — not folded into a gate re
 | C5 | **The memorised-coordinate result is a bounded negative, not a zero**, and the round-number-longitude substitution it found instead has 2 observations on 1 situation | 11 waypoint-carrying orders cannot establish a rate. The detector looks for Perth specifically and would not see a different memorised coordinate | Phase 3, if order quality is measured at scale. The Stage-B conclusion does not depend on it |
 | C6 | **OQ-3 remains open** | Unrelated to Phase 2; it turns on whether `n8ro-llm` is ever installed | v1.1 planning, unchanged |
 | C7 | **`claude.maxTokens = 512` is Haiku-shaped and truncates Sonnet** (§Corrections items 24(b), 25, 26, 27). *(Opened v1.8.5, narrowed v1.8.6, config surface v1.8.7, **measured and CLOSED v1.8.9**.)* | Not a Phase 2 defect: 512 was chosen against the only model then measured, and Haiku uses 25 % of it at its worst over 120 orders. It became wrong when a second model was run, not when it was set | **CLOSED.** The config surface is model-shaped and bounded `[1, 8192]` (v1.8.7, derived from Stage A's body cap — item 26 also records the 4 KiB record cap that would have silently truncated the evidence). The measurement is done (v1.8.9, under the v1.8.8 grant): raising the ceiling took acceptance **91.7 % → 100.0 %** for **+0.5 % cost**, and Sonnet's true max is **673 tokens — not the ~2,000 that scaling by Haiku's headroom would have given**. **The default stays 512 because the default model is Haiku**; the Sonnet figures an operator needs are on the record and picking a headroom policy is the owner's call, not this document's. Residual → **C8** |
+| C9 | **The C3 prefix reduction is associated with a worse latency tail** — p99 **7,466 → 10,578 ms** across the two 120-order arms (§Corrections item 34). *(Opened v1.8.16.)* | Not a defect and not dismissed. Every percentile moved the same way, which is *weaker* evidence of noise than v1.8.5's inconsistent signal. Against it: C2's headers comparison bounds a prefix delta of this size at **−103 ms [−940, +733]**, and arm B's p50 shift of +207 ms sits inside that. The tail is unmeasurable at n=120 — p99 there is the second-highest observation | **Needs repeats of one configuration, not a bigger single sample** — the same shape as C8. **No action follows**: the hard bound `p99 < cadenceS` is met with 47 % margin and no run has ever timed out. Filed so the −16.6 % cost saving is not recorded without this beside it |
 | C8 | **A ceiling sized from one 48-order run is sized against noise** (§Corrections item 27(e)). *(Opened v1.8.9.)* | Fell out of C7's own control rather than being assumed: per-fixture mean output moved by up to **71 tokens** between two identically-configured runs, and one fixture's max moved **478 → 193**. 673 is a sample maximum, not a bound | Only matters if a non-Haiku model is actually adopted. At that point the question is a **tail** question and needs repeats, not a larger single sample. Not scheduled, and no value is chosen in the meantime |
 
 ##### The C2 latency decomposition — run, and inconclusive *(v1.8.5; re-analysed and partly corrected v1.8.10 — see §Corrections item 28)*
@@ -2134,6 +2192,28 @@ Advisory. Gaps found while composing this PRD, not blockers.
 - **v1.2 note — the snapshot was specified from the Lua surface, not the C++ one.** Every field in the original §Exactly what is transmitted named a Lua verb, and two of them turned out to have no C++ equivalent. The lesson generalizes: for a C++ plugin, "which verb returns this?" is the wrong traceability question — "which header or schema record exposes this to *the plugin*?" is the right one. Appendix A now carries the Lua/C++ split explicitly so the next field added is checked against both columns.
 
 ## Changelog
+
+### v1.8.16 — 2026-08-05
+
+**A target is retired and a finding is filed against a change this document just shipped.** An owner decision taken after C2 closed. No new request; both items are re-analysis of data already on disk. §Corrections items 33 and 34.
+
+**Why retiring the target is not the thing v1.3 refused.** v1.3 declined to move the *cost* target to match a measurement — *"moving a target to match a measurement would erase the signal."* That refusal was right and still is. The distinction is what the target has already yielded. v1.3's cost target was being moved **before** OQ-8 had an answer; softening it would have destroyed the mechanism that was going to force the measurement. **The latency target has now been fully cashed out**: it produced the p95 miss, the C2 decomposition, two failed instruments, and finally the finding that the fixed term exceeds the target on its own. A target that has yielded everything it can is not the same object as one still doing work. **This is the weakest reasoning in this document and it is written at length so it can be disagreed with on the merits.**
+
+**What the target was.** `p95 ≤ 2.5 s`, set in v1.2 **against no hosted measurement of any kind** — an absolute number chosen before anyone had made a single hosted request. C2 showed it unreachable: on Sonnet, time to response headers alone, before one token exists, is **mean 3,157 ms / p95 6,917 ms**.
+
+**What replaced it, derived from the architecture rather than from a sample.** **Hard bound `p99 < commander.cadenceS`; design intent `p99 < 0.5 × cadenceS`.** The hard bound is a correctness property: above it the next request fires before the previous returns, the latest-wins slot carries an order in flight continuously, and the fallback ladder stops being a backstop. **An absolute millisecond count was never a measurement of that.**
+
+**The verdict, as two verdicts.** Over 240 Haiku orders on the currently shipping prefix — p50 **2,787**, p95 **5,895**, p99 **10,578**, max **11,094** ms. Hard bound: **MET, 47 % margin.** Design intent: **marginally MISSED at 52.9 %** — by 6 %, and reported as missed rather than rounded to a pass. **Zero timeouts across every run of every phase, including in-engine C1.**
+
+**No new absolute number is chosen, deliberately.** Replacing 2.5 s with a measured p95 is the obvious move and it is exactly what **C8** exists to warn against. This document has watched a p95 move **26 %** between two runs of an identical configuration. A number from n=120 would be a sample statistic wearing a requirement's clothes. The absolute figures are reported as measurements; the gate is the ratio.
+
+**And a correction this revision owes.** v1.8.4 recorded p99 at 7,099 ms, and this document has since called the cadence margin comfortable on that basis. **On the prefix that ships after C3 it is 10,578 ms — 53 % of the cadence, not 35 %.** The margin is real and thinner than every prior statement about it implied.
+
+**Then the finding filed against C3, opened as C9.** The prefix reduction is associated with a worse tail: p50 2,580 → 2,787, p95 4,979 → 5,895, **p99 7,466 → 10,578**, max 7,839 → 11,094. **Every percentile moved the same way**, and that is what stops this being an easy dismissal — v1.8.5 dismissed a prefix-vs-latency signal because it was *inconsistent*, and consistency is weaker evidence of noise, not stronger.
+
+**What argues noise anyway, with a number.** C2's headers comparison measured a prefix delta of comparable size at **−103 ms, 95 % interval [−940, +733]**, and arm B's p50 shift of +207 ms sits inside it. The tail cannot be measured at this n at all: p99 over 120 samples is the second-highest observation — the error item 32(d) has just finished correcting in another instrument.
+
+**Filed, not decided.** Settling it needs repeats of one configuration, not a larger single sample — the same shape as C8. **No action follows**: the hard bound is met with 47 % margin, nothing has ever timed out, and C3's cost saving is measured and real. **What would be wrong is to record the −16.6 % saving and quietly not record this beside it.**
 
 ### v1.8.15 — 2026-08-05
 
