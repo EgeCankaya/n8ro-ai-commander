@@ -61,10 +61,37 @@ void PromptRenderer::build(const CommanderConfig& config, const std::string& doc
     std::ostringstream stream;
     stream.imbue(std::locale::classic());
 
+    // WHAT IS NOT HERE, AND WHY (v1.8.14, C3). The order schema used to be rendered into the prefix
+    // here as prose, immediately after the posture vocabulary. It is gone.
+    //
+    // It was never redundant when it was written: on the local backend `format` was the only
+    // structural constraint, and the prose copy was what a model read for field semantics. On the
+    // hosted path the adapter ALSO sends the schema as `output_config.format.schema`, so the
+    // document went out twice per request - ~71 % of the cached prefix in two renderings of one
+    // thing (§Corrections item 22).
+    //
+    // The removal was held unmade across four revisions on purpose, because the cost half was
+    // measured and the QUALITY half was not, and this project's §Corrections is largely a record of
+    // what happens when a measured-good artifact is changed on the strength of a plausible story.
+    // It is made now on a pre-registered paired arm: 120 orders each, the prose copy the only
+    // difference, decision rule fixed in the document BEFORE the run (§Corrections item 30).
+    // Both arms accepted 120/120 with reject.schema and reject.shape at 0.00 %.
+    //
+    // TWO CONSEQUENCES A LATER EDITOR NEEDS. (1) The structured-output projection is now the ONLY
+    // description of the order shape that reaches the model on the hosted path - if a backend is
+    // ever added that does not constrain decoding, it does not inherit this and the prose copy has
+    // to come back for it. (2) The cached block falls to ~5,075 tokens against Haiku 4.5's 4,096
+    // minimum. The margin was 86 %; it is now 24 %. Roughly 980 tokens of further prefix reduction
+    // stops the prefix caching at all, which costs far more than it saves (§Corrections item 31).
+    // The bare '\n' below is deliberate and is NOT a leftover. It is the blank line that used to
+    // separate the schema block from DOCTRINE, and it is kept so that the prefix this ships is
+    // BYTE-IDENTICAL to the arm that measured 120/120. Dropping it as tidy-up made the shipped
+    // prefix 8,749 bytes against the measured 8,750 - a one-byte divergence between the artifact
+    // under test and the artifact in production, which is a small instance of exactly the class of
+    // error §Corrections is a record of. Kept, and the reason written down so it survives the next
+    // person who notices it looks redundant.
     stream << kSystemPrompt << '\n'
            << kPostureVocabulary << '\n'
-           << "ORDER SCHEMA (your reply must validate against this):\n"
-           << orderJsonSchemaText() << '\n'
            << '\n'
            << "DOCTRINE:\n"
            << (doctrineText.empty() ? std::string("(none provided)") : doctrineText) << '\n'
