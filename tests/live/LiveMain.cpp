@@ -27,6 +27,16 @@
 //                                    [--backend local|claude] [--model TAG] [--base-url URL]
 //                                    [--claude-model ID] [--claude-base-url URL] [--key-env NAME]
 //                                    [--max-tokens N] [--no-format] [--out PATH] [--csv PATH]
+//                                    [--prose-schema] [--dump-dir DIR]
+//
+//   --prose-schema  reconstructs C3's ARM A - the prefix as it was before v1.8.14 removed the prose
+//                   copy of the order schema - as a control. `--mode soak` only; every other mode
+//                   rejects it rather than ignoring it. What ships is arm B, which is the default,
+//                   so an unqualified run measures the product and this flag measures the control.
+//                   (It replaces `--no-prose-schema`, which selected the arm that now ships and
+//                   could no longer succeed at all.)
+//   --dump-dir      where `--mode ttft-dump` writes ttft-request-NN.json. Defaults to the working
+//                   directory. The arm-A/arm-B TTFT pairing is a pairing of two such directories.
 //
 // `--backend claude` REACHES THE NETWORK and transmits the volatile suffix - position, velocity,
 // heading, team, reported tracks, loadout. It is authorization-gated (PRD §Phase 2). The default is
@@ -504,47 +514,105 @@ struct Options {
     // the most tokens, and that correlation is the whole of the C2 latency decomposition.
     std::string csvPath;
 
-    // C3's arm B. The order schema is transmitted TWICE per request (PRD §Corrections item 22):
-    // once as prose, rendered into the prefix by PromptRenderer::build, and once structurally as
-    // `output_config.format.schema`. C3 proposes deleting the prose copy - a 12 % cost saving that
-    // has been confirmed by measurement and NOT MADE, because what it might cost in order quality
-    // has never been measured against its absence.
+    // C3's arm A, and it is now the arm that has to be RECONSTRUCTED.
     //
-    // False excises exactly the prose block, and nothing else, from the built prefix. It does not
-    // touch `--no-format`: structured outputs stay ON, because the whole premise of the proposed
-    // change is that the structural copy is doing the constraining and the prose copy is now
-    // redundant. Turning both off would measure a different question.
-    bool proseSchema = true;
+    // The order schema used to be transmitted TWICE per request (PRD §Corrections item 22): once as
+    // prose, rendered into the prefix by PromptRenderer::build, and once structurally as
+    // `output_config.format.schema`. C3 measured the pair at 120 orders per arm, both accepted
+    // 120/120, the pre-registered decision rule fired, and the prose copy was REMOVED from the
+    // shipped prefix (v1.8.14, §Corrections item 31).
+    //
+    // WHICH INVERTS THIS FLAG. It was `--no-prose-schema` and it EXCISED the block. After the
+    // removal there is nothing to excise: the search string is no longer emitted, so the flag hit
+    // std::exit(1) unconditionally and C3's arm A became unreconstructible from the binary - the
+    // shipped artifact could no longer be turned back into the artifact the experiment compared it
+    // against. Found in the post-merge review of PR #13.
+    //
+    // It is INVERTED RATHER THAN DELETED, and the reason is in §Corrections item 31(c) and in
+    // PromptRenderer.cpp's own comment: the structured-output projection is now the ONLY description
+    // of the order shape that reaches the model on the hosted path, and a backend that does not
+    // constrain decoding would not inherit it - the prose copy would have to come back for that one.
+    // Deleting the flag would leave that question un-re-measurable except by reverting a shipped
+    // change. `--prose-schema` is what keeps the control arm reachable.
+    //
+    // True re-inserts exactly the prose block, and nothing else, into the built prefix. It does not
+    // touch `--no-format`: structured outputs stay ON in both arms, because the premise the pair
+    // tests is that the structural copy is doing the constraining. Turning both off would measure a
+    // different question.
+    bool proseSchema = false;
+
+    // Where --mode ttft-dump writes its request bodies. Defaults to the working directory, which is
+    // what it did unconditionally and with no way to say otherwise - unlike every other mode, which
+    // takes --out. Two dumps taken from different directories are silently unrelated, and the
+    // arm-A/arm-B pairing measure-ttft.ps1 depends on is a pairing of two DIRECTORIES, so where you
+    // were standing when you took them was load-bearing and undeclared. Found in the post-merge
+    // review of PR #13. --out is a report FILE path and cannot serve; this is a directory.
+    std::string dumpDir = ".";
 };
 
-// Produces the prefix that PromptRenderer::build WOULD produce if the two lines rendering the prose
-// schema were deleted from it - which is precisely the change C3 proposes and has not made.
+// Produces the prefix PromptRenderer::build produced BEFORE C3 - the arm-A control - by putting the
+// prose schema block back where it used to be.
 //
-// Done by excision rather than by a config flag on purpose. A flag would be a product change, and
-// this is a measurement whose entire point is to decide whether the product change is safe; adding
-// the switch first would be deciding the question by building it. The excision is asserted rather
-// than assumed: if the block is not found, or is not exactly the expected length, the run stops
-// instead of silently measuring the unchanged prefix in both arms - which would produce a clean
-// null result that meant nothing at all.
-bool exciseProseSchema(const std::string& prefix, std::string& out) {
+// This is the inverse of what used to live here. `exciseProseSchema` cut the block out of a prefix
+// that still carried it, and stopped working the moment the shipped renderer stopped emitting it.
+// Reconstruction is the only direction that survives its own experiment landing.
+//
+// WHY BY TEXT SURGERY AND NOT BY A CONFIG FLAG, unchanged from the original reasoning: a flag would
+// be a product change, and this is a measurement, not a feature. And why on the RENDERER'S output
+// rather than composed here: render() is `prefix + "\nSITUATION:\n" + suffix + "\n\nYour order:\n"`,
+// so rebuilding that shape in a second place would silently diverge the day it changes. The
+// renderer stays the single authority on what a prompt looks like; this cuts one block into it.
+//
+// THE INSERTION POINT, derived rather than guessed. build() emitted, and still emits:
+//
+//   kSystemPrompt '\n' kPostureVocabulary '\n' [ header schemaText '\n' ] '\n' "DOCTRINE:\n" ...
+//                                              ^-- the block, gone since v1.8.14
+//
+// The '\n' after the block is the bare newline at PromptRenderer.cpp:95, which was KEPT precisely so
+// the post-removal prefix stayed byte-identical to the arm that measured 120/120 (§Corrections item
+// 31(f)). It is still there, so "\nDOCTRINE:\n" locates the seam exactly and the reconstruction is
+// byte-exact rather than approximate.
+//
+// ASSERT, DO NOT ASSUME - mirroring what the excision did, in the opposite direction. The excision
+// refused to run when the block was missing; this refuses to run when the block is already PRESENT,
+// because inserting a second copy would measure a prompt nobody has ever shipped while looking like
+// a clean control arm.
+bool insertProseSchema(const std::string& prefix, std::string& out) {
     const std::string header = "ORDER SCHEMA (your reply must validate against this):\n";
-    const std::size_t start = prefix.find(header);
-    if (start == std::string::npos) {
-        std::cerr << "[FAIL] prose-schema header not found in the prefix - PromptRenderer changed\n";
+    if (prefix.find(header) != std::string::npos) {
+        std::cerr << "[FAIL] the prefix ALREADY carries the prose schema - PromptRenderer changed, "
+                     "and re-inserting would send it twice\n";
         return false;
     }
-    // build() emits: header, then orderJsonSchemaText(), then '\n'. That is the whole block.
-    const std::size_t blockLength = header.size() + orderJsonSchemaText().size() + 1;
-    if (start + blockLength > prefix.size()) {
-        std::cerr << "[FAIL] prose-schema block runs past the end of the prefix\n";
+    const std::string seam = "\nDOCTRINE:\n";
+    const std::size_t at = prefix.find(seam);
+    if (at == std::string::npos) {
+        std::cerr << "[FAIL] the DOCTRINE seam was not found in the prefix - PromptRenderer changed, "
+                     "and the arm-A insertion point can no longer be located\n";
         return false;
     }
-    const std::string block = prefix.substr(start, blockLength);
-    if (block.find(orderJsonSchemaText()) == std::string::npos) {
-        std::cerr << "[FAIL] the excised block does not contain the schema text\n";
+    if (prefix.find(seam, at + 1) != std::string::npos) {
+        std::cerr << "[FAIL] the DOCTRINE seam appears more than once - the insertion point is "
+                     "ambiguous and a guess here would silently produce a prompt nobody shipped\n";
         return false;
     }
-    out = prefix.substr(0, start) + prefix.substr(start + blockLength);
+    const std::string block = header + orderJsonSchemaText() + "\n";
+    out = prefix.substr(0, at) + block + prefix.substr(at);
+
+    // The size the reconstruction has to land on, and it is a MEASURED number rather than a derived
+    // one: arm A's prefix was 17,756 bytes and arm B's 8,750, a difference of 9,006 (§Corrections
+    // item 31(a)). If the schema document ever changes shape, this stops matching and the run stops
+    // - which is correct, because at that point the reconstruction is no longer arm A and pairing
+    // its result with the archived arm-B rows would be comparing two different experiments.
+    constexpr std::size_t kArmABlockBytes = 9006;
+    if (block.size() != kArmABlockBytes) {
+        std::cerr << "[FAIL] the reconstructed prose block is " << block.size() << " bytes, not the "
+                  << kArmABlockBytes
+                  << " C3's arm A measured. The order schema changed, so this is no longer arm A "
+                     "and its rows must not be pooled with the archived ones "
+                     "(tests/live/data/c3-quality-armA-prose-schema.csv).\n";
+        return false;
+    }
     return true;
 }
 
@@ -810,44 +878,45 @@ Tally runSoak(const Options& options, const CommanderConfig& config, const Promp
     ClientHandle handle = makeClient(options, config);
     const std::vector<Situation> situations = buildSituations();
 
-    // C3's arm B. Resolved once before the loop: the prefix has to be BYTE-IDENTICAL across the run
-    // or the cache never reads and the arm measures a cold path instead of the thing it was asked
-    // about.
+    // C3's arm A, reconstructed. Resolved once before the loop: the prefix has to be BYTE-IDENTICAL
+    // across the run or the cache never reads and the arm measures a cold path instead of the thing
+    // it was asked about.
     //
-    // The excision is applied to the FULL PROMPT rather than composed from prefix + suffix, and the
+    // The insertion is applied to the FULL PROMPT rather than composed from prefix + suffix, and the
     // difference matters. render() is `prefix + "\nSITUATION:\n" + suffix + "\n\nYour order:\n"` -
     // rebuilding that here would duplicate PromptRenderer's format in a second place and silently
-    // diverge the day it changes. Taking render()'s output and cutting one block out of it leaves
+    // diverge the day it changes. Taking render()'s output and putting one block back into it leaves
     // the renderer the single authority on what a prompt looks like, which is the property this
-    // measurement most needs: arm A must be the shipped prompt EXACTLY, or the pair compares
-    // nothing.
-    std::size_t excisedBytes = 0;
-    if (!options.proseSchema) {
+    // measurement most needs: arm B must be the shipped prompt EXACTLY, or the pair compares
+    // nothing. Note which arm that sentence now names - arm B is what ships.
+    std::size_t insertedBytes = 0;
+    if (options.proseSchema) {
         std::string probe;
-        if (!exciseProseSchema(renderer.prefix(), probe)) {
+        if (!insertProseSchema(renderer.prefix(), probe)) {
             std::exit(1);
         }
-        excisedBytes = renderer.prefix().size() - probe.size();
-        std::cout << "    [C3 arm B] prose schema excised: " << renderer.prefix().size() << " -> "
-                  << probe.size() << " bytes (-" << excisedBytes
-                  << "). Structured outputs remain ON.\n";
+        insertedBytes = probe.size() - renderer.prefix().size();
+        std::cout << "    [C3 arm A, RECONSTRUCTED] prose schema re-inserted: "
+                  << renderer.prefix().size() << " -> " << probe.size() << " bytes (+"
+                  << insertedBytes
+                  << "). This is the CONTROL, not what ships. Structured outputs remain ON.\n";
     }
 
     // The cache breakpoint goes at the real prefix/suffix boundary (AIC-BE-3). Suppressed when
     // perturbing, because H2 deliberately shifts the prefix - declaring a boundary that the
     // perturbation has moved would place the breakpoint mid-text and measure neither hypothesis.
-    const std::size_t prefixLength = perturb ? 0 : renderer.prefix().size() - excisedBytes;
+    const std::size_t prefixLength = perturb ? 0 : renderer.prefix().size() + insertedBytes;
 
     Tally tally;
     for (int i = 0; i < orders; ++i) {
         const Situation& situation = situations[static_cast<std::size_t>(i) % situations.size()];
         std::string prompt = renderer.render(situation.snapshot);
-        if (!options.proseSchema) {
-            std::string cut;
-            if (!exciseProseSchema(prompt, cut)) {
+        if (options.proseSchema) {
+            std::string withProse;
+            if (!insertProseSchema(prompt, withProse)) {
                 std::exit(1);
             }
-            prompt = cut;
+            prompt = withProse;
         }
         if (perturb) {
             prompt = perturbPrefix(prompt, i);
@@ -1027,8 +1096,10 @@ int main(int argc, char** argv) {
             options.outPath = next();
         } else if (arg == "--no-format") {
             options.grammarEnabled = false;
-        } else if (arg == "--no-prose-schema") {
-            options.proseSchema = false;
+        } else if (arg == "--prose-schema") {
+            options.proseSchema = true;
+        } else if (arg == "--dump-dir") {
+            options.dumpDir = next();
         } else if (arg == "--backend") {
             options.backend = next();
         } else if (arg == "--claude-model") {
@@ -1041,10 +1112,36 @@ int main(int argc, char** argv) {
             options.claudeMaxTokens = std::atoi(next().c_str());
         } else if (arg == "--csv") {
             options.csvPath = next();
+        } else if (arg == "--no-prose-schema") {
+            // Named explicitly so the failure is a sentence rather than "unknown argument". The
+            // flag inverted when C3 landed: the prose block is no longer in the shipped prefix, so
+            // there is nothing to turn off, and a run that quietly accepted the old spelling would
+            // measure arm B while its command line said arm A.
+            std::cerr << "--no-prose-schema no longer exists. C3 REMOVED the prose schema from the "
+                         "shipped prefix (PRD v1.8.14), so the default run is already the arm that "
+                         "flag used to select. Use --prose-schema to reconstruct arm A as a "
+                         "control.\n";
+            return 2;
         } else {
             std::cerr << "unknown argument: " << arg << "\n";
             return 2;
         }
+    }
+
+    // --prose-schema only reaches runSoak, and it used to be SILENTLY IGNORED everywhere else: a
+    // `--mode ttft-dump --prose-schema` invocation would dump arm-B bodies while its command line
+    // said arm A, and nothing said so. A flag that is read in one mode and dropped in the others is
+    // a flag that will eventually label a run wrongly. Found in the post-merge review of PR #13.
+    // It is honoured by `prefix` as well, and that is not a convenience: `--mode prefix
+    // --prose-schema` writes arm A's exact bytes with no network and no key, which is the only way
+    // to re-measure arm A's token count through count-prefix-tokens.ps1, and the only way to check
+    // that the reconstruction still lands on 17,756 bytes without spending anything.
+    if (options.proseSchema && options.mode != "soak" && options.mode != "prefix") {
+        std::cerr << "--prose-schema applies to --mode soak (it reconstructs C3's arm-A prompt for "
+                     "the paired comparison) and --mode prefix (it writes arm A's bytes for "
+                     "inspection). It is not read by mode '"
+                  << options.mode << "', and being ignored silently is how a run gets mislabelled.\n";
+        return 2;
     }
 
     if (options.backend != "local" && options.backend != "claude") {
@@ -1222,10 +1319,12 @@ int main(int argc, char** argv) {
             }
 
             std::ostringstream name;
-            name << "ttft-request-" << std::setfill('0') << std::setw(2) << (i + 1) << ".json";
+            name << options.dumpDir << "/ttft-request-" << std::setfill('0') << std::setw(2)
+                 << (i + 1) << ".json";
             std::ofstream out(name.str(), std::ios::binary);
             if (!out) {
-                std::cerr << "[FAIL] could not open " << name.str() << "\n";
+                std::cerr << "[FAIL] could not open " << name.str()
+                          << " (does the --dump-dir exist? this mode does not create it)\n";
                 return 1;
             }
             out << body;
@@ -1237,7 +1336,11 @@ int main(int argc, char** argv) {
         }
 
         std::cout << "\n[OK] wrote " << written << " request bodies for " << options.claudeModel
-                  << " at max_tokens=" << options.claudeMaxTokens << "\n";
+                  << " at max_tokens=" << options.claudeMaxTokens << " into " << options.dumpDir
+                  << "\n";
+        std::cout << "     The directory is what measure-ttft.ps1 -RequestDir takes, and the\n";
+        std::cout << "     arm-A/arm-B pairing is a pairing of two of them - name them so a reader\n";
+        std::cout << "     of the CSVs can tell which dump produced which arm.\n";
         std::cout << "     target URL (not contacted): " << capturedUrl << "\n";
         std::cout << "     NOTHING WAS SENT. The capture is at the transport boundary, before any\n";
         std::cout << "     socket is opened, so this mode needs no authorization and no API key.\n";
@@ -1248,17 +1351,30 @@ int main(int argc, char** argv) {
     }
 
     if (options.mode == "prefix") {
-        const std::string outPath = "prefix.txt";
+        // Arm B - what ships - unless --prose-schema asks for the arm-A control. Both are the
+        // stable prefix alone: no snapshot, no scenario state, which is the property the v1.8.1
+        // authorization is scoped to and the reason this mode needs no gate.
+        std::string text = renderer.prefix();
+        if (options.proseSchema) {
+            std::string armA;
+            if (!insertProseSchema(text, armA)) {
+                return 1;
+            }
+            text = armA;
+        }
+        const std::string outPath = options.outPath.empty() ? std::string("prefix.txt")
+                                                            : options.outPath;
         std::ofstream out(outPath, std::ios::binary);
         if (!out) {
             std::cerr << "[FAIL] could not open " << outPath << " for writing\n";
             return 1;
         }
-        out.write(renderer.prefix().data(),
-                  static_cast<std::streamsize>(renderer.prefix().size()));
+        out.write(text.data(), static_cast<std::streamsize>(text.size()));
         out.close();
-        std::cout << "[OK] wrote " << renderer.prefix().size() << " bytes to " << outPath
-                  << " (stable prefix only - no snapshot, no scenario state)\n";
+        std::cout << "[OK] wrote " << text.size() << " bytes to " << outPath << " ("
+                  << (options.proseSchema ? "C3 ARM A, RECONSTRUCTED - the control, NOT what ships"
+                                          : "the shipped prefix, C3 arm B")
+                  << "; stable prefix only - no snapshot, no scenario state)\n";
         return 0;
     }
 

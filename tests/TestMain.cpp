@@ -5,6 +5,8 @@
 #include <core/logging/GlobalLogger.h>
 
 #include <cstdio>
+#include <filesystem>
+#include <system_error>
 
 namespace arkheon::aicommander::testing {
 
@@ -23,6 +25,35 @@ static std::string& releaseRootStorage() {
 const std::string& releaseRoot() { return releaseRootStorage(); }
 void setReleaseRoot(std::string root) { releaseRootStorage() = std::move(root); }
 
+static std::string& repoRootStorage() {
+    static std::string root;
+    return root;
+}
+
+const std::string& repoRoot() { return repoRootStorage(); }
+void setRepoRoot(std::string root) { repoRootStorage() = std::move(root); }
+
+// Walks up from the executable until a directory holding the solution file is found. The marker is
+// `ai-commander.slnx` rather than `.git` or `data/`: a checkout can be exported without its git
+// directory, and `data/` exists under the release tree too, which is exactly the directory this
+// must not accidentally resolve to.
+static std::string findRepoRoot(const char* argv0) {
+    std::error_code ec;
+    std::filesystem::path here = std::filesystem::absolute(std::filesystem::path(argv0), ec);
+    if (ec) {
+        return {};
+    }
+    for (here = here.parent_path(); !here.empty(); here = here.parent_path()) {
+        if (std::filesystem::exists(here / "ai-commander.slnx", ec)) {
+            return here.string();
+        }
+        if (!here.has_relative_path()) {
+            break; // Reached the drive root; parent_path() is a fixed point from here.
+        }
+    }
+    return {};
+}
+
 } // namespace arkheon::aicommander::testing
 
 // The Phase-1a suite. It runs with no inference server and no network by construction: nothing it
@@ -35,6 +66,14 @@ int main(int argc, char* argv[]) {
         if (arkheon::aicommander::tryReadEnvVar("N8RO_RELEASE", release)) {
             arkheon::aicommander::testing::setReleaseRoot(release);
         }
+    }
+
+    // Resolved from argv[0] before initializeForTests() for the same reason as the release root:
+    // that call repoints N8RO_RELEASE, and anything derived from the environment afterwards is
+    // derived from the test-artifacts directory instead of from the real tree.
+    if (argc > 0 && argv[0] != nullptr) {
+        arkheon::aicommander::testing::setRepoRoot(
+            arkheon::aicommander::testing::findRepoRoot(argv[0]));
     }
 
     n8ro::core::GlobalLogger::initializeForTests();

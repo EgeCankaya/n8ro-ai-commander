@@ -66,6 +66,31 @@ $ErrorActionPreference = "Stop"
 
 # -- inputs -----------------------------------------------------------------------------------
 
+# WINDOWS POWERSHELL 5.1 ONLY, AND THIS IS A MEASUREMENT REQUIREMENT RATHER THAN A COMPATIBILITY ONE.
+#
+# The two ServicePointManager lines below are what keep .NET's own client stack out of the number
+# this probe reports. They work on .NET Framework, where HttpClientHandler is a wrapper over
+# HttpWebRequest and ServicePointManager is the thing being configured. Under PowerShell 7 (pwsh,
+# .NET 5+) the handler is SocketsHttpHandler, which ignores ServicePointManager entirely: both lines
+# become silent no-ops that still LOOK like they did something.
+#
+# What that costs is not hypothetical. PRD Corrections item 29(g) records the first smoke run of
+# this script measuring two samples pinned at ~30,500 ms - .NET's Expect100Continue handshake, not
+# the service - and it was caught only because 30,498 and 30,501 ms are not what variance looks
+# like. Expect100Continue lands in the FIXED term, which is the exact term C2 is about. Re-running
+# under pwsh would reintroduce it, and this time the lesson is already in the changelog, so the
+# anomaly would read as service variance rather than as a new finding.
+#
+# Checked before the API key, deliberately: an edition mismatch should fail on a machine that has no
+# key at all, so it surfaces during setup rather than on the first paid request.
+if ($PSVersionTable.PSEdition -ne 'Desktop') {
+    Write-Error ("run under Windows PowerShell 5.1 (powershell.exe), not $($PSVersionTable.PSEdition) " +
+                 "$($PSVersionTable.PSVersion). ServicePointManager::Expect100Continue and " +
+                 "DefaultConnectionLimit are no-ops on .NET 5+ (SocketsHttpHandler), and the " +
+                 "handshake they suppress lands in the fixed term this probe exists to measure - " +
+                 "see PRD Corrections item 29(g), which paid to discover it once already.")
+}
+
 $requests = @(Get-ChildItem -Path $RequestDir -Filter "ttft-request-*.json" | Sort-Object Name)
 if ($requests.Count -eq 0) {
     Write-Error "no ttft-request-*.json in $RequestDir. Run: ai-commander-live-tests.exe --mode ttft-dump --backend claude"
@@ -123,14 +148,49 @@ foreach ($file in $requests) {
 
     $streamed = '{"stream":true,' + $text.Substring(1)
 
-    # Assert the edit did exactly one thing. Everything else about the body must be byte-identical
-    # to what the adapter built, and this is the check that says so rather than trusting it.
-    $expectedDelta = '{"stream":true,'.Length - 1
-    if (($streamed.Length - $text.Length) -ne $expectedDelta) {
-        Write-Error "$($file.Name): the stream edit changed $($streamed.Length - $text.Length) bytes, expected $expectedDelta"
+    # Assert the edit did exactly one thing - SEMANTICALLY, not by counting bytes.
+    #
+    # This check used to compare ($streamed.Length - $text.Length) against
+    # ('{"stream":true,'.Length - 1) and could not fail: both sides are the same arithmetic over the
+    # same literal, so it was always 14 -ne 14. It asserted nothing about the body while carrying a
+    # comment claiming to be "the check that says so rather than trusting it" - a probe whose
+    # headline guard was a tautology, which is a worse failure than having no guard, because the
+    # comment stops anyone looking. Found in the post-merge review of PR #13.
+    #
+    # It also parsed the WRONG STRING. ConvertFrom-Json ran on $text, the original, and never on
+    # $streamed - the body that actually goes on the wire. Nothing checked that what is transmitted
+    # is well-formed JSON at all, so a BOM, leading whitespace before '{', or a degenerate '{}'
+    # would splice into something malformed, pass both guards, and surface as a PAID HTTP 400 with
+    # $failures incrementing quietly while the run continued.
+    #
+    # THE SPLICE STAYS. It is not the defect and it must not be "fixed" into a round trip: parsing
+    # and re-serialising would renormalise escaping, key order and number formatting, and the body
+    # measured here would stop being the body the adapter builds - which is the one thing this probe
+    # exists to get right (see the comment block above, and Corrections item 22). So the splice is
+    # unchanged and only the assertion becomes real: parse the spliced body, and compare its
+    # property set against the original's.
+    $before = ConvertFrom-Json $text
+    # Under $ErrorActionPreference = Stop this throws if the splice produced invalid JSON, which is
+    # the check that was missing entirely.
+    $after = ConvertFrom-Json $streamed
+
+    if ($after.stream -ne $true) {
+        Write-Error "$($file.Name): the spliced body has no stream flag set - the edit did not take"
+    }
+    $added = @(Compare-Object $before.PSObject.Properties.Name $after.PSObject.Properties.Name |
+               ForEach-Object { $_.InputObject })
+    if ($added.Count -ne 1 -or $added[0] -ne 'stream') {
+        Write-Error ("$($file.Name): the splice changed more than the stream field - differing " +
+                     "top-level properties: $($added -join ', ')")
+    }
+    # Byte-level backstop, in the one form that is not circular: the spliced body must still END
+    # with the original body's bytes after its opening brace. Everything the adapter wrote is
+    # therefore present and in order, which the property-set check alone does not establish.
+    if (-not $streamed.EndsWith($text.Substring(1), [System.StringComparison]::Ordinal)) {
+        Write-Error "$($file.Name): the spliced body does not carry the adapter's bytes verbatim"
     }
 
-    $probe = ConvertFrom-Json $text
+    $probe = $before
     $prepared += [pscustomobject]@{
         Name      = $file.Name
         Body      = $streamed
@@ -290,13 +350,36 @@ $rows | Export-Csv -Path $Csv -NoTypeInformation -Encoding utf8
 # Reported per arm rather than pooled: the comparison this instrument exists for is BETWEEN two
 # runs of this script, and pooling here would hide the quantity being compared.
 
+# A PERCENTILE NEEDS A SAMPLE, AND THIS ONE REFUSES TO PRINT WHEN IT DOES NOT HAVE ONE.
+#
+# Nearest-rank p95 lands on the MAXIMUM whenever ceil(n * 0.95) = n, i.e. for every n below 20. At
+# the default -Repeats 8 (n=48) this is a real percentile; at -Repeats 1 (n=6) it is the maximum
+# wearing a percentile's name. PRD v1.7.4 Finding 3 recorded exactly that error, v1.8.15 item 32(d)
+# removed it from run-live-scenario.ps1 - and did not remove it from this script, which is the
+# meta-complaint item 32(d) makes about itself, committed a second time in the same revision. Found
+# in the post-merge review of PR #13.
+#
+# 20 is not a quality bar, it is the arithmetic: it is the smallest n at which the p95 index stops
+# being the last element. Below it the caller gets $null and Stats prints "n/a", because a blank is
+# read as "not measured" and a number is read as measured.
+$script:PctMinimumN = 20
+
 function Pct($values, $p) {
     $sorted = @($values | Sort-Object)
-    if ($sorted.Count -eq 0) { return 0 }
+    if ($sorted.Count -eq 0) { return $null }
+    # The p50 index is interior for any n >= 2, so a median is honest where a p95 is not. Only the
+    # tail percentiles need the guard.
+    if ($p -ge 95 -and $sorted.Count -lt $script:PctMinimumN) { return $null }
     $idx = [int][Math]::Ceiling($sorted.Count * $p / 100.0) - 1
     if ($idx -lt 0) { $idx = 0 }
     if ($idx -ge $sorted.Count) { $idx = $sorted.Count - 1 }
     return $sorted[$idx]
+}
+
+function PctText($values, $p) {
+    $v = Pct $values $p
+    if ($null -eq $v) { return "n/a" }
+    return "{0:N0}" -f $v
 }
 
 function Stats($name, $values) {
@@ -308,8 +391,8 @@ function Stats($name, $values) {
         foreach ($v in $values) { $ss += [Math]::Pow($v - $mean, 2) }
         $sd = [Math]::Sqrt($ss / ($values.Count - 1))
     }
-    Write-Host ("  {0,-14} mean {1,7:N0}  SD {2,6:N0}  p50 {3,7:N0}  p95 {4,7:N0}  min {5,6:N0}  max {6,6:N0}" -f `
-                $name, $mean, $sd, (Pct $values 50), (Pct $values 95), $m.Minimum, $m.Maximum)
+    Write-Host ("  {0,-14} mean {1,7:N0}  SD {2,6:N0}  p50 {3,7}  p95 {4,7}  min {5,6:N0}  max {6,6:N0}" -f `
+                $name, $mean, $sd, (PctText $values 50), (PctText $values 95), $m.Minimum, $m.Maximum)
 }
 
 Write-Host ""
@@ -321,10 +404,35 @@ Stats "deltas"      @($rows | ForEach-Object { $_.deltas })
 Stats "total"       @($rows | ForEach-Object { $_.totalMs })
 Stats "tokensOut"   @($rows | ForEach-Object { $_.tokensOut })
 
-$cacheHits = @($rows | Where-Object { $_.cacheReadTokens -gt 0 }).Count
+# CACHE READS, REPORTED AS A DISTRIBUTION RATHER THAN AS ONE SAMPLE.
+#
+# This used to print `Select-Object -First 1` - the first hit's token count, presented as the run's
+# value. It is constant across every hit in both archived arms (7,608 on A, 5,118 on B, 119 rows
+# each), which is what makes PRD Corrections item 33(c)'s per-hit-versus-mean correction possible at
+# all. But nothing CHECKED that it was constant, and a figure that happens to be right is not a
+# figure that is known to be right - which is most of what Corrections is a record of. Found in the
+# post-merge review of PR #13.
+#
+# Constant is the expected case and gets the short line. A varying count is a finding: it means the
+# prefix is not stable across the run, or the service is caching a different block on some requests,
+# and either one invalidates pooling these rows. So the range is printed and named rather than
+# averaged into a number that hides it.
+$cacheReads = @($rows | Where-Object { $_.cacheReadTokens -gt 0 } | ForEach-Object { $_.cacheReadTokens })
+$cacheHits = $cacheReads.Count
+$distinctReads = @($cacheReads | Sort-Object -Unique)
 Write-Host ""
-Write-Host ("  cache reads   {0}/{1} orders at {2:N0} tokens" -f `
-            $cacheHits, $rows.Count, (@($rows | Where-Object { $_.cacheReadTokens -gt 0 } | ForEach-Object { $_.cacheReadTokens }) | Select-Object -First 1))
+if ($cacheHits -eq 0) {
+    Write-Host ("  cache reads   0/{0} orders - THE PREFIX DID NOT CACHE. Every figure below is" -f $rows.Count)
+    Write-Host  "                priced at the uncached rate and the arms are not comparable."
+} elseif ($distinctReads.Count -eq 1) {
+    Write-Host ("  cache reads   {0}/{1} orders at {2:N0} tokens (constant on every hit, asserted)" -f `
+                $cacheHits, $rows.Count, $distinctReads[0])
+} else {
+    Write-Host ("  cache reads   {0}/{1} orders, NOT CONSTANT: {2} distinct values, {3:N0}-{4:N0} tokens" -f `
+                $cacheHits, $rows.Count, $distinctReads.Count, $distinctReads[0], $distinctReads[-1])
+    Write-Host  "                The cached block moved during the run. Do not quote a single"
+    Write-Host  "                cached-token figure for this arm, and do not pool it with another."
+}
 Write-Host ("  csv           {0}" -f (Resolve-Path $Csv))
 Write-Host ""
 Write-Host "  TTFT is the fixed-term estimator. Compare it ACROSS arms, not against the total"
