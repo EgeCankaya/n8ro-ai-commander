@@ -3,8 +3,10 @@
 **Audience:** anyone who needs to answer "what did you send to a third party, and how do you know?"
 **Scope:** `commander.backend = claude` with `claude.enabled = true`. In every other configuration
 this document is moot — see §Nothing leaves at all, below.
-**Status:** written 2026-08-03 against the adapter as implemented (PRD v1.8, AIC-BE-2). Every claim
-here is either enforced by a test named below or is a statement about code you can read.
+**Status:** written 2026-08-03 against the adapter as implemented (PRD v1.8, AIC-BE-2); **revised
+2026-08-05 for the fifth egress grant (PRD v1.8.11), which changes the *provenance* of the volatile
+suffix from synthetic fixtures to real scenario state — see §Where those values come from.** Every
+claim here is either enforced by a test named below or is a statement about code you can read.
 
 ---
 
@@ -90,6 +92,27 @@ C++ read seam exists for sensor tracks or weapon stores. They are **pushed in** 
 deterministic mission script. The consequence is that the plugin can only transmit what a script
 explicitly handed it, and the reporting verbs accept **numbers only**, so no free-text field can
 enter a prompt through that path at all.
+
+#### Where those values come from — and what changed on 2026-08-05
+
+**The field list above is exhaustive and has not changed.** What changed is where the values in it
+are drawn from, and that distinction is the one every egress grant in this project has turned on.
+
+| | Provenance | Authorized by |
+|---|---|---|
+| **Until 2026-08-05** | The **six hand-authored situation fixtures** in `tests/live/LiveMain.cpp`. Same field set, values invented for a test — no scenario, no mission file, no shipped content | grants two through four (PRD v1.8.3, v1.8.5, v1.8.8) |
+| **From 2026-08-05** | **Real scenario state**, read live from `RedSu35_01` in the shipped "Mariana Shield" scenario, via `tests\smoke\run-live-scenario.ps1` on the hosted backend | the **fifth grant** (PRD v1.8.11) |
+
+**This is stated here because "it is the same fields" was, for four grants running, explicitly not
+enough.** The v1.8.3 grant refused to read a fixture authorization as covering a scenario run on
+exactly that reasoning. The boundary was released by an owner decision, recorded in the PRD before
+any request was made under it — not by the argument finally being accepted.
+
+**What a reader should take from it:** a position that leaves this machine after 2026-08-05 may be
+the position of an aircraft in a shipped scenario rather than a number someone typed into a test.
+The *shape* of what is transmitted is unchanged, and every assertion and allowlist test named in
+this document still applies unchanged. Nothing new is transmitted. What is new is that the values
+are real.
 
 ### Part 3 — the headers
 
