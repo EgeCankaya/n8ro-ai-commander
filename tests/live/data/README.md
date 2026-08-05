@@ -30,6 +30,18 @@ may be described as characterising the product rather than the fixtures.
 | `c2-armB-haiku-short-doctrine.csv` | C2 decomposition, arm B — short doctrine, 10,976 B prefix / 5,991 cached tokens. Identical to arm A in every other respect | `claude-haiku-4-5` | 60 | third (v1.8.3) | v1.8.5 |
 | `sonnet-maxtokens-512.csv` | First non-Haiku run, at the shipped ceiling. **44 accepted, 4 truncated at the cap** | `claude-sonnet-5` | 48 | third (v1.8.3) | v1.8.5, v1.8.6 |
 | `sonnet-maxtokens-8192.csv` | The ceiling-raised re-run that closed C7. **48/48 accepted.** Paired with the row above: same model, same fixtures, ceiling the only difference | `claude-sonnet-5` | 48 | fourth (v1.8.8) | v1.8.9 |
+| `c2-ttft-armA-full-doctrine.csv` | The TTFT run, arm A — 17,756 B prefix / 10,493 cached tokens. Different columns from the four above; see below | `claude-sonnet-5` | 48 | fifth (v1.8.11) | v1.8.12 |
+| `c2-ttft-armB-short-doctrine.csv` | The TTFT run, arm B — 10,976 B prefix / 8,291 cached tokens. Identical to arm A in every other respect | `claude-sonnet-5` | 48 | fifth (v1.8.11) | v1.8.12 |
+
+The two TTFT files come from `measure-ttft.ps1`, not from `--csv`, and carry a different schema:
+`arm, fixture, repeat, ttftMs, headersMs, totalMs, afterFirstMs, deltas, tokensIn, tokensOut,
+cacheReadTokens, stopReason`. Analysed by `analyse-ttft.py`.
+
+**`ttftMs` in those two files does not mean what its name says, and §Corrections item 29 is mostly
+about that.** Under structured outputs the service emits ~6 deltas per response rather than one per
+token, and the first delta arrives *after* the generation — so `ttftMs` correlates with `totalMs` at
+**0.995**, and `afterFirstMs` is a near-constant 2.2-second flush rather than generation time.
+**`headersMs` is the column with no generation in it**, and it is the one worth reading.
 
 ## Columns
 

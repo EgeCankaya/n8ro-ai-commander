@@ -19,7 +19,11 @@
 //   schema - does the hosted structured-output path accept what the adapter sends? One request.
 //            Tests PRD §Corrections item 19, which is recorded as a PREDICTION, not a measurement
 //
-// Usage: ai-commander-live-tests.exe [--orders N] [--mode prefix|schema|soak|cold|h2|geo|all]
+//   ttft-dump - writes the EXACT request bodies the Claude adapter would POST, captured at the
+//            transport boundary so a streaming probe can measure time-to-first-token without
+//            reconstructing a request nobody sends. Sends nothing; needs no key (PRD v1.8.11)
+//
+// Usage: ai-commander-live-tests.exe [--orders N] [--mode prefix|schema|soak|cold|h2|geo|ttft-dump|all]
 //                                    [--backend local|claude] [--model TAG] [--base-url URL]
 //                                    [--claude-model ID] [--claude-base-url URL] [--key-env NAME]
 //                                    [--max-tokens N] [--no-format] [--out PATH] [--csv PATH]
@@ -48,6 +52,8 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -1058,6 +1064,111 @@ int main(int argc, char** argv) {
             out << dump.text;
             std::cout << "[OK] wrote " << dump.text.size() << " bytes to " << dump.path << "\n";
         }
+        return 0;
+    }
+
+    // -- ttft-dump: write the EXACT request bodies, so a streaming probe can measure TTFT ---------
+    //
+    // For C2 (PRD §Corrections item 28(f) and the fifth grant, v1.8.11). Time-to-first-token is the
+    // lower-variance estimator that C2 needs, and it is not observable through the product's HTTP
+    // seam at all: `n8ro::core::IHttpClient::send()` is blocking and returns a whole body, with no
+    // chunk callback and no headers-received hook. So the measurement lives in a PowerShell probe,
+    // exactly as count-prefix-tokens.ps1 and probe-canonical-schema.ps1 already do, and this mode
+    // supplies it with the one thing a hand-written probe cannot be trusted to reproduce: the body.
+    //
+    // THE ERROR THIS MODE EXISTS TO PREVENT is §Corrections item 22. OQ-8 measured the prefix with
+    // count_tokens, correctly and against the right tokenizer, and got a number for the wrong
+    // object - the adapter sends an entire second copy of the schema after the renderer stops. A
+    // TTFT probe that composed its own request body would repeat that error precisely: it would
+    // measure a request nobody sends.
+    //
+    // So the body is not rebuilt here. It is CAPTURED AT THE TRANSPORT BOUNDARY - a fake
+    // IHttpClient installed through the adapter's existing test seam records `request.body` and
+    // returns nullopt, so what lands on disk is the byte sequence that would have gone on the wire,
+    // produced by ClaudeLlmClient's own construction path. Nothing is sent: the capture happens
+    // before any socket is opened, which is why this mode is NOT authorization-gated.
+    if (options.mode == "ttft-dump") {
+        if (options.backend != "claude") {
+            std::cerr << "[FAIL] --mode ttft-dump requires --backend claude\n";
+            return 1;
+        }
+
+        // Records what it is handed and refuses to send it. Returning nullopt drives the adapter's
+        // transport-failure path, which is fine: the result is discarded and the capture already
+        // happened. It also means the mode cannot reach the network even by mistake.
+        //
+        // FIRST CAPTURE WINS, and that is load-bearing rather than defensive. A nullopt return is
+        // exactly the condition on which the adapter runs AIC-BE-4's TLS-availability control probe
+        // - a second send() through this same client, to the same host, deliberately carrying no
+        // prompt, no key and no body. Last-write-wins would therefore hand back an empty string
+        // every time, and a probe built on it would have measured nothing while looking like it
+        // worked. The control request is a real part of the adapter's behaviour; it is simply not
+        // the request being measured.
+        struct CapturingHttpClient final : public n8ro::core::IHttpClient {
+            std::string* body;
+            std::string* url;
+            std::optional<n8ro::core::HttpResponse> send(
+                const n8ro::core::HttpRequest& request) override {
+                if (body->empty()) {
+                    *body = request.body;
+                    *url = request.url;
+                }
+                return std::nullopt;
+            }
+        };
+
+        const std::vector<Situation> dumpSituations = buildSituations();
+        int written = 0;
+        std::string capturedUrl;
+
+        for (std::size_t i = 0; i < dumpSituations.size(); ++i) {
+            const Situation& situation = dumpSituations[i];
+
+            std::string body;
+            ClaudeLlmClient client(claudeConfigFrom(options, config));
+            client.setHttpClientFactory([&body, &capturedUrl] {
+                auto fake = std::make_unique<CapturingHttpClient>();
+                fake->body = &body;
+                fake->url = &capturedUrl;
+                return fake;
+            });
+
+            const std::string prompt = renderer.render(situation.snapshot);
+            // Discarded on purpose. runWorkerCall is the production call path, and driving it here
+            // rather than calling the adapter directly is what makes the captured body the body a
+            // real order would produce - including LlmRequest::prefixLength, which decides where
+            // the cache breakpoint goes and is therefore part of what is being measured.
+            (void)CommanderRuntime::runWorkerCall(situation.snapshot, prompt, client,
+                                                  renderer.prefix().size());
+
+            if (body.empty()) {
+                std::cerr << "[FAIL] captured an empty body for " << situation.label << "\n";
+                return 1;
+            }
+
+            std::ostringstream name;
+            name << "ttft-request-" << std::setfill('0') << std::setw(2) << (i + 1) << ".json";
+            std::ofstream out(name.str(), std::ios::binary);
+            if (!out) {
+                std::cerr << "[FAIL] could not open " << name.str() << "\n";
+                return 1;
+            }
+            out << body;
+            out.close();
+
+            std::cout << "[OK] " << std::left << std::setw(28) << name.str() << std::right
+                      << std::setw(7) << body.size() << " bytes   " << situation.label << "\n";
+            ++written;
+        }
+
+        std::cout << "\n[OK] wrote " << written << " request bodies for " << options.claudeModel
+                  << " at max_tokens=" << options.claudeMaxTokens << "\n";
+        std::cout << "     target URL (not contacted): " << capturedUrl << "\n";
+        std::cout << "     NOTHING WAS SENT. The capture is at the transport boundary, before any\n";
+        std::cout << "     socket is opened, so this mode needs no authorization and no API key.\n";
+        std::cout << "     These bodies CARRY THE VOLATILE SUFFIX - position, velocity, heading,\n";
+        std::cout << "     team, tracks, loadout, from the synthetic fixtures. measure-ttft.ps1 is\n";
+        std::cout << "     what transmits them, and it is gated.\n";
         return 0;
     }
 
