@@ -57,7 +57,21 @@
 param(
     [string]$ReleaseRoot = $(if ($env:N8RO_RELEASE_ROOT) { $env:N8RO_RELEASE_ROOT } else { "C:\N8RO" }),
     [int]$RunSeconds = 600,
-    [switch]$SkipControl
+    [switch]$SkipControl,
+
+    # `claude` REACHES THE NETWORK, and it is the one parameter here that needs an owner grant.
+    #
+    # This is C1. Every hosted measurement in this project before 2026-08-05 ran against the six
+    # synthetic fixtures in tests/live/LiveMain.cpp - the same FIELD SET as a real snapshot, filled
+    # with values invented for a test. `-Backend claude` transmits the same fields drawn from REAL
+    # SCENARIO STATE in a shipped mission. That distinction is what four consecutive egress grants
+    # declined to blur, and it was released by an owner decision recorded in PRD v1.8.11 before this
+    # parameter existed. See docs/egress.md, §Where those values come from.
+    [ValidateSet("local", "claude")]
+    [string]$Backend = "local",
+
+    [string]$ClaudeModel = "claude-haiku-4-5",
+    [string]$KeyEnvVar = "ANTHROPIC_API_KEY"
 )
 
 $ErrorActionPreference = "Stop"
@@ -88,6 +102,23 @@ Write-Host "release root : $ReleaseRoot"
 Write-Host "scenario     : Mariana Shield (shipped, unmodified)"
 Write-Host "entities     : RedSu35_01 and RedSu35_02, both on the swapped Tier-1 script"
 Write-Host "run seconds  : $RunSeconds per run"
+Write-Host "backend      : $Backend"
+if ($Backend -eq "claude") {
+    if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($KeyEnvVar))) {
+        Write-Error "environment variable '$KeyEnvVar' is unset or empty - no API key available"
+    }
+    Write-Host ""
+    Write-Host "  *** THIS RUN REACHES THE NETWORK, AND WITH REAL SCENARIO STATE. ***" -ForegroundColor Yellow
+    Write-Host "  model      : $ClaudeModel   key from `$$KeyEnvVar (name only; value never logged)"
+    Write-Host "  transmits  : position, velocity, heading, team, reported tracks, loadout -"
+    Write-Host "               the same field set as every hosted run since v1.8.3, but drawn from"
+    Write-Host "               RedSu35_01 in the shipped 'Mariana Shield' scenario rather than from"
+    Write-Host "               the six synthetic LiveMain fixtures."
+    Write-Host "  authorized : PRD v1.8.11, the fifth egress grant. This boundary was held by the"
+    Write-Host "               four grants before it and released by an owner decision. C1."
+    Write-Host "  see        : docs/egress.md, 'Where those values come from'"
+    Write-Host ""
+}
 
 if (-not (Test-Path $missionPath)) { throw "No shipped mission script at $missionPath" }
 if (-not (Test-Path $scriptSrc))   { throw "No reference Tier-1 script at $scriptSrc" }
@@ -155,7 +186,19 @@ cd /d "%N8RO_RELEASE%"
     # This is what PRD v1.7.2 bought. commander.enabled is a positive act, and this script is
     # taking it explicitly and reversibly rather than depending on a file someone left behind.
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $deployedCfg) | Out-Null
-    @"
+    if ($Backend -eq "claude") {
+        @"
+# Written by run-live-scenario.ps1 for the C1 hosted live-scenario run. Removed in its finally block.
+commander.enabled=true
+commander.backend=claude
+commander.cadenceS=20
+claude.enabled=true
+claude.model=$ClaudeModel
+claude.apiKeyEnvVar=$KeyEnvVar
+"@ | Set-Content -Path $deployedCfg -Encoding ascii
+        $expectedFields = 6
+    } else {
+        @"
 # Written by run-live-scenario.ps1 for the Phase 1b live gate. Removed in its finally block.
 commander.enabled=true
 commander.backend=local
@@ -163,6 +206,8 @@ commander.cadenceS=20
 local.model=qwen2.5:7b-instruct-q8_0
 local.grammarEnabled=true
 "@ | Set-Content -Path $deployedCfg -Encoding ascii
+        $expectedFields = 5
+    }
     Assert-That (Test-Path $deployedCfg) "deployed config written to data/config/plugins/ai-commander.cfg"
 
     # -- 3. commander-on run ---------------------------------------------------------------------
@@ -175,11 +220,11 @@ local.grammarEnabled=true
 
     # If this fails the run measured NOTHING - it measured the stub backend. Asserted rather than
     # assumed, because a green smoke over canned orders is worse than a red one.
-    Assert-That ($log -match 'backend=local enabled=true') `
-        ("commander is ON with the local backend - if this fails the plugin did not apply the " +
+    Assert-That ($log -match "backend=$Backend enabled=true") `
+        ("commander is ON with the $Backend backend - if this fails the plugin did not apply the " +
          "deployed config (AIC-API-2, PRD v1.7.2) and the run is void")
 
-    Assert-That ($log -match 'applied 5 field\(s\) from the deployed config') `
+    Assert-That ($log -match "applied $expectedFields field\(s\) from the deployed config") `
         "the deployed config was read and applied in full, by path and field count"
 
     Assert-That ($log -match 'doctrine loaded from') `
@@ -207,18 +252,37 @@ local.grammarEnabled=true
         # over 10 samples cannot tell a real regression from three unlucky draws. The >= 95 % bar
         # lives on the 200-order soak, where n is large enough to mean something. What this script
         # uniquely proves is that the pipeline works INSIDE THE ENGINE, and that needs no rate.
-        $rate = if ($requested.Count) { 100.0 * $accepted.Count / $requested.Count } else { 0 }
-        Write-Host ("  acceptance: {0} of {1} requested ({2} %) - reported, not barred; the bar is on the soak" -f `
-            $accepted.Count, $requested.Count, [math]::Round($rate,1))
+        # THE DENOMINATOR IS RESOLVED ORDERS, NOT REQUESTED ONES (v1.8.15). A request issued in the
+        # last few seconds of a fixed-length run is still in flight when the engine stops: it has no
+        # accepted and no rejected record, and counting it against acceptance charges the backend for
+        # a verdict the run did not wait for. The C1 run printed "10 of 13 (76.9 %)" where two of the
+        # thirteen were unresolved - a number that reads exactly like an order-quality result and is
+        # not one, which is the same shape as the 91.7 % configuration artifact in §Corrections 24(b).
+        $resolved = $accepted.Count + $rejected.Count
+        $inFlight = $requested.Count - $resolved
+        $rate = if ($resolved) { 100.0 * $accepted.Count / $resolved } else { 0 }
+        Write-Host ("  acceptance: {0} of {1} RESOLVED ({2} %) - {3} requested, {4} still in flight at shutdown" -f `
+            $accepted.Count, $resolved, [math]::Round($rate,1), $requested.Count, $inFlight)
+        Write-Host ("              REPORTED, NOT BARRED, and at n={0} it is not a rate at all - the >= 95 %" -f $resolved)
+        Write-Host  "              bar lives on the 200-order soak. Do not quote this figure as one."
 
         $postures = @($accepted | ForEach-Object { $_.order.posture } | Sort-Object -Unique)
         Assert-That ($postures.Count -ge 3) `
             "at least three distinct postures observed ($($postures -join ', '))"
 
+        # NOT A p95, AND IT STOPPED CLAIMING TO BE ONE (v1.8.15). At n~10 the 95th percentile index
+        # lands on the last or second-to-last sample, so this printed the MAXIMUM under a percentile's
+        # name. PRD v1.7.4 Finding 3 recorded exactly this - "the reported p95 is not a p95", 10,363 ms
+        # being the second-highest of five - and this script went on printing one for four revisions.
+        # A percentile needs a sample; a ten-minute engagement does not produce one. The range is what
+        # this run can honestly say, so the range is what it says.
         $latencies = @($accepted | ForEach-Object { $_.latencyMs } | Sort-Object)
         if ($latencies.Count) {
-            $p95 = $latencies[[math]::Min($latencies.Count - 1, [int]($latencies.Count * 0.95))]
-            Write-Host "  p95 order latency: $p95 ms"
+            $median = $latencies[[int]([math]::Floor($latencies.Count / 2))]
+            Write-Host ("  order latency: min {0} ms, median {1} ms, max {2} ms over n={3}" -f `
+                $latencies[0], $median, $latencies[-1], $latencies.Count)
+            Write-Host ("              NO PERCENTILE IS REPORTED. At n={0} a p95 is the maximum wearing a" -f $latencies.Count)
+            Write-Host  "              percentile's name (PRD v1.7.4, Finding 3). The p95 lives on the soak."
         }
 
         # The first order of a run must complete rather than time out (PRD Phase 1b gate).
