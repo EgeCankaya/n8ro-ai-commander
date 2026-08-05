@@ -503,7 +503,50 @@ struct Options {
     // output length; it cannot say whether the SAME orders that were slow were the ones that emitted
     // the most tokens, and that correlation is the whole of the C2 latency decomposition.
     std::string csvPath;
+
+    // C3's arm B. The order schema is transmitted TWICE per request (PRD §Corrections item 22):
+    // once as prose, rendered into the prefix by PromptRenderer::build, and once structurally as
+    // `output_config.format.schema`. C3 proposes deleting the prose copy - a 12 % cost saving that
+    // has been confirmed by measurement and NOT MADE, because what it might cost in order quality
+    // has never been measured against its absence.
+    //
+    // False excises exactly the prose block, and nothing else, from the built prefix. It does not
+    // touch `--no-format`: structured outputs stay ON, because the whole premise of the proposed
+    // change is that the structural copy is doing the constraining and the prose copy is now
+    // redundant. Turning both off would measure a different question.
+    bool proseSchema = true;
 };
+
+// Produces the prefix that PromptRenderer::build WOULD produce if the two lines rendering the prose
+// schema were deleted from it - which is precisely the change C3 proposes and has not made.
+//
+// Done by excision rather than by a config flag on purpose. A flag would be a product change, and
+// this is a measurement whose entire point is to decide whether the product change is safe; adding
+// the switch first would be deciding the question by building it. The excision is asserted rather
+// than assumed: if the block is not found, or is not exactly the expected length, the run stops
+// instead of silently measuring the unchanged prefix in both arms - which would produce a clean
+// null result that meant nothing at all.
+bool exciseProseSchema(const std::string& prefix, std::string& out) {
+    const std::string header = "ORDER SCHEMA (your reply must validate against this):\n";
+    const std::size_t start = prefix.find(header);
+    if (start == std::string::npos) {
+        std::cerr << "[FAIL] prose-schema header not found in the prefix - PromptRenderer changed\n";
+        return false;
+    }
+    // build() emits: header, then orderJsonSchemaText(), then '\n'. That is the whole block.
+    const std::size_t blockLength = header.size() + orderJsonSchemaText().size() + 1;
+    if (start + blockLength > prefix.size()) {
+        std::cerr << "[FAIL] prose-schema block runs past the end of the prefix\n";
+        return false;
+    }
+    const std::string block = prefix.substr(start, blockLength);
+    if (block.find(orderJsonSchemaText()) == std::string::npos) {
+        std::cerr << "[FAIL] the excised block does not contain the schema text\n";
+        return false;
+    }
+    out = prefix.substr(0, start) + prefix.substr(start + blockLength);
+    return true;
+}
 
 std::string readFile(const std::string& path) {
     std::ifstream stream(path, std::ios::binary);
@@ -767,15 +810,45 @@ Tally runSoak(const Options& options, const CommanderConfig& config, const Promp
     ClientHandle handle = makeClient(options, config);
     const std::vector<Situation> situations = buildSituations();
 
+    // C3's arm B. Resolved once before the loop: the prefix has to be BYTE-IDENTICAL across the run
+    // or the cache never reads and the arm measures a cold path instead of the thing it was asked
+    // about.
+    //
+    // The excision is applied to the FULL PROMPT rather than composed from prefix + suffix, and the
+    // difference matters. render() is `prefix + "\nSITUATION:\n" + suffix + "\n\nYour order:\n"` -
+    // rebuilding that here would duplicate PromptRenderer's format in a second place and silently
+    // diverge the day it changes. Taking render()'s output and cutting one block out of it leaves
+    // the renderer the single authority on what a prompt looks like, which is the property this
+    // measurement most needs: arm A must be the shipped prompt EXACTLY, or the pair compares
+    // nothing.
+    std::size_t excisedBytes = 0;
+    if (!options.proseSchema) {
+        std::string probe;
+        if (!exciseProseSchema(renderer.prefix(), probe)) {
+            std::exit(1);
+        }
+        excisedBytes = renderer.prefix().size() - probe.size();
+        std::cout << "    [C3 arm B] prose schema excised: " << renderer.prefix().size() << " -> "
+                  << probe.size() << " bytes (-" << excisedBytes
+                  << "). Structured outputs remain ON.\n";
+    }
+
     // The cache breakpoint goes at the real prefix/suffix boundary (AIC-BE-3). Suppressed when
     // perturbing, because H2 deliberately shifts the prefix - declaring a boundary that the
     // perturbation has moved would place the breakpoint mid-text and measure neither hypothesis.
-    const std::size_t prefixLength = perturb ? 0 : renderer.prefix().size();
+    const std::size_t prefixLength = perturb ? 0 : renderer.prefix().size() - excisedBytes;
 
     Tally tally;
     for (int i = 0; i < orders; ++i) {
         const Situation& situation = situations[static_cast<std::size_t>(i) % situations.size()];
         std::string prompt = renderer.render(situation.snapshot);
+        if (!options.proseSchema) {
+            std::string cut;
+            if (!exciseProseSchema(prompt, cut)) {
+                std::exit(1);
+            }
+            prompt = cut;
+        }
         if (perturb) {
             prompt = perturbPrefix(prompt, i);
         }
@@ -954,6 +1027,8 @@ int main(int argc, char** argv) {
             options.outPath = next();
         } else if (arg == "--no-format") {
             options.grammarEnabled = false;
+        } else if (arg == "--no-prose-schema") {
+            options.proseSchema = false;
         } else if (arg == "--backend") {
             options.backend = next();
         } else if (arg == "--claude-model") {

@@ -10,8 +10,9 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 > **One-liner:** A `n8ro-sim` plugin that lets a language model issue tactical *intent* — posture, target, waypoint, rules of engagement — to entities in a running scenario, while every kinematic decision and every state mutation stays in the deterministic C++ and Lua tiers that already exist.
 
 **Date:** 2026-07-31 (revised 2026-08-05)
-**Status:** Draft v1.8.12
+**Status:** Draft v1.8.13
 **Revision history:**
+- v1.8.13 — **§Corrections item 30: C3's quality arm, PRE-REGISTERED. No request has been made at the time of this revision.** Exact Clopper–Pearson bounds at n=120/arm: **120/120 bounds the true acceptance at ≥97.53 %** and **119/120 at ≥96.11 %** — both clear the ≥95 % gate; **118/120 bounds it at 94.85 % and does not.** Resolvable difference between arms ≈**2.5 percentage points**, so the run can rule out a gate-breaching quality cost and **cannot distinguish 100 % from 99 %** — stated in advance so a null cannot later be read as more than it is. **Decision rule fixed now:** ≥119/120 with eject.schema/eject.shape at 0.00 % → the prose-schema removal is safe to make; ≤118/120 → not made; **any schema or shape rejection → not made regardless of count.** Every prior arm in this project was assessed for power *after* its result, and twice the answer was no.
 - v1.8.12 — **§Corrections item 29: the TTFT instrument ran, it does not measure what item 28(f) predicted, and C2 CLOSES on a number nobody was arguing about.** 96 orders, two doctrine arms, under the fifth grant. **TTFT correlates with total latency at 0.995** — under structured outputs the service emits ~6 deltas per response and the first arrives *after* the generation, so the probe subtracts a near-constant 2.2 s flush rather than generation. **SD(afterFirst) is 314 ms**, which refutes item 28(f)'s premise directly: generation is a large share of the **mean** and a negligible share of the **variance**, and *a share of the mean is not a share of the variance*. The estimator that helps is one nobody proposed and the probe was already recording — **time to response headers**, ~25–33 % lower SD. **And it closes C2: headers alone, before one token exists, are mean 3,157 ms / p95 6,917 ms, so the fixed term exceeds the 2.5 s total-latency target and no prompt-side change can reach it.** The doctrine comparison is **null on all three estimators**; 2,202 cached tokens are worth −103 ms [−940, +733]. **§Success metrics still reads MISSED — the target is not moved to fit the measurement.** ≈$0.84 against ≈$0.50 estimated, overrun reported.
 - v1.8.11 — **the fifth egress grant, recorded and pushed before any request made under it — and the first grant to cross the boundary the previous four deliberately held.** Three experiments: **①** the C2 fixed term via **time-to-first-token** (≈$0.50), with a **null result written into the grant in advance** as a real outcome rather than a reason to run a third pair of arms; **②** C3's quality half, a paired arm at n≈120 (≈$0.40), **conditioned on the arm's resolvable effect size being recorded before the run**; **③** **C1 — the in-engine live-scenario run, AUTHORIZED**, after being held across four grants. C1 is released by an **owner decision**, not by an argument that made it look already-covered — `docs/egress.md` is revised in this same commit to record that the volatile suffix's **provenance** changes from six synthetic fixtures to real scenario state while its **field set does not**. §Out of scope's streaming row is **unchanged** and still governs the product path; the carve-out admits streaming only as a measurement instrument under `tests/live/`, which is the only place it could live — `IHttpClient::send()` is blocking and whole-body-only. **Measurement only:** no latency remedy, no prose-schema removal, and no `claude.maxTokens` value for Sonnet follows from any of it. ≈$1.00 against $3.68 remaining.
 - v1.8.10 — **§Corrections item 28: the C2 re-analysis, which corrects this document's own record twice and strikes one over-claimed clause. No new request, no network, no cost.** Range restriction is *demonstrated* — banding Sonnet's output to Haiku's width collapses r² **0.734 → 0.036**, and the closed form predicts **0.019** on Haiku's spread. But the two Haiku arms **never disagreed** (their slope CIs overlap), so v1.8.5's stated reason was wrong even though its verdict was right; and they license nothing in the other direction either (arm A's CI includes zero *and* excludes Sonnet's slope). The clause *"not by either quantity the product controls"* is **struck**. The C2 remedy is unchanged and now priced: at ±776 ms of intercept noise a repeat two-arm comparison needs a ≈1,100 ms gap to resolve and ≈$10 to reach by sample size, so **TTFT is the cheaper instrument as well as the better one**. The four per-order CSVs behind items 25, 27(f) and 28 are **archived in-tree**.
@@ -333,6 +334,31 @@ predicted; one of those predictions did not survive contact. Each is load-bearin
     **What follows, and what does not.** The remedy is not prompt-side: it is a different model, a different target, or accepting the miss — and **the 20 s cadence already accepts it**, absorbing p99 with room to spare, which is why no run in any phase has been degraded by this. **§Success metrics' latency row is left unchanged and still reads MISSED.** Moving a target to match a measurement is the one thing this document has refused since v1.3, and it is not going to start here. **C2 closes with a cause rather than a remedy.**
 
     **(g) Cost, including the overrun.** 109 requests ≈ **$0.84**, against **≈$0.50** estimated in the fifth grant — **+68 %**. Thirteen of those requests were instrument development, and they were not free: the first smoke run measured two samples pinned at ~30,500 ms that turned out to be .NET's `Expect100Continue` handshake, not the service. **That is a probe measuring its own client stack and reporting it as latency**, caught only because 30,498 and 30,501 ms are not what variance looks like. Running total **≈$2.16 of $5**.
+
+30. **C3's quality arm, pre-registered: what n=120 can and cannot resolve, and the decision rule, both written down before the run.** *(v1.8.13 — no request has been made at the time of this entry. The fifth grant (v1.8.11) conditions this run on exactly that ordering.)*
+
+    **Why this is an item and not a paragraph in the results.** Every prior arm in this project was designed, run, and *then* assessed for whether it could have detected anything — and twice the answer was no (the C2 doctrine arms, §Corrections item 28(d); the TTFT instrument, item 29(c)). **A power statement written after a null result is indistinguishable from an excuse.** This one is written first so that it cannot become one.
+
+    **(a) The change under test.** `PromptRenderer::build` renders the order schema into the prefix as prose; `ClaudeLlmClient` *also* sends it structurally as `output_config.format.schema`. §Corrections item 22 measured the duplication at **~71 % of the cached prefix**, and v1.8.5 confirmed the cost half — cutting the prefix saved **12 %** per four-ship-hour. **What has never been measured is what the prose copy is worth.** The arm removes exactly that block and nothing else, with structured outputs left **on**, because the premise of the proposed change is that the structural copy does the constraining.
+
+    **(b) What n=120 per arm can resolve, exactly.** The metric is acceptance rate, the same one §Success metrics gates at **≥ 95 %**. Exact (Clopper–Pearson) one-sided 95 % lower bounds:
+
+    | Arm B result | Point estimate | True acceptance is at least | vs the ≥ 95 % gate |
+    |---|---|---|---|
+    | **120/120** | 100.00 % | **97.53 %** | **clears** |
+    | **119/120** | 99.17 % | **96.11 %** | **clears** |
+    | 118/120 | 98.33 % | 94.85 % | does not clear |
+    | 117/120 | 97.50 % | 93.67 % | does not clear |
+
+    Between the two arms, the resolvable difference is **≈ 2.5 percentage points**. **So this run can rule out a quality cost large enough to breach the gate, and it cannot distinguish 100 % from 99 %.** That is the honest limit and it is stated in advance: a 1-point true difference will read as noise here and **must not** be reported as evidence of no difference — which is precisely the error item 28(d) records.
+
+    **(c) The decision rule, fixed now.**
+
+    - **≥ 119/120 accepted**, with `reject.schema` and `reject.shape` both at 0.00 % → the true rate clears the gate with margin. **The prose-schema removal is safe to make on this evidence, and C3's cost saving is available.**
+    - **≤ 118/120** → the removal is **not** made. The lower bound has fallen through the gate, and a 12 % saving does not buy a gate breach.
+    - **Any rejection reading `schema` or `shape`** → the removal is not made **regardless of the count**, because that is the prose copy doing structural work the projection was assumed to cover, and one such rejection is a mechanism rather than a rate.
+
+    **(d) What this run is not.** It is not a measurement of order *quality* beyond acceptance — a well-formed order that is tactically worse would pass Stage A and count as accepted. Acceptance is what the gate is written in and what the arms can compare; **a semantic quality difference would be invisible here, and this item says so now rather than after the number arrives.**
 
 ## Problem statement
 
@@ -2037,6 +2063,20 @@ Advisory. Gaps found while composing this PRD, not blockers.
 - **v1.2 note — the snapshot was specified from the Lua surface, not the C++ one.** Every field in the original §Exactly what is transmitted named a Lua verb, and two of them turned out to have no C++ equivalent. The lesson generalizes: for a C++ plugin, "which verb returns this?" is the wrong traceability question — "which header or schema record exposes this to *the plugin*?" is the right one. Appendix A now carries the Lua/C++ split explicitly so the next field added is checked against both columns.
 
 ## Changelog
+
+### v1.8.13 — 2026-08-05
+
+**A power statement, written before the run it is about.** No request has been made at the time of this revision. The fifth grant conditions C3's quality arm on exactly this ordering, and the reason is in this document's own record: **every prior arm here was designed, run, and only then assessed for whether it could have detected anything — and twice the answer was no.** The C2 doctrine arms could not (item 28(d)); the TTFT instrument could not (item 29(c)). **A power statement written after a null result is indistinguishable from an excuse**, so this one is written first.
+
+**What is being tested.** The order schema is transmitted twice per request — once as prose in the prefix, once structurally as `output_config.format.schema`. The duplication is ~71 % of the cached prefix (item 22) and cutting it saves **12 %** per four-ship-hour, confirmed in v1.8.5. **What the prose copy is worth has never been measured.** The arm removes exactly that block, with structured outputs left on.
+
+**What n=120 per arm can resolve, exactly.** Clopper–Pearson one-sided 95 % lower bounds on acceptance: **120/120 → ≥ 97.53 %**, **119/120 → ≥ 96.11 %**, **118/120 → 94.85 %**, 117/120 → 93.67 %. The gate is ≥ 95 %. Between arms, the resolvable difference is **≈ 2.5 percentage points**.
+
+**So: this run can rule out a quality cost large enough to breach the gate, and it cannot distinguish 100 % from 99 %.** Stated now so that a null cannot later be reported as evidence of no difference — the error item 28(d) exists to record.
+
+**The decision rule, fixed in advance.** ≥ 119/120 with `reject.schema` and `reject.shape` at 0.00 % → the removal is safe to make and C3's saving is available. ≤ 118/120 → not made; a 12 % saving does not buy a gate breach. **Any `schema` or `shape` rejection → not made regardless of count**, because that is the prose copy doing structural work the projection was assumed to cover, and one such rejection is a mechanism rather than a rate.
+
+**And what the run is not.** Acceptance is not quality. A well-formed order that is tactically worse passes Stage A and counts as accepted. Acceptance is what the gate is written in and what the arms can compare; **a semantic difference would be invisible here.**
 
 ### v1.8.12 — 2026-08-05
 
