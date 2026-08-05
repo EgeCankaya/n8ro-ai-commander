@@ -19,6 +19,21 @@ enum class Backend {
 
 [[nodiscard]] const char* toString(Backend backend);
 
+// Upper bound on `claude.maxTokens`. Derived, not chosen (PRD §Corrections item 26).
+//
+// Three ceilings bound a response and none of them is aware of the others: this one, in TOKENS;
+// Stage-A A0's kMaxResponseBodyBytes at 64 KiB, which rejects an over-long body as `range` before
+// the parse; and OrderRecorder's kMaxRecordedBodyBytes at 4 KiB, which truncates the recorded body
+// silently. 65,536 / 8 bytes-per-token — generous by 3-5x against this project's own measured
+// ratios — is the largest ceiling at which a full-length response still cannot trip A0 for length.
+// It is also inside the band a NON-STREAMING request completes in, and this adapter has no
+// streaming path. The API's own maxima are an order of magnitude above; the binding constraint is
+// ours.
+//
+// This is a BOUND, not a recommendation. The default stays 512 because no other value has been
+// measured: the run that found 512 to be Haiku-shaped is right-censored at 512 (item 25).
+inline constexpr int kMaxClaudeMaxTokens = 8192;
+
 // The plugin's full configuration surface (AIC-API-2), held as parsed values rather than as the
 // canonical strings PluginConfigField carries on the wire.
 //
@@ -62,6 +77,10 @@ struct CommanderConfig {
     bool claudeEnabled = false;
     std::string claudeBaseUrl = "https://api.anthropic.com";
     std::string claudeModel = "claude-haiku-4-5";
+    // Model-shaped, like claudeEffort below. 512 is 4.0x Haiku 4.5's measured worst case over 120
+    // orders and 1.02x Sonnet 5's, which truncated 4 of 48 at this value. Truncation arrives as
+    // `parse`/`envelope`, never as a length error. Raising it for a verbose model needs that
+    // model's output distribution measured first. Bounded above by kMaxClaudeMaxTokens.
     int claudeMaxTokens = 512;
     // The NAME of an environment variable, never the value. See ADR-5: the value is read via
     // std::getenv at request time, never persisted, never logged, never returned by getConfigFields.

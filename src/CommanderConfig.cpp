@@ -242,7 +242,9 @@ bool tryParseConfigFields(
             draft.claudeModel = field.value;
         } else if (name == "claude.maxTokens") {
             if (!parseInt(field.value, draft.claudeMaxTokens)) return fail(name, "expected an integer");
-            if (draft.claudeMaxTokens < 1) return fail(name, "must be >= 1");
+            if (draft.claudeMaxTokens < 1 || draft.claudeMaxTokens > kMaxClaudeMaxTokens) {
+                return fail(name, "must be within [1, " + std::to_string(kMaxClaudeMaxTokens) + "]");
+            }
         } else if (name == "claude.apiKeyEnvVar") {
             draft.claudeApiKeyEnvVar = field.value;
         } else if (name == "claude.effort") {
