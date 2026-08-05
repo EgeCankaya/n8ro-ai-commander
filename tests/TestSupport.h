@@ -64,6 +64,26 @@ std::vector<TestFactory>& registry();
 const std::string& releaseRoot();
 void setReleaseRoot(std::string root);
 
+// The REPOSITORY root, derived in main() by walking up from the executable's own path until a
+// directory holding `ai-commander.slnx` is found.
+//
+// It cannot be the working directory and it cannot be N8RO_RELEASE. ci-selfhosted.yml runs this
+// suite as `cd /d "%N8RO_RELEASE%"` followed by an absolute path to the exe, so the CWD during a CI
+// run is the RELEASE TREE, not the checkout - a test resolving "data/doctrine.txt" relative to the
+// working directory would read C:\N8RO\data\ and find something else or nothing at all. And
+// N8RO_RELEASE is repointed at test_artifacts by initializeForTests(), which is why releaseRoot()
+// above exists in the first place.
+//
+// Walking up from argv[0] is the only one of the three that holds under every invocation this
+// project actually uses: the Release build (tests/bin/release/), the AddressSanitizer build
+// (tests/bin/asan/), and a run started from any directory.
+//
+// Empty when the marker was not found, which a test must treat as a FAILURE rather than a skip -
+// see PromptRendererTests.cpp. A guard that quietly does nothing when it cannot find its input is
+// worse than no guard, because the suite still reports green.
+const std::string& repoRoot();
+void setRepoRoot(std::string root);
+
 struct AutoRegister {
     explicit AutoRegister(TestFactory factory) { registry().push_back(factory); }
 };

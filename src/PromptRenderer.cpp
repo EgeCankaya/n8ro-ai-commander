@@ -1,7 +1,11 @@
 #include "PromptRenderer.h"
 
 #include "Order.h"
-#include "OrderSchema.h"
+// OrderSchema.h is deliberately NOT included. It was, until C3 removed the prose rendering of the
+// order schema from the prefix (v1.8.14, and the WHAT IS NOT HERE block in build() below), and
+// nothing in this file has referred to a symbol from it since. `orderJsonSchemaText()` itself stays
+// very much alive - LocalLlmClient sends it as Ollama's `format` document, and the hosted adapter
+// sends a projection of the same schema - it simply is not this file's business any more.
 
 #include <core/json/JsonValue.h>
 
