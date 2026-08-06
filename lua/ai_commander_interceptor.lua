@@ -151,6 +151,26 @@ local function totalRounds(entityId)
     return total
 end
 
+-- The first hardpoint still carrying a round, or nil when the aircraft is winchester. The stock
+-- oppint_red_interceptor.lua additionally picks by range against the profile's envelope; this
+-- takes the simpler rule because Tier 2 supplies no weapon-selection intent and inventing one
+-- here would be the script deciding something AIC-ORD-2 does not give it.
+local function firstLoadedHardpoint(entityId)
+    if weapon == nil or weapon.getWeaponLoadout == nil then
+        return nil
+    end
+    local loadout = weapon.getWeaponLoadout(entityId)
+    if type(loadout) ~= "table" then
+        return nil
+    end
+    for _, row in ipairs(loadout) do
+        if row.hardpointName ~= nil and (row.ammoCount or 0) > 0 then
+            return row.hardpointName
+        end
+    end
+    return nil
+end
+
 -- ---------------------------------------------------------------------------------------------
 -- Obligation 2: execute the published order.
 -- ---------------------------------------------------------------------------------------------
@@ -258,16 +278,27 @@ local function considerFiring(entityId, s, simulationTimeS, targetId, roe)
         end
     end
 
+    -- Fire from a NAMED HARDPOINT, not the two-argument legacy form (AIC-ORD-2, v1.8.22). The
+    -- engine distinguishes the two in its own log -- `hardpoint R77_BVR` against `profile
+    -- Weapon_AAM_...` -- and only the hardpoint form draws down a loadout slot. Fired by profile,
+    -- 66 launches left ammoCount at 6, which made `winchester` unreachable and left Stage-B's
+    -- loadout check with no case to catch. No loaded hardpoint means no shot: an aircraft with
+    -- nothing on the rails must report winchester rather than fire from nowhere.
+    local hardpoint = firstLoadedHardpoint(entityId)
+    if hardpoint == nil then
+        return
+    end
+
     -- The return is CHECKED, not discarded: a refused request must not open an assessment window,
     -- or a weapon that never fires would still look like one pacing its shots.
-    if weapon.requestFire(entityId, targetId) then
+    if weapon.requestFire(entityId, targetId, hardpoint) then
         local assessS = (rangeM or kMissileRangeM * kLaunchRangeFrac) / kMissileAvgSpeedMps
             + kAssessMarginS
         if assessS < kAssessMinS then assessS = kAssessMinS end
         if assessS > kAssessMaxS then assessS = kAssessMaxS end
         s.nextFireTime = simulationTimeS + assessS
-        log(string.format("%s launching at %s (%.0f m, assess %.0f s)",
-            entityId, targetId, rangeM or -1.0, assessS))
+        log(string.format("%s launching %s at %s (%.0f m, assess %.0f s, %d left)",
+            entityId, hardpoint, targetId, rangeM or -1.0, assessS, totalRounds(entityId)))
     end
 end
 
