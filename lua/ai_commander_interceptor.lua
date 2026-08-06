@@ -16,7 +16,8 @@
 --
 -- Posture -> verb mapping (AIC-ORD-2):
 --   ingress -> navigation.requestGoTo(id, lat, lon, alt, speed)
---   engage  -> navigation.requestTrackTarget(id, targetId, speed) + weapon.canFire/requestFire
+--   engage  -> navigation.requestTrackTarget(id, targetId, speed) + weapon.requestFire, spaced by
+--              an assessment window. NOT weapon.canFire -- see considerFiring.
 --   crank   -> navigation.requestGoTo(...) with a SCRIPT-computed offset steer point
 --   defend  -> navigation.requestGoTo(...) with a SCRIPT-computed cold point
 --   hold    -> navigation.requestHoldPosition(id, lat, lon, alt, orbitRadiusM, speed)
@@ -30,11 +31,21 @@ local kLaunchRangeFrac  = 0.8      -- Fire inside 0.8 of kinematic reach, not at
 local kMissileRangeM    = 60000.0
 local kEarthRadiusM     = 6371000.0
 
+-- Launch spacing (AIC-ORD-2, v1.8.21). Assessment window = time of flight + margin, clamped --
+-- the same sizing the shipped oppint_red_interceptor.lua uses, against the same medium-range AAM
+-- archetype (~900 m/s averaged over a BVR shot). Without this the engage posture fires every
+-- tick: the canFire precondition this script used to carry never returned true, so it stood in
+-- for shot spacing that was never written.
+local kMissileAvgSpeedMps = 900.0
+local kAssessMarginS      = 5.0
+local kAssessMinS         = 10.0
+local kAssessMaxS         = 30.0
+
 local state = {}
 
 local function ensureState(entityId)
     if state[entityId] == nil then
-        state[entityId] = { mode = "", enrolled = false, lastSerial = -1 }
+        state[entityId] = { mode = "", enrolled = false, lastSerial = -1, nextFireTime = 0.0 }
     end
     return state[entityId]
 end
@@ -207,28 +218,39 @@ end
 
 -- Launch discipline is the script's, not the model's. The order can say "engage"; only this
 -- decides whether a shot is actually taken, and ROE gates it independently of posture.
-local function considerFiring(entityId, targetId, roe)
+--
+-- `weapon.canFire` is deliberately NOT called (AIC-ORD-2, v1.8.21). It takes the carrier only --
+-- no target -- while being documented "armed, in range, ammo > 0", so its range predicate cannot
+-- be about the contact being shot at, and it was measured returning false for entire runs with a
+-- full rail and a valid weapon component. Used as a precondition it made this whole function
+-- unreachable. The shipped oppint_red_interceptor.lua, whose launch behaviour is the quality bar
+-- this script is measured against, never calls it either.
+local function considerFiring(entityId, s, simulationTimeS, targetId, roe)
     if roe == "weaponsHold" then
         if weapon ~= nil and weapon.requestCeaseFire ~= nil then
             weapon.requestCeaseFire(entityId)
         end
         return
     end
-    if weapon == nil or weapon.canFire == nil or weapon.requestFire == nil then
+    if weapon == nil or weapon.requestFire == nil then
         return
     end
     if targetId == nil or targetId == "" then
         return
     end
-    if not weapon.canFire(entityId) then
+    -- One shot per assessment window. Checked before the geometry so a target that stays in
+    -- range does not re-trigger every tick.
+    if simulationTimeS < (s.nextFireTime or 0.0) then
         return
     end
 
+    local rangeM
     if entityControl ~= nil and entityControl.getPositionGeodetic ~= nil then
         local ownLat, ownLon = entityControl.getPositionGeodetic(entityId)
         local tgtLat, tgtLon = entityControl.getPositionGeodetic(targetId)
         if ownLat ~= nil and tgtLat ~= nil then
-            local _, rangeM = bearingAndDistance(ownLat, ownLon, tgtLat, tgtLon)
+            local _, r = bearingAndDistance(ownLat, ownLon, tgtLat, tgtLon)
+            rangeM = r
             -- Fire inside 0.8 of kinematic reach rather than at the edge of the envelope.
             if rangeM > kMissileRangeM * kLaunchRangeFrac then
                 return
@@ -236,7 +258,17 @@ local function considerFiring(entityId, targetId, roe)
         end
     end
 
-    weapon.requestFire(entityId, targetId)
+    -- The return is CHECKED, not discarded: a refused request must not open an assessment window,
+    -- or a weapon that never fires would still look like one pacing its shots.
+    if weapon.requestFire(entityId, targetId) then
+        local assessS = (rangeM or kMissileRangeM * kLaunchRangeFrac) / kMissileAvgSpeedMps
+            + kAssessMarginS
+        if assessS < kAssessMinS then assessS = kAssessMinS end
+        if assessS > kAssessMaxS then assessS = kAssessMaxS end
+        s.nextFireTime = simulationTimeS + assessS
+        log(string.format("%s launching at %s (%.0f m, assess %.0f s)",
+            entityId, targetId, rangeM or -1.0, assessS))
+    end
 end
 
 function onInit(entityId)
@@ -321,7 +353,7 @@ function onTick(entityId, simulationTimeS, deltaTimeS)
         end
         -- weaponsTight permits fire only against the ORDERED target, which is exactly what is
         -- passed here; weaponsFree would additionally allow the script's own selection.
-        considerFiring(entityId, targetId, roe)
+        considerFiring(entityId, s, simulationTimeS, targetId, roe)
 
     elseif posture == "crank" then
         setMode(s, entityId, "crank", targetId)
