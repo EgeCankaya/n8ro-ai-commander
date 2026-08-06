@@ -620,6 +620,21 @@ predicted; one of those predictions did not survive contact. Each is load-bearin
 
     **(f) And one gate result is now known to have been vacuous.** C1's live smoke records **"Zero fratricide ✅ 0"**. Nothing the commanded aircraft did could have produced a fratricide, because nothing they fired was aimed at an aircraft. It is not a false entry — it is a true one carrying no information, and it should not be cited as evidence that the safety envelope prevented anything.
 
+    **(g) The first uncounfounded pair was then run, and it moves the explanation from the plumbing to the model.** 600 s commander-on / commander-off on `local`, same seed, with the fix in place *(2026-08-06, `20260806T144058Z-local`)*:
+
+    | | Commander-on *(fixed script)* | Commander-off *(stock Tier 1)* |
+    |---|---|---|
+    | Accepted orders | 5 — **4 × `hold`, 1 × `ingress`, zero `engage`** | — |
+    | Red launches at a Blue aircraft | **0** | **4** |
+    | Red detonations on a Blue aircraft | **0** | **2**, both on `BlueF16_01` |
+    | Red losses | both by ~85 s | both by ~85 s |
+
+    **The commanded aircraft did not fire because they were never ordered to engage** — not because they could not. The fix is verified separately: a 150 s run on the same build landed an `engage` and produced `RedSu35_02 launching at BlueF16_01 (22244 m, assess 30 s)`, one launch and one spawn, correctly spaced. **What this pair measures is posture selection**, and it agrees with the H1 marks from the same backend: the local model issued **no `engage` in 600 s** while its two `inappropriate` marks were both `hold` decisions where the reviewer judged action was required. **The commander's disadvantage in this pair is a model property, not a defect** — which is a claim item 37 could not have made before the gate was found, because until then every pair was confounded.
+
+    **What it still does not license.** One run, one model, n=5 accepted orders. **It is not an H1 verdict** — H1's instrument is the reviewer, and a local-model outcome does not speak to whether posture-level intent at a 15–30 s cadence is sound. The hosted arm, which issued five `engage` orders across its run, has **not** been re-paired under the fix and would need a grant.
+
+    **And the `reject.shape` tally moves again:** **1 of 10 (10 %)** this run, `posture 'hold' requires orbitRadiusM > 0` — the same conditional value rule as before. Post-C3 local now stands at **4 of 32 (12.5 %)** against a pre-C3 baseline of 0 of 200. Still carried, still undecided.
+
     **C12 opens** — see the register. Running total unchanged at **≈$2.57 of $5**.
 
 ## Problem statement
@@ -2517,6 +2532,8 @@ Advisory. Gaps found while composing this PRD, not blockers.
 **H1's review was performed** — 14 of 27 decisions marked, **hosted 9/10 appropriate, local 1/4**, recorded in §Key hypotheses with its three limits. **No verdict is written**: the reviewer's overall call is H1's instrument. **C11 stays open on one sentence.**
 
 **No outcome-based reading of the H1 pairs is admissible** — the commanded entities never shot at anyone. The posture-appropriateness signal H1 specifies is unaffected. C1's **"Zero fratricide ✅ 0"** is true and carries no information.
+
+**The first unconfounded pair was then run** (600 s, `local`, fix in place): the commanded aircraft took **zero launches at a Blue aircraft against the control's four, and zero hits against two** — **because the model issued no `engage` order in 600 s**, not because the fire path failed. **The disadvantage is now a model property rather than a defect**, a claim item 37 could not have made while every pair was confounded. `reject.shape` post-C3 local moves to **4 of 32 (12.5 %)**.
 
 **C12 opens** — `getWeaponLoadout` reported 6 rounds unchanged across 66 launches, so `winchester` is unreachable and Stage-B's loadout check has never had a true case. Running total unchanged at **≈$2.57 of $5**.
 
