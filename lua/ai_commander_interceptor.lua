@@ -249,7 +249,8 @@ local function considerFiring(entityId, s, simulationTimeS, targetId, roe)
         local ownLat, ownLon = entityControl.getPositionGeodetic(entityId)
         local tgtLat, tgtLon = entityControl.getPositionGeodetic(targetId)
         if ownLat ~= nil and tgtLat ~= nil then
-            _, rangeM = bearingAndDistance(ownLat, ownLon, tgtLat, tgtLon)
+            local _, r = bearingAndDistance(ownLat, ownLon, tgtLat, tgtLon)
+            rangeM = r
             -- Fire inside 0.8 of kinematic reach rather than at the edge of the envelope.
             if rangeM > kMissileRangeM * kLaunchRangeFrac then
                 return
