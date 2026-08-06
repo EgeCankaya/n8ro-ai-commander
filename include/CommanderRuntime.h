@@ -55,6 +55,12 @@ struct CommanderStats {
     std::int64_t timeouts = 0;
     std::int64_t droppedSnapshots = 0;
     std::int64_t lastLatencyMs = 0;
+    // Orders whose `reason` Stage A shortened rather than rejecting the order for length (C16,
+    // v1.8.25). Deliberately NOT in rejectByReason: nothing was rejected, and folding it in would
+    // make the acceptance rate read as a rejection rate. It is a separate line because it answers a
+    // separate question - "is the configured model outgrowing the cap?" - and because a truncation
+    // nobody counts is the silent shortening §Corrections item 26 records as a defect.
+    std::int64_t reasonTruncated = 0;
     std::map<std::string, std::int64_t> rejectByReason;
 };
 
@@ -163,6 +169,7 @@ public:
     void countRejection(RejectReason reason);
     void countAcceptance(std::int64_t latencyMs);
     void countRequest();
+    void countReasonTruncation();
     void countDroppedSnapshot() { ++stats_.droppedSnapshots; }
 
     // Clears all per-entity state. Called on scenario stop.

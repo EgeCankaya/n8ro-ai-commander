@@ -102,7 +102,8 @@ JsonValue buildSharedProperties() {
 
     (void)properties.set("reason", makeString(kMinReasonChars, kMaxReasonChars,
         "One sentence of rationale. Advisory only - it is recorded for humans reading the order "
-        "log and is never parsed."));
+        "log and is never parsed. An over-long reason is shortened rather than refused, so brevity "
+        "costs nothing and length costs nothing but tokens."));
 
     return properties;
 }

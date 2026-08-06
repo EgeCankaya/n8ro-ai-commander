@@ -458,10 +458,25 @@ StageAOutcome validateStageA(
         return reject(RejectReason::Range, "an entity id exceeds "
             + std::to_string(kMaxEntityIdChars) + " characters");
     }
-    if (order.reason.size() < kMinReasonChars || order.reason.size() > kMaxReasonChars) {
-        return reject(RejectReason::Range, "'reason' must be 1-"
-            + std::to_string(kMaxReasonChars) + " characters, got "
+    // `reason` is bounded ASYMMETRICALLY: too short rejects, too long truncates (AIC-ORD-1,
+    // PRD v1.8.25, closing C16). The reasoning is in OrderSchema.h next to the two constants;
+    // what matters here is the ORDER of the two branches. The emptiness check runs first, so a
+    // zero-length reason can never be mistaken for something that was truncated to nothing.
+    if (order.reason.size() < kMinReasonChars) {
+        return reject(RejectReason::Range, "'reason' must be at least "
+            + std::to_string(kMinReasonChars) + " character, got "
             + std::to_string(order.reason.size()));
+    }
+    bool reasonTruncated = false;
+    if (order.reason.size() > kMaxReasonChars) {
+        // Marked, and marked INSIDE the cap - the marker replaces the last characters rather than
+        // being appended past them, so the stored value satisfies the bound it was measured
+        // against. A shortened record that does not say it was shortened is the defect
+        // §Corrections item 26 already names; this must not add a second instance of it.
+        const std::size_t markerLength = std::char_traits<char>::length(kReasonTruncationMarker);
+        order.reason.resize(kMaxReasonChars - markerLength);
+        order.reason += kReasonTruncationMarker;
+        reasonTruncated = true;
     }
     if (!isSanitizedText(order.entityId) || !isSanitizedText(order.targetEntityId)) {
         return reject(RejectReason::Range, "an entity id carries characters outside the permitted set");
@@ -498,6 +513,13 @@ StageAOutcome validateStageA(
         if (!normalized.has("orbitRadiusM")) {
             (void)normalized.setDouble("orbitRadiusM", 0.0);
         }
+        // The TRUNCATED reason, not the one the model sent - and this line is load-bearing rather
+        // than tidy. The branch document bounds `reason` by maxLength, so validating the original
+        // here would fail every over-long order as `schema` and give back exactly the whole-order
+        // loss C16 was about, one check later and under a less informative reason code. Stage A
+        // validates the order it is going to ACCEPT, which is the same asymmetry the two lines
+        // above already rest on.
+        (void)normalized.setString("reason", order.reason);
 
         std::string schemaError;
         if (!normalized.validateAgainstSchema(orderSchemaBranch(order.posture), &schemaError)) {
@@ -509,6 +531,7 @@ StageAOutcome validateStageA(
     StageAOutcome outcome;
     outcome.accepted = true;
     outcome.reason = RejectReason::None;
+    outcome.reasonTruncated = reasonTruncated;
     outcome.order = std::move(order);
     return outcome;
 }

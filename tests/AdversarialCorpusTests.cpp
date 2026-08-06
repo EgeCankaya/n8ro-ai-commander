@@ -273,10 +273,11 @@ AIC_TEST(AdversarialCorpusStageA) {
     cases.push_back({"empty reason",
         R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"engage","targetEntityId":"BlueF18_02","cruiseSpeedMps":300.0,"orbitRadiusM":0.0,"roe":"weaponsFree","reason":""})",
         RejectReason::Range});
-    cases.push_back({"over-long reason",
-        R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"engage","targetEntityId":"BlueF18_02","cruiseSpeedMps":300.0,"orbitRadiusM":0.0,"roe":"weaponsFree","reason":")"
-            + std::string(kMaxReasonChars + 1, 'a') + R"("})",
-        RejectReason::Range});
+    // An OVER-LONG reason is deliberately absent from this corpus (v1.8.25, C16). It is no longer a
+    // rejection: `reason` carries no control authority, so Stage A truncates it and accepts the
+    // order rather than discarding the posture, target and waypoint alongside it. The acceptance
+    // path is asserted in ReasonOverTheCapIsTruncatedAndTheOrderSurvives below, and this comment
+    // stands in the corpus so the case reads as MOVED rather than as quietly dropped.
 
     // -- injection through the free-text field -------------------------------------------------
     cases.push_back({"reason carrying a newline and a forged log prefix",
@@ -351,6 +352,102 @@ AIC_TEST(AdversarialCorpusStageA) {
     AIC_EXPECT_TRUE(cases.size() >= 40,
                     "the Stage-A corpus must carry at least 40 payloads, has "
                         + std::to_string(cases.size()));
+    return true;
+}
+
+// C16 (PRD v1.8.25, AIC-ORD-1). An over-long `reason` is TRUNCATED and the order ACCEPTED.
+//
+// WHAT THIS ASSERTS AND WHY IT IS NOT A LENGTH TEST. The property C16 is about is that the order
+// SURVIVES - a posture, a target and a cruise speed are not thrown away over a field the system
+// never reads. Asserting only `reason.size() == kMaxReasonChars` would pass on an implementation
+// that truncated the string and then rejected the order anyway, which is the failure mode worth
+// guarding. So every authority-carrying field is checked to have come through intact.
+AIC_TEST(ReasonOverTheCapIsTruncatedAndTheOrderSurvives) {
+    const std::string overLong(kMaxReasonChars + 64, 'a');
+    const std::string body =
+        R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"engage",)"
+        R"("targetEntityId":"BlueF18_02","cruiseSpeedMps":300.0,"orbitRadiusM":0.0,)"
+        R"("roe":"weaponsFree","reason":")" + overLong + R"("})";
+
+    const StageAOutcome outcome = validateStageA(body, "RedSu35_01");
+
+    AIC_EXPECT_TRUE(outcome.accepted,
+                    "an over-long reason must not reject the order; it carries no control authority "
+                    "and rejecting it costs the posture, target and speed with it. Reason code: "
+                        + std::string(toString(outcome.reason)) + " - " + outcome.detail);
+    AIC_EXPECT_TRUE(outcome.reasonTruncated, "the truncation must be reported, not silent");
+    AIC_EXPECT_EQ(outcome.order.reason.size(), kMaxReasonChars,
+                  "the stored reason must sit exactly at the cap, marker included");
+
+    // The marker is INSIDE the cap, not appended past it.
+    const std::string marker = kReasonTruncationMarker;
+    AIC_EXPECT_TRUE(outcome.order.reason.size() >= marker.size()
+                        && outcome.order.reason.compare(
+                               outcome.order.reason.size() - marker.size(), marker.size(), marker) == 0,
+                    "a truncated reason must end in the truncation marker - a shortened record that "
+                    "does not say it was shortened is the defect Corrections item 26 names");
+
+    // The fields that actually command the aircraft came through untouched. This is the assertion
+    // C16 exists for.
+    AIC_EXPECT_TRUE(outcome.order.posture == Posture::Engage, "posture survived the truncation");
+    AIC_EXPECT_EQ(outcome.order.targetEntityId, std::string("BlueF18_02"), "target survived");
+    AIC_EXPECT_TRUE(outcome.order.roe == Roe::WeaponsFree, "roe survived");
+    AIC_EXPECT_TRUE(outcome.order.cruiseSpeedMps == 300.0, "cruise speed survived");
+    return true;
+}
+
+// The other half of C16's asymmetry, asserted separately because it is the half a "just stop
+// rejecting on reason" implementation gets wrong. An EMPTY reason still rejects: it says the model
+// did not answer a required field, and unlike verbosity that does not vary by which model is
+// configured. It is covered by the corpus above as well; it is restated here so the two halves of
+// the rule sit next to each other and neither can be changed without the other being seen.
+AIC_TEST(EmptyReasonStillRejectsWhileAnOverLongOneDoesNot) {
+    const std::string empty =
+        R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"engage","targetEntityId":"BlueF18_02",)"
+        R"("cruiseSpeedMps":300.0,"orbitRadiusM":0.0,"roe":"weaponsFree","reason":""})";
+    const StageAOutcome outcome = validateStageA(empty, "RedSu35_01");
+    AIC_EXPECT_TRUE(!outcome.accepted, "an empty reason must still reject");
+    AIC_EXPECT_TRUE(outcome.reason == RejectReason::Range, "and it rejects as `range`");
+    AIC_EXPECT_TRUE(!outcome.reasonTruncated, "a rejection is not a truncation");
+    return true;
+}
+
+// A reason exactly AT the cap is left alone. The boundary is the off-by-one this fix could
+// plausibly introduce, and it would present as every long-but-legal rationale silently acquiring an
+// ellipsis it did not earn.
+AIC_TEST(ReasonExactlyAtTheCapIsNotTruncated) {
+    const std::string atCap(kMaxReasonChars, 'a');
+    const std::string body =
+        R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"engage",)"
+        R"("targetEntityId":"BlueF18_02","cruiseSpeedMps":300.0,"orbitRadiusM":0.0,)"
+        R"("roe":"weaponsFree","reason":")" + atCap + R"("})";
+
+    const StageAOutcome outcome = validateStageA(body, "RedSu35_01");
+    AIC_EXPECT_TRUE(outcome.accepted, "a reason exactly at the cap is legal");
+    AIC_EXPECT_TRUE(!outcome.reasonTruncated, "and must not be reported as truncated");
+    AIC_EXPECT_EQ(outcome.order.reason, atCap, "and must come through byte-identical");
+    return true;
+}
+
+// C16's regression guard against the check that would have quietly undone it. Stage A's A4b
+// structural backstop validates the order against the posture's schema branch, and that branch
+// bounds `reason` by maxLength - so validating the ORIGINAL body there would fail every over-long
+// order as `schema` and give back the whole-order loss C16 removed, one check later and under a
+// less informative reason code. This asserts the backstop sees the truncated value.
+AIC_TEST(TruncatedReasonSatisfiesTheSchemaBackstop) {
+    const std::string overLong(kMaxReasonChars * 3, 'a');
+    const std::string body =
+        R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"hold",)"
+        R"("waypoint":{"latitudeDeg":13.5,"longitudeDeg":144.8,"altitudeHaeM":9000.0},)"
+        R"("cruiseSpeedMps":220.0,"orbitRadiusM":8000.0,"roe":"weaponsTight","reason":")"
+            + overLong + R"("})";
+
+    const StageAOutcome outcome = validateStageA(body, "RedSu35_01");
+    AIC_EXPECT_TRUE(outcome.accepted,
+                    "the schema backstop must validate the TRUNCATED reason, not the original - "
+                    "otherwise C16's fix is undone by a `schema` rejection. Got: "
+                        + std::string(toString(outcome.reason)) + " - " + outcome.detail);
+    AIC_EXPECT_TRUE(outcome.reasonTruncated, "and the truncation is still reported");
     return true;
 }
 

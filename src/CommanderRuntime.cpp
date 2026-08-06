@@ -226,6 +226,9 @@ CandidateOrder CommanderRuntime::runWorkerCall(
     outAccepted = outcome.accepted;
     outReason = outcome.reason;
     outDetail = outcome.detail;
+    // Set on the candidate directly rather than through an out-parameter, because unlike the
+    // verdict it is not consulted by the overload below - it only has to survive the slot.
+    candidate.stageAReasonTruncated = outcome.reasonTruncated;
     if (outcome.accepted) {
         candidate.order = outcome.order;
     }
@@ -264,6 +267,10 @@ void CommanderRuntime::countAcceptance(std::int64_t latencyMs) {
     stats_.lastLatencyMs = latencyMs;
 }
 
+void CommanderRuntime::countReasonTruncation() {
+    ++stats_.reasonTruncated;
+}
+
 void CommanderRuntime::countRejection(RejectReason reason) {
     if (reason == RejectReason::None) {
         return;
@@ -299,6 +306,9 @@ std::string CommanderRuntime::statsJson() const {
     (void)root.setInt64("timeouts", stats_.timeouts);
     (void)root.setInt64("droppedSnapshots", stats_.droppedSnapshots);
     (void)root.setInt64("lastLatencyMs", stats_.lastLatencyMs);
+    // Reported next to the totals rather than inside rejectByReason: it is not a rejection, and a
+    // reader scanning that map for what went wrong must not find it there (C16, v1.8.25).
+    (void)root.setInt64("reasonTruncated", stats_.reasonTruncated);
 
     n8ro::core::JsonValue byReason = n8ro::core::JsonValue::object();
     for (const auto& entry : stats_.rejectByReason) {

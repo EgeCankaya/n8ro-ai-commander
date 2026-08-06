@@ -46,6 +46,26 @@ struct OrderSnapshot {
     double velNMps = 0.0;         // m/s North (runtime column velocityNed.x).
     double velEMps = 0.0;         // m/s East  (runtime column velocityNed.y).
     double velDMps = 0.0;         // m/s Down  (runtime column velocityNed.z).
+
+    // Ground speed as a MAGNITUDE, m/s: ||velocityNed|| over the three signed components above
+    // (PRD v1.8.25, §Exactly what is transmitted, §Corrections item 41(e), closing C15).
+    //
+    // DERIVED, NOT READ, and that is the decision rather than an implementation detail.
+    // componentTransform DOES carry a `speedMps` schema leaf, and reading it would be the obvious
+    // implementation and the wrong one: schema-reference.json documents it as "Initial ground speed
+    // at t=0", on a component whose own description says runtime pose and motion are "thereafter
+    // owned by the physics pass, not by this datablock". Reading it would put a SPAWN-TIME CONSTANT
+    // in the snapshot under a name that reads as current. TransformRuntimeColumns.h declares no
+    // runtime speed or heading column, so velocityNed.* is the only live motion state there is and
+    // a live ground speed must be computed from it.
+    //
+    // WHY IT EXISTS AT ALL. Its absence was C15. The model is asked for a cruise speed and was given
+    // three SIGNED components and no scalar; in four of four archived runs it copied velEMps -
+    // correct in magnitude, wrong in sign - and the whole order was rejected for it. It transmits
+    // nothing new: it is a function of three fields already on the allowlist, so AIC-SEC-2's
+    // boundary does not move.
+    double speedMps = 0.0;
+
     std::string team;
 
     // What Tier 1 reported for this cadence window. Rendered in a deterministic order, not in Lua
@@ -62,5 +82,13 @@ struct OrderSnapshot {
 // ascending by hardpointName. Called once when the snapshot is taken, so every downstream consumer
 // — prompt renderer, snapshot hash, order record — sees the same bytes for the same picture.
 void canonicalizeSnapshot(OrderSnapshot& snapshot);
+
+// Ground speed as a magnitude: ||(velN, velE, velD)||, m/s (PRD v1.8.25, C15).
+//
+// A free function rather than three lines inside buildSnapshot, so the definition the plugin ships
+// is the definition a test can call. buildSnapshot needs an IEntityManager and is therefore not
+// reachable from the offline suite; a test that re-implemented the norm beside it would assert its
+// own arithmetic and pin nothing.
+[[nodiscard]] double groundSpeedMps(double velNMps, double velEMps, double velDMps);
 
 } // namespace arkheon::aicommander

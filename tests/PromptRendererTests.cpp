@@ -28,16 +28,32 @@ namespace {
 // count it stands in for was measured once, under the fifth grant, and is recorded here rather than
 // re-derived.
 //
-//   prefix as shipped ........... 8,750 bytes   (§Corrections item 31(a), arm B, 120 orders)
+//   prefix as shipped ........... 9,642 bytes   (v1.8.25; was 8,750 - §Corrections item 31(a))
 //   bytes per token ............. 3.955         (measured on THIS corpus, v1.8.2 - not a constant)
-//   prefix text alone ........... ≈2,212 tokens
-//   what actually caches ........ 5,118 tokens  (the adapter ALSO sends the schema structurally in
+//   prefix text alone ........... ≈2,438 tokens (was ≈2,212)
+//   what actually caches ........ ≈5,344 tokens (the adapter ALSO sends the schema structurally in
 //                                                output_config.format.schema, and it caches too -
-//                                                §Corrections item 22; measured in-engine, item 32(b))
+//                                                §Corrections item 22; the 5,118 figure was measured
+//                                                in-engine at item 32(b) and is carried forward here
+//                                                with the +226-token prefix delta added to it)
 //   Haiku 4.5 cache minimum ..... 4,096 tokens
-//   margin ...................... 1,022 tokens (24.9 %) ≈ 4,042 bytes of prefix
+//   margin ...................... ≈1,248 tokens (30.5 %) ≈ 4,936 bytes of prefix
 //
-// So roughly 4,000 bytes of prefix can still be removed before the cache stops forming, and this
+// WHY THESE NUMBERS MOVED (v1.8.25, C15). The doctrine's CRUISE SPEED block was rewritten: it now
+// names own.speedMps as the value to start from, states that a cruise speed is a magnitude and that
+// velN/velE/velD are signed components rather than speeds, and it stops claiming that the aircraft
+// "will clamp anything outside its own envelope" - nothing clamps, Stage A and Stage B reject.
+// Doctrine 6,932 -> 7,824 bytes; the scaffold is untouched.
+//
+// The direction matters and is the reason this change is safe to make without a new arm: the prefix
+// GREW, so the cached block moves FURTHER ABOVE the 4,096 minimum, not toward it. The hazard this
+// test guards is a prefix shrinking under the minimum silently; a growth cannot trigger it. What a
+// growth does cost is cache-write bytes, which are billed once per run at 1.25x and are immaterial
+// against the per-order read. The ≈5,344 figure is DERIVED, not measured - no request was made for
+// it - and it is marked that way because the 5,118 it is derived from was measured and the
+// difference between those two states is exactly what §Corrections exists to keep visible.
+//
+// So roughly 4,900 bytes of prefix can still be removed before the cache stops forming, and this
 // test is what makes crossing that boundary a deliberate act rather than an editorial accident.
 // PRD §Corrections item 22 told an editor "a page of doctrine can be deleted without consequence";
 // item 31(e) records that this stopped being true when C3 spent the margin. A reader of the doctrine
@@ -54,8 +70,8 @@ namespace {
 // UPDATING THESE NUMBERS is a deliberate act with a precondition: the prefix that ships must be the
 // prefix that was measured. If the prefix changes on purpose, the cache figures above are stale
 // until a new arm measures them, and §Cost model's rows are computed from them.
-constexpr std::size_t kMeasuredPrefixBytes = 8750;
-constexpr std::size_t kShippedDoctrineBytes = 6932;
+constexpr std::size_t kMeasuredPrefixBytes = 9642;
+constexpr std::size_t kShippedDoctrineBytes = 7824;
 
 // Everything PromptRenderer::build contributes that is not the doctrine text: the system prompt, the
 // posture/ROE vocabulary, the DOCTRINE: label, the cadence paragraph, and the newlines between them.
@@ -68,10 +84,10 @@ constexpr std::size_t kPrefixScaffoldBytes = kMeasuredPrefixBytes - kShippedDoct
 // (the byte count), and someone reading a red test at speed will otherwise reach for the wrong one.
 const char* kCacheMinimumArithmetic =
     "\n    The prefix is cached on the hosted path and Haiku 4.5 will not cache a block under"
-    "\n    4,096 tokens. What caches is 5,118 tokens - the prefix text (8,750 B / 3.955 B per"
-    "\n    token = ~2,212) PLUS the structural schema copy the adapter sends in"
+    "\n    4,096 tokens. What caches is ~5,344 tokens - the prefix text (9,642 B / 3.955 B per"
+    "\n    token = ~2,438) PLUS the structural schema copy the adapter sends in"
     "\n    output_config.format.schema (PRD Corrections item 22). The margin over the minimum is"
-    "\n    1,022 tokens (24.9 percent), i.e. about 4,042 bytes of prefix. Below it the cache"
+    "\n    ~1,248 tokens (30.5 percent), i.e. about 4,936 bytes of prefix. Below it the cache"
     "\n    silently stops forming and the cost per order goes from $0.001220 to ~$0.005829 - no"
     "\n    error, no counter, nothing red. If you MEANT to change the prefix, update the constants"
     "\n    in this file and say so in the PRD; the cost rows in Cost model are computed from them.";
@@ -281,6 +297,67 @@ AIC_TEST(PromptTransmitsOnlyAllowlistedFields) {
         AIC_EXPECT_TRUE(suffix.find(needle) == std::string::npos,
                         std::string("field '") + needle + "' must NOT appear in the prompt suffix");
     }
+    return true;
+}
+
+// C15 (PRD v1.8.25, §Corrections item 41). The suffix must carry a SCALAR own-ship speed.
+//
+// THE REGRESSION THIS PINS, stated concretely because the abstract version reads as pedantry. Both
+// Su-35s in the shipped scenario spawn at heading 270 and 220 m/s - due west - so their NED velocity
+// at spawn is exactly velN 0, velE -220, velD 0. In four of four archived 14B runs the model emitted
+// `cruiseSpeedMps: -220.0` and lost the whole order to a `range` rejection: it wanted the aircraft's
+// speed, the suffix did not have one, and the nearest number to hand was a SIGNED component that
+// happened to carry the right magnitude.
+//
+// So this asserts the speed is present, is the magnitude, and is positive in exactly the geometry
+// that produced the failure. A test that only checked "speedMps appears" would pass on an
+// implementation that assigned it from velE.
+AIC_TEST(SuffixCarriesOwnSpeedAsAPositiveMagnitude) {
+    const PromptRenderer renderer = builtRenderer();
+
+    // The C15 geometry: due west, 220 m/s, level.
+    OrderSnapshot snapshot = sentinelSnapshot();
+    snapshot.headingDeg = 270.0;
+    snapshot.velNMps = 0.0;
+    snapshot.velEMps = -220.0;
+    snapshot.velDMps = 0.0;
+    snapshot.speedMps = 220.0;
+
+    const std::string suffix = renderer.renderSuffix(snapshot);
+
+    AIC_EXPECT_TRUE(suffix.find("\"speedMps\"") != std::string::npos,
+                    "the suffix must carry a scalar own-ship speed - its absence WAS C15");
+    AIC_EXPECT_TRUE(suffix.find("\"speedMps\":220") != std::string::npos,
+                    "own speed must be rendered as the positive magnitude, not as a velocity "
+                    "component: the suffix was " + suffix);
+    // The signed components stay - `defend` and the geometry reasoning need them. What must not
+    // happen is the scalar going missing again.
+    AIC_EXPECT_TRUE(suffix.find("\"velE\":-220") != std::string::npos,
+                    "the signed components are still transmitted; the scalar is an addition, not a "
+                    "replacement");
+    return true;
+}
+
+// The scalar must be the NORM of the three components — not any one of them, and not their sum.
+//
+// This calls the SHIPPED function, which is why groundSpeedMps exists as a free function rather than
+// as three lines inside buildSnapshot: buildSnapshot needs an IEntityManager and cannot be reached
+// from the offline suite, so a test that re-derived the norm beside it would assert its own
+// arithmetic and pin nothing.
+AIC_TEST(OwnSpeedIsTheNormOfTheVelocityComponents) {
+    // 3-4-12-13 is a Pythagorean quadruple, so the expected value is exact in binary floating point
+    // and this assertion needs no tolerance.
+    AIC_EXPECT_TRUE(groundSpeedMps(3.0, 4.0, 12.0) == 13.0,
+                    "own speed must be ||velocityNed||");
+
+    // The C15 case itself: a single negative component must produce a POSITIVE speed. An
+    // implementation that copied velE, or that summed the components, fails here and passes the
+    // quadruple above only by coincidence.
+    AIC_EXPECT_TRUE(groundSpeedMps(0.0, -220.0, 0.0) == 220.0,
+                    "a due-west aircraft is making 220 m/s, not -220");
+
+    // Stationary is a legal state and must not produce anything but zero.
+    AIC_EXPECT_TRUE(groundSpeedMps(0.0, 0.0, 0.0) == 0.0, "a stopped entity reports zero speed");
     return true;
 }
 

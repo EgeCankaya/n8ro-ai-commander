@@ -171,6 +171,26 @@ if ($hadCfg) {
     Write-Host "  pre-existing ai-commander.cfg backed up to $cfgBackup"
 }
 
+# The doctrine is release-tree state this script is responsible for too, and it is backed up on the
+# same terms as the mission script and the config rather than merely seeded-if-absent.
+#
+# WHY THIS CHANGED (v1.8.25, C15). Both this script and the .vcxproj post-build step used to copy
+# data/doctrine.txt ONLY when it was absent, on the reasoning that an operator's own doctrine should
+# not be overwritten. The consequence is that a doctrine EDIT never reached the release tree: C15's
+# fix rewrote the CRUISE SPEED block from 6,932 to 7,824 bytes, the unit suite pinned the new prefix,
+# and a live run would still have sent the old one. The measurement and the artifact would have
+# disagreed by 892 bytes with nothing red - which is the same class of error as the one-byte prefix
+# divergence PRD §Corrections item 31(f) records catching by hand, three orders of magnitude larger
+# and inside the run that was supposed to be the evidence.
+#
+# So: back up whatever is there, install the repository's copy, and put the original back in the
+# finally. An operator's doctrine survives the run; the run measures what this repository ships.
+$doctrineBackup = Join-Path $workDir "doctrine-backup-$stamp.txt"
+$hadDoctrine    = Test-Path $doctrineDst
+if ($hadDoctrine) {
+    Copy-Item $doctrineDst $doctrineBackup -Force
+    Write-Host "  pre-existing doctrine.txt backed up to $doctrineBackup"
+}
 $seededDoctrine = $false
 
 try {
@@ -180,11 +200,14 @@ try {
     Assert-That ((Get-Item $missionPath).Length -eq (Get-Item $scriptSrc).Length) `
         "commander-aware Tier-1 script swapped in for oppint_red_interceptor.lua"
 
-    if (-not (Test-Path $doctrineDst)) {
-        Copy-Item $doctrineSrc $doctrineDst -Force
-        $seededDoctrine = $true
-    }
+    if (-not $hadDoctrine) { $seededDoctrine = $true }
+    Copy-Item $doctrineSrc $doctrineDst -Force
     Assert-That (Test-Path $doctrineDst) "doctrine present at data/doctrine.txt (prompt.doctrinePath default)"
+    # Asserted by SIZE, not merely by presence. "A doctrine file exists" was the old check and it is
+    # what let a stale block through; what the run needs to be true is that the block it sends is the
+    # block this repository ships and the unit suite pins.
+    Assert-That ((Get-Item $doctrineDst).Length -eq (Get-Item $doctrineSrc).Length) `
+        "deployed doctrine matches the repository's byte-for-byte (C15: a stale block would make the run measure the wrong prompt)"
 
     function Invoke-Scenario {
         param([string]$Name, [int]$Seconds, [string]$Tag)
@@ -425,7 +448,14 @@ finally {
         Write-Host "  ai-commander.cfg removed; no commander config left in the release tree"
     }
 
-    if ($seededDoctrine -and (Test-Path $doctrineDst)) {
+    if ($hadDoctrine -and (Test-Path $doctrineBackup)) {
+        # The run installed this repository's doctrine over whatever was there; put the original
+        # back. Restoring is now the normal path rather than the exceptional one, because the run
+        # OVERWRITES rather than seeds (see the backup block above).
+        Copy-Item $doctrineBackup $doctrineDst -Force
+        Write-Host "  pre-existing doctrine.txt restored"
+    }
+    elseif ($seededDoctrine -and (Test-Path $doctrineDst)) {
         Remove-Item $doctrineDst -Force; Write-Host "  removed the seeded doctrine"
     }
 

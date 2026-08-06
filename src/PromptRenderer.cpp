@@ -124,6 +124,10 @@ std::string PromptRenderer::renderSuffix(const OrderSnapshot& snapshot) const {
     (void)own.setDouble("longitudeDeg", snapshot.longitudeDeg);
     (void)own.setDouble("altitudeHaeM", snapshot.altitudeHaeM);
     (void)own.setDouble("headingDeg", snapshot.headingDeg);
+    // Emitted BEFORE the three signed components, deliberately. The order a JSON object is written
+    // in is not semantics, but it is what a reader scans, and C15 was a model reaching past the
+    // field it wanted because that field was not there. Now it is there, and it is there first.
+    (void)own.setDouble("speedMps", snapshot.speedMps);
     (void)own.setDouble("velN", snapshot.velNMps);
     (void)own.setDouble("velE", snapshot.velEMps);
     (void)own.setDouble("velD", snapshot.velDMps);

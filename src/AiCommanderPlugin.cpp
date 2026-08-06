@@ -469,6 +469,10 @@ bool AiCommanderPlugin::buildSnapshot(
     out.velNMps = *velN;
     out.velEMps = *velE;
     out.velDMps = *velD;
+    // Derived here, on the simulation thread, alongside the columns it is computed from - so the
+    // prompt renderer receives a value rather than a formula and there is one definition of what
+    // "own speed" means. See Snapshot.h for why this is not read from componentTransform/speedMps.
+    out.speedMps = groundSpeedMps(*velN, *velE, *velD);
     out.team = entity->getTeam();
     return true;
 }
@@ -518,6 +522,14 @@ void AiCommanderPlugin::drainCompletedOrders(double simTimeS, std::int64_t frame
             if (warning.has_value()) {
                 N8RO_LOG_WARNING(*warning, kLogCategory);
             }
+        }
+
+        // Counted BEFORE the verdict branch below, so a truncation is recorded even when a later
+        // Stage-A check rejects the order anyway. The question this counter answers - is the
+        // configured model outgrowing the cap? - does not depend on whether that particular order
+        // survived (C16, v1.8.25).
+        if (candidate->stageAReasonTruncated) {
+            runtime_.countReasonTruncation();
         }
 
         // -- Stage A verdict, acted on here because the worker could not ---------------------------

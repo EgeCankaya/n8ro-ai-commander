@@ -21,6 +21,12 @@ struct StageAOutcome {
     RejectReason reason = RejectReason::None;
     std::string detail;   // Human-readable, written to the order record alongside the reason.
     Order order;
+
+    // True when `order.reason` was shortened to kMaxReasonChars rather than the order being
+    // rejected for length (AIC-ORD-1, PRD v1.8.25, C16). It is NOT a rejection and does not appear
+    // in rejectByReason - it rides out to the simulation thread only so the event can be counted,
+    // because a truncation nobody counts is the silent shortening §Corrections item 26 is about.
+    bool reasonTruncated = false;
 };
 
 // Stage A — syntactic validation, worker thread, **no SDK access** (AIC-VAL-1).
