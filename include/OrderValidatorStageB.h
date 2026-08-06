@@ -20,6 +20,14 @@ namespace arkheon::aicommander {
 // Every method here is called on the simulation thread only. Nothing in this interface may be
 // invoked from a worker: IEntityManager is single-thread-only, and that constraint is the whole
 // reason validation is split in two.
+// SISO-REF-010 entity kinds this validator names. Derived from the shipped catalog at
+// data/resources/taxonomy/siso-ref-010-entity-types.json, not from memory (Tenet 5).
+inline constexpr std::int64_t kEntityKindMunition = 2;
+
+// Returned by entityKindOf when the entity is unknown or carries no entityType. Negative so it
+// cannot collide with a real SISO kind, all of which are non-negative.
+inline constexpr std::int64_t kUnknownEntityKind = -1;
+
 class StageBWorldView {
 public:
     virtual ~StageBWorldView() = default;
@@ -29,6 +37,13 @@ public:
 
     // B4. IEntity::getTeam(). Empty when the entity is unknown.
     [[nodiscard]] virtual std::string teamOf(const std::string& entityId) const = 0;
+
+    // B9. IEntity::getEntityType()->kind in production -- the SISO-REF-010 entity kind, whose
+    // enumeration ships at data/resources/taxonomy/siso-ref-010-entity-types.json (1 Platform,
+    // 2 Munition, ...). Returns kUnknownEntityKind when the entity is unknown OR carries no
+    // entityType at all, and B9 treats that as a pass: refusing every target in a scenario whose
+    // profiles omit the field would turn a safety check into an outage.
+    [[nodiscard]] virtual std::int64_t entityKindOf(const std::string& entityId) const = 0;
 
     // B5. The commanded entity's current geodetic position, from componentTransform's authored
     // schema leaves. False when unavailable — in which case the geofence cannot be evaluated and

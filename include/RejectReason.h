@@ -37,6 +37,12 @@ enum class RejectReason {
     // asymmetry with Track: an EMPTY reported loadout does not produce this reason, because
     // "Tier 1 reported nothing" is not "Tier 1 reported nothing left" (AIC-VAL-1, v1.7.3).
     Loadout,
+    // B9. engage/crank ordered against a target whose SISO-REF-010 entity kind is 2 (Munition).
+    // Note the asymmetry with Fratricide: an UNKNOWN kind does not produce this reason. B4 refuses
+    // an unknown team because that makes the shot more dangerous; an unknown kind leaves it merely
+    // unclassified, and refusing it would take every scenario whose profiles omit `entityType`
+    // offline (AIC-VAL-1, v1.8.23).
+    TargetClass,
 };
 
 // Stable lowercase identifiers. These are a wire contract, not a display string: they appear in

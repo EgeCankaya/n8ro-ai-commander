@@ -36,6 +36,7 @@ public:
         const auto it = teams.find(id);
         return it == teams.end() ? std::string() : it->second;
     }
+    std::int64_t entityKindOf(const std::string&) const override { return kUnknownEntityKind; }
     bool positionOf(const std::string& id, double& outLat, double& outLon, double& outAlt) const override {
         if (teams.find(id) == teams.end()) {
             return false;

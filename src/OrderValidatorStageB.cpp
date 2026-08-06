@@ -125,6 +125,26 @@ StageBOutcome validateStageB(
             return reject(RejectReason::Fratricide,
                 "target '" + order.targetEntityId + "' is on own team '" + ownTeam + "'");
         }
+
+        // B9. Target class. B3 established that Tier 1 saw this contact; that is provenance, not
+        // plausibility, and an inbound missile passes it — Tier 1 reports every sensor track,
+        // munitions included, because `defend` needs them in the picture. Measured: two of three
+        // launches on the first live run in which a commanded aircraft could fire went at
+        // BlueF16_01_wpn_32300_6 (§Corrections item 39).
+        //
+        // The opposite rule to B4 above, deliberately. An unknown TEAM is refused because it makes
+        // the shot more dangerous. An unknown KIND passes, because refusing it would take every
+        // scenario whose profiles omit `entityType` offline — and B4 has already run, so a target
+        // of unknown kind on an unknown team is refused there regardless.
+        if (order.posture == Posture::Engage || order.posture == Posture::Crank) {
+            const std::int64_t targetKind = world.entityKindOf(order.targetEntityId);
+            if (targetKind == kEntityKindMunition) {
+                return reject(RejectReason::TargetClass,
+                    std::string("posture ") + toString(order.posture) + " ordered against '"
+                        + order.targetEntityId + "', which is a munition (SISO-REF-010 kind "
+                        + std::to_string(targetKind) + ")");
+            }
+        }
     }
 
     // -- B8: an offensive posture on an aircraft with nothing left to shoot ----------------------

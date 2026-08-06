@@ -46,6 +46,7 @@ class FakeWorld final : public StageBWorldView {
 public:
     std::map<std::string, std::string> teams;                          // entityId -> team
     std::map<std::string, std::array<double, 3>> positions;            // entityId -> lat/lon/alt
+    std::map<std::string, std::int64_t> kinds;                          // entityId -> SISO kind
 
     bool entityExists(const std::string& entityId) const override {
         return teams.find(entityId) != teams.end();
@@ -53,6 +54,12 @@ public:
     std::string teamOf(const std::string& entityId) const override {
         const auto it = teams.find(entityId);
         return it == teams.end() ? std::string() : it->second;
+    }
+    // Absent from `kinds` means the profile carries no entityType -- which B9 must pass, not
+    // refuse. That case is a test in its own right, not an incidental default.
+    std::int64_t entityKindOf(const std::string& entityId) const override {
+        const auto it = kinds.find(entityId);
+        return it == kinds.end() ? kUnknownEntityKind : it->second;
     }
     bool positionOf(const std::string& entityId, double& lat, double& lon, double& alt) const override {
         const auto it = positions.find(entityId);
@@ -72,7 +79,13 @@ FakeWorld makeWorld() {
     world.teams["BlueF18_02"] = "blue";
     world.teams["RedSu35_02"] = "red";        // a wingman - same team as the commanded entity
     world.teams["GhostContact_99"] = "";      // exists but with no known team
+    world.teams["BlueF18_02_wpn_1234"] = "blue";  // an inbound missile - hostile, so B4 passes it
     world.positions[kOwnId] = {13.50, 144.80, 9000.0};
+
+    // SISO-REF-010 kinds. BlueF18_02 is a Platform and its missile is a Munition; RedSu35_02 and
+    // GhostContact_99 are deliberately ABSENT, standing for a profile that carries no entityType.
+    world.kinds["BlueF18_02"] = 1;
+    world.kinds["BlueF18_02_wpn_1234"] = kEntityKindMunition;
     return world;
 }
 
@@ -82,7 +95,7 @@ StageBRequest makeRequest() {
     request.onRoster = true;
     request.snapshotSimTimeS = 400.0;
     request.currentSimTimeS = 405.0;
-    request.reportedTrackIds = {"BlueF18_02", "RedSu35_02", "GhostContact_99"};
+    request.reportedTrackIds = {"BlueF18_02", "RedSu35_02", "GhostContact_99", "BlueF18_02_wpn_1234"};
     request.publishedSerial = 12;
     request.candidateSerial = 13;
     return request;
@@ -681,6 +694,113 @@ AIC_TEST(LoadoutIsAStageBReasonWithItsWireName) {
     AIC_EXPECT_TRUE(isStageBReason(RejectReason::Loadout),
                     "loadout is a Stage-B reason: it needs the snapshot's reported stores, which "
                     "only the simulation thread assembles");
+    return true;
+}
+
+// -- AIC-VAL-1 B9 (v1.8.23): an offensive posture against a munition ------------------------------
+//
+// Measured, not hypothesised: on the first live run in which a commanded aircraft could fire, two
+// of three launches went at an inbound missile because the commander ordered `engage` naming the
+// munition track (Corrections item 39). Every layer was behaving as specified - Tier 1 reports all
+// tracks so `defend` has them, and B3 asks provenance rather than plausibility.
+
+AIC_TEST(StageBRejectsOffensivePosturesAgainstAMunition) {
+    const StageAOutcome engage = validateStageA(engageOrder("BlueF18_02_wpn_1234"), kOwnId);
+    AIC_EXPECT_TRUE(engage.accepted, "the engage order must clear Stage A first");
+
+    const FakeWorld world = makeWorld();
+    const StageBRequest request = makeRequest();
+
+    const StageBOutcome rejected = validateStageB(engage.order, request, CommanderConfig{}, world);
+    AIC_EXPECT_FALSE(rejected.accepted, "engage against a munition must be rejected");
+    AIC_EXPECT_TRUE(rejected.reason == RejectReason::TargetClass,
+                    "the reason must be `targetClass`, got '"
+                        + std::string(toString(rejected.reason)) + "': " + rejected.detail);
+
+    // crank is the same class of order - it is a shot being supported.
+    Order crank = engage.order;
+    crank.posture = Posture::Crank;
+    const StageBOutcome crankOutcome = validateStageB(crank, request, CommanderConfig{}, world);
+    AIC_EXPECT_TRUE(crankOutcome.reason == RejectReason::TargetClass,
+                    "crank against a munition must reject `targetClass` too, got '"
+                        + std::string(toString(crankOutcome.reason)) + "'");
+    return true;
+}
+
+// THE ONE A NAIVE IMPLEMENTATION GETS WRONG, and the mirror of B8's empty-loadout case. A target
+// whose profile carries no entityType is UNCLASSIFIED, not a munition. Refusing it would take
+// every scenario that omits the field offline - a safety check turned into an outage.
+//
+// Note this is the OPPOSITE rule to B4 one check above, which refuses an unknown TEAM. The
+// asymmetry is intentional: an unknown team makes the shot more dangerous, an unknown kind leaves
+// it merely unlabelled, and B4 has already run either way.
+AIC_TEST(StageBDoesNotTreatAnAbsentEntityTypeAsAMunition) {
+    const StageAOutcome engage = validateStageA(engageOrder("GhostContact_99"), kOwnId);
+    AIC_EXPECT_TRUE(engage.accepted, "the engage order must clear Stage A first");
+
+    FakeWorld world = makeWorld();
+    world.teams["GhostContact_99"] = "blue";   // give it a team so B4 does not claim the rejection
+    AIC_EXPECT_TRUE(world.entityKindOf("GhostContact_99") == kUnknownEntityKind,
+                    "the fixture must have no entityType here, or the test proves nothing");
+
+    const StageBOutcome outcome =
+        validateStageB(engage.order, makeRequest(), CommanderConfig{}, world);
+    AIC_EXPECT_TRUE(outcome.accepted,
+                    "a target with no entityType must NOT be rejected as a munition; got '"
+                        + std::string(toString(outcome.reason)) + "': " + outcome.detail);
+    return true;
+}
+
+// Ordering. B9 sits after B3/B4 and before B8, so the most specific diagnosis wins the record -
+// the same rule B8 already follows, for the same reason: `reject.targetClass` climbing means the
+// model is shooting at missiles, and folding that into another counter destroys the signal.
+AIC_TEST(StageBOrdersTargetClassAfterFratricideAndBeforeLoadout) {
+    FakeWorld world = makeWorld();
+
+    // A munition that is also on OUR side. B4 must win: whose side it is on outranks what it is.
+    world.teams["BlueF18_02_wpn_1234"] = "red";
+    const StageAOutcome friendlyMunition =
+        validateStageA(engageOrder("BlueF18_02_wpn_1234"), kOwnId);
+    AIC_EXPECT_TRUE(friendlyMunition.accepted, "the order must clear Stage A first");
+    const StageBOutcome fratricideWins =
+        validateStageB(friendlyMunition.order, makeRequest(), CommanderConfig{}, world);
+    AIC_EXPECT_TRUE(fratricideWins.reason == RejectReason::Fratricide,
+                    "a friendly munition must reject `fratricide`, not `targetClass`; got '"
+                        + std::string(toString(fratricideWins.reason)) + "'");
+
+    // A hostile munition on a completely dry aircraft. B9 must win over B8: "you are shooting at a
+    // missile" is a better diagnosis than "you have nothing to shoot with".
+    const FakeWorld hostile = makeWorld();
+    const StageAOutcome engage = validateStageA(engageOrder("BlueF18_02_wpn_1234"), kOwnId);
+    AIC_EXPECT_TRUE(engage.accepted, "the order must clear Stage A first");
+    StageBRequest dry = makeRequest();
+    dry.reportedAmmoCounts = {0, 0, 0, 0};
+    const StageBOutcome targetClassWins =
+        validateStageB(engage.order, dry, CommanderConfig{}, hostile);
+    AIC_EXPECT_TRUE(targetClassWins.reason == RejectReason::TargetClass,
+                    "a munition on a dry aircraft must reject `targetClass`, not `loadout`; got '"
+                        + std::string(toString(targetClassWins.reason)) + "'");
+    return true;
+}
+
+// A real aircraft is still engageable. Guards against a check that rejects everything.
+AIC_TEST(StageBStillAcceptsEngageAgainstAPlatform) {
+    const StageAOutcome engage = validateStageA(engageOrder("BlueF18_02"), kOwnId);
+    AIC_EXPECT_TRUE(engage.accepted, "the engage order must clear Stage A first");
+    const StageBOutcome outcome =
+        validateStageB(engage.order, makeRequest(), CommanderConfig{}, makeWorld());
+    AIC_EXPECT_TRUE(outcome.accepted,
+                    "engage against a hostile PLATFORM must still be accepted; got '"
+                        + std::string(toString(outcome.reason)) + "': " + outcome.detail);
+    return true;
+}
+
+AIC_TEST(TargetClassIsAStageBReasonWithItsWireName) {
+    AIC_EXPECT_EQ(std::string(toString(RejectReason::TargetClass)), std::string("targetClass"),
+                  "the `targetClass` wire name is a contract, not a display string");
+    AIC_EXPECT_TRUE(isStageBReason(RejectReason::TargetClass),
+                    "targetClass is a Stage-B reason: it needs IEntity::getEntityType(), which is "
+                    "only legal to touch on the simulation thread");
     return true;
 }
 

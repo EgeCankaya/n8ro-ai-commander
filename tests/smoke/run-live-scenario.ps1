@@ -71,6 +71,11 @@ param(
     [string]$Backend = "local",
 
     [string]$ClaudeModel = "claude-haiku-4-5",
+
+    # The local model, parameterised at v1.8.22 so the H1 model-dependence question can be asked
+    # at more than one capability. The default is the value this script hardcoded through Phase 1b
+    # and Phase 3, so every prior run reproduces unchanged.
+    [string]$LocalModel = "qwen2.5:7b-instruct-q8_0",
     [string]$KeyEnvVar = "ANTHROPIC_API_KEY",
 
     # WHERE THIS RUN'S EVIDENCE GOES, and why it is outside the repository (PRD v1.8.18,
@@ -123,6 +128,7 @@ Write-Host "scenario     : Mariana Shield (shipped, unmodified)"
 Write-Host "entities     : RedSu35_01 and RedSu35_02, both on the swapped Tier-1 script"
 Write-Host "run seconds  : $RunSeconds per run"
 Write-Host "backend      : $Backend"
+if ($Backend -eq "local") { Write-Host "model        : $LocalModel" }
 if ($Backend -eq "claude") {
     if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($KeyEnvVar))) {
         Write-Error "environment variable '$KeyEnvVar' is unset or empty - no API key available"
@@ -241,7 +247,7 @@ claude.apiKeyEnvVar=$KeyEnvVar
 commander.enabled=true
 commander.backend=local
 commander.cadenceS=20
-local.model=qwen2.5:7b-instruct-q8_0
+local.model=$LocalModel
 local.grammarEnabled=true
 "@ | Set-Content -Path $deployedCfg -Encoding ascii
         $expectedFields = 5

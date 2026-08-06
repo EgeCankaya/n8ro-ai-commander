@@ -22,6 +22,7 @@ const char* toString(RejectReason reason) {
         case RejectReason::Clamp:      return "clamp";
         case RejectReason::Superseded: return "superseded";
         case RejectReason::Loadout:    return "loadout";
+        case RejectReason::TargetClass: return "targetClass";
     }
     return "none";
 }
@@ -36,6 +37,7 @@ bool isStageBReason(RejectReason reason) {
         case RejectReason::Clamp:
         case RejectReason::Superseded:
         case RejectReason::Loadout:
+        case RejectReason::TargetClass:
             return true;
         default:
             return false;

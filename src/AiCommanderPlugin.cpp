@@ -80,6 +80,20 @@ public:
         return entity == nullptr ? std::string() : entity->getTeam();
     }
 
+    // B9. getEntityType() is std::optional at the module boundary; an absent record and an
+    // unknown entity both mean "unclassified", which B9 passes rather than refuses.
+    std::int64_t entityKindOf(const std::string& entityId) const override {
+        if (manager_ == nullptr) {
+            return kUnknownEntityKind;
+        }
+        const n8ro::sim::IEntity* entity = manager_->getEntity(entityId);
+        if (entity == nullptr) {
+            return kUnknownEntityKind;
+        }
+        const std::optional<n8ro::data::taxonomy::EntityTypeCode> type = entity->getEntityType();
+        return type ? type->kind : kUnknownEntityKind;
+    }
+
     bool positionOf(const std::string& entityId, double& lat, double& lon, double& alt) const override {
         if (manager_ == nullptr) {
             return false;
