@@ -160,6 +160,7 @@ std::vector<PluginConfigField> toConfigFields(const CommanderConfig& config) {
     pushText(fields, "claude.effort", config.claudeEffort);
 
     pushReal(fields, "safety.maxSpeedMps", config.maxSpeedMps);
+    pushReal(fields, "safety.minSpeedMps", config.minSpeedMps);
     pushReal(fields, "safety.minAltitudeHaeM", config.minAltitudeHaeM);
     pushReal(fields, "safety.maxAltitudeHaeM", config.maxAltitudeHaeM);
     pushReal(fields, "safety.geofenceRadiusM", config.geofenceRadiusM);
@@ -256,6 +257,14 @@ bool tryParseConfigFields(
         } else if (name == "safety.maxSpeedMps") {
             if (!parseReal(field.value, draft.maxSpeedMps)) return fail(name, "expected a finite number");
             if (draft.maxSpeedMps <= 0.0) return fail(name, "must be > 0");
+        } else if (name == "safety.minSpeedMps") {
+            if (!parseReal(field.value, draft.minSpeedMps)) return fail(name, "expected a finite number");
+            // Zero is legal and means "no floor" - the pre-v1.8.27 behaviour, which a rotary-wing or
+            // loitering deployment may legitimately want back. Negative is not: a speed floor below
+            // zero cannot bind on any value Stage A's A7 lets through, so it is a configuration
+            // mistake rather than a permissive setting, and a bound that silently cannot fire is
+            // exactly the failure mode this field exists to remove.
+            if (draft.minSpeedMps < 0.0) return fail(name, "must be >= 0");
         } else if (name == "safety.minAltitudeHaeM") {
             if (!parseReal(field.value, draft.minAltitudeHaeM)) return fail(name, "expected a finite number");
         } else if (name == "safety.maxAltitudeHaeM") {
@@ -282,6 +291,13 @@ bool tryParseConfigFields(
 
     if (draft.minAltitudeHaeM >= draft.maxAltitudeHaeM) {
         return fail("safety.minAltitudeHaeM", "must be < safety.maxAltitudeHaeM");
+    }
+
+    // The same rule the altitude pair has always carried, now that speed is a two-sided envelope
+    // too (v1.8.27, C19). An envelope whose ends cross accepts nothing at all, and it would present
+    // as "the model stopped producing usable orders" rather than as a configuration error.
+    if (draft.minSpeedMps >= draft.maxSpeedMps) {
+        return fail("safety.minSpeedMps", "must be < safety.maxSpeedMps");
     }
 
     // Fail-closed on the hosted backend, and deliberately NOT a silent fall back to local: a silent

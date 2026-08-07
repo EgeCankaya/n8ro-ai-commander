@@ -453,7 +453,7 @@ AIC_TEST(TruncatedReasonSatisfiesTheSchemaBackstop) {
 
 // Stage B's rows need live state, so they run against the fake world rather than as raw bodies.
 AIC_TEST(AdversarialCorpusStageB) {
-    const CommanderConfig config;   // defaults: 400 m/s, 100-20000 m HAE, 200 km geofence
+    const CommanderConfig config;   // defaults: 50-400 m/s, 100-20000 m HAE, 200 km geofence
     const FakeWorld world = makeWorld();
 
     struct Row {
@@ -521,6 +521,13 @@ AIC_TEST(AdversarialCorpusStageB) {
 
     { Row r{"speed over the safety envelope", RejectReason::Clamp,
             ingress(13.51, 144.81, 9000.0, config.maxSpeedMps + 1.0), makeRequest()};
+      rows.push_back(r); }
+
+    // C19 (v1.8.27). The band used to be (0, maxSpeedMps] and this row had no counterpart: nothing
+    // anywhere refused a 1.5 m/s cruise order for a fighter, and five were accepted in three live
+    // runs. Sits next to the ceiling row deliberately - they are one envelope.
+    { Row r{"speed under the safety envelope", RejectReason::Clamp,
+            ingress(13.51, 144.81, 9000.0, config.minSpeedMps - 1.0), makeRequest()};
       rows.push_back(r); }
 
     { Row r{"altitude below the floor", RejectReason::Clamp,

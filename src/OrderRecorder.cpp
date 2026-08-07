@@ -152,6 +152,35 @@ void OrderRecorder::recordRequested(
     (void)record.setString("snapshotHash", snapshotHash);
     (void)record.setString("promptHash", promptHash);
     (void)record.setInt64("tracksReported", static_cast<std::int64_t>(snapshot.tracks.size()));
+
+    // The own-ship state the snapshot actually transmitted (AIC-DET-1, v1.8.27, C18).
+    //
+    // WHY, AND WHY THE HASH WAS NOT ENOUGH. This FR's Customer scenario has promised since v1.0 that
+    // an engineer "reads the exact order, THE SNAPSHOT THAT PRODUCED IT, and the model's stated
+    // reason" - and no record has ever carried a snapshot. `snapshotHash` cannot stand in for one:
+    // it is a digest, it answers "did the picture change?" and never "what WAS the picture?", and
+    // position moves every tick, so it changes whether or not any other field did.
+    //
+    // The concrete question it exists to answer: when an accepted order commands 1.5 m/s, was that
+    // the model inventing a number or the snapshot reporting one? Before this block those were one
+    // unresolved observation (PRD Corrections item 42(e)). `headingDeg` is here for the same reason
+    // - the schema documents componentTransform/headingDeg as the heading at t=0, so whether it
+    // tracks the physics pass is checkable only by watching it move across a run.
+    //
+    // OWN-SHIP ONLY. tracks[] and loadout[] are deliberately excluded: both are already
+    // reconstructible from the Tier-1 ingress calls, and both would dominate the record's size for
+    // a question nobody has asked of them.
+    JsonValue own = JsonValue::object();
+    (void)own.setDouble("latitudeDeg", snapshot.latitudeDeg);
+    (void)own.setDouble("longitudeDeg", snapshot.longitudeDeg);
+    (void)own.setDouble("altitudeHaeM", snapshot.altitudeHaeM);
+    (void)own.setDouble("headingDeg", snapshot.headingDeg);
+    (void)own.setDouble("speedMps", snapshot.speedMps);
+    (void)own.setDouble("velN", snapshot.velNMps);
+    (void)own.setDouble("velE", snapshot.velEMps);
+    (void)own.setDouble("velD", snapshot.velDMps);
+    (void)record.set("own", own);
+
     writeLine(record.toString());
 }
 

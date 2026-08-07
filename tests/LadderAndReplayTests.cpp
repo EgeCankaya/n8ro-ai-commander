@@ -329,6 +329,55 @@ AIC_TEST(ReplayToleratesATruncatedFinalLine) {
     return true;
 }
 
+// C18 (AIC-DET-1, v1.8.27). `order.requested` must carry the own-ship state the snapshot
+// transmitted, not merely a digest of it.
+//
+// THE PROPERTY THIS PROTECTS is that two questions stay distinguishable: "the model emitted 1.5 m/s"
+// and "the snapshot said 1.5 m/s". Before this block they were one unresolved observation, because
+// snapshotHash answers "did the picture change?" and never "what WAS the picture?" - and position
+// moves every tick, so the hash changes whether or not any other field did. The distinct sentinel
+// values below are what make a transposed or duplicated field visible.
+AIC_TEST(RequestedRecordCarriesTheOwnShipSnapshot) {
+    const std::filesystem::path dir = scratchDir("requested-own");
+    const std::string logPath = (dir / "orders.jsonl").string();
+
+    OrderSnapshot snapshot;
+    snapshot.entityId = "RedSu35_01";
+    snapshot.serial = 7;
+    snapshot.latitudeDeg = 13.49;
+    snapshot.longitudeDeg = 144.83;
+    snapshot.altitudeHaeM = 10000.0;
+    snapshot.headingDeg = 271.5;
+    snapshot.speedMps = 319.75;
+    snapshot.velNMps = 0.5;
+    snapshot.velEMps = -319.75;
+    snapshot.velDMps = 0.25;
+
+    {
+        OrderRecorder recorder;
+        AIC_EXPECT_TRUE(recorder.open(dir.string(), 1024 * 1024, 2), "recorder opens");
+        recorder.recordRequested(100.0, 0, snapshot, "local", "qwen2.5:7b",
+                                 "fnv1a64:aa", "fnv1a64:bb");
+    }
+
+    std::ifstream stream(logPath, std::ios::binary);
+    std::string line;
+    AIC_EXPECT_TRUE(static_cast<bool>(std::getline(stream, line)), "a record was written");
+
+    for (const char* needle : {"\"own\"", "\"headingDeg\":271.5", "\"speedMps\":319.75",
+                               "\"velN\":0.5", "\"velE\":-319.75", "\"velD\":0.25",
+                               "\"latitudeDeg\":13.49", "\"longitudeDeg\":144.83"}) {
+        AIC_EXPECT_TRUE(line.find(needle) != std::string::npos,
+                        std::string("order.requested must carry ") + needle + "; got: " + line);
+    }
+
+    // Own-ship only, deliberately: tracks and loadout are reconstructible from the Tier-1 ingress
+    // calls and would dominate the record. If someone later widens this, they should have to say so.
+    AIC_EXPECT_TRUE(line.find("\"tracks\"") == std::string::npos,
+                    "the requested record carries own-ship state only, not the track list");
+    return true;
+}
+
 // A replay backend with nothing to replay is a configuration error, not an empty run.
 AIC_TEST(ReplayRejectsALogWithNoOrders) {
     const std::filesystem::path dir = scratchDir("replay-empty");

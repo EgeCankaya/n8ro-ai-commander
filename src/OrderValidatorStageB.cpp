@@ -182,6 +182,23 @@ StageBOutcome validateStageB(
                 + " exceeds safety.maxSpeedMps "
                 + std::to_string(static_cast<int>(config.maxSpeedMps)));
     }
+    // The floor (v1.8.27, C19). Until this existed the accepted band was (0, maxSpeedMps] and
+    // nothing anywhere refused a 1.5 m/s cruise order for a fighter - five were accepted across
+    // three runs. Stage A's `> 0` is a meaninglessness check, not an envelope; this is the envelope.
+    //
+    // The SAME reason code as the ceiling, on purpose: `clamp` already means "outside the configured
+    // envelope" for both speed and altitude, and splitting the floor into its own reason would
+    // divide one diagnosis across two counters for no diagnostic gain.
+    //
+    // This is NOT a fix for the model copying a velocity component into this field (C15). It only
+    // puts that failure back on the counter it fell off when the copied value became reliably
+    // positive - which is the whole of what it claims to do.
+    if (order.cruiseSpeedMps < config.minSpeedMps) {
+        return reject(RejectReason::Clamp,
+            "cruiseSpeedMps " + std::to_string(static_cast<int>(order.cruiseSpeedMps))
+                + " is below safety.minSpeedMps "
+                + std::to_string(static_cast<int>(config.minSpeedMps)));
+    }
 
     if (order.hasWaypoint()) {
         if (order.altitudeHaeM < config.minAltitudeHaeM

@@ -89,6 +89,32 @@ struct CommanderConfig {
 
     // -- safety.* : the Stage-B clamp bounds -----------------------------------------------------
     double maxSpeedMps = 400.0;
+
+    // The floor B6 never had (PRD v1.8.27, AIC-VAL-1, closing C19).
+    //
+    // Until this field existed the accepted band was (0, maxSpeedMps]: Stage A's A7 refused <= 0,
+    // B6 refused above the ceiling, and NOTHING refused between. Five orders at ~1.5 m/s were
+    // accepted for a fighter, and every layer behaved as specified. The asymmetry was visible one
+    // line below this one - altitude has carried BOTH bounds since v1.0, because too low is
+    // dangerous, and the identical argument for speed was simply never made.
+    //
+    // `> 0` is not a floor. It is a meaninglessness check - the same role kMaxCruiseSpeedMps plays
+    // at the other end ("a static ceiling, not an airframe limit").
+    //
+    // THE VALUE IS A POLICY CHOICE AND CANNOT BE DERIVED, which is why it is documented rather than
+    // justified. No minimum, stall, or performance envelope exists anywhere in the shipped platform
+    // data: componentPhysics carries mass and dragCoefficient, componentNavigation carries no speed
+    // bound, the Su-35 profile overrides only mass and RCS, and the schema's only Mps leaves are
+    // componentTransform/speedMps (initial) and waypoint/speed (commanded). So this sits on exactly
+    // the same footing as maxSpeedMps = 400, which is also derived from nothing.
+    //
+    // 50 m/s is a factor of >= 4 below both the shipped scenario's 220 m/s spawn and the 400 m/s
+    // ceiling, so it cannot refuse a legitimate cruise order in the platform class the rest of this
+    // block already assumes - while sitting far above the 1.5-27 m/s band actually observed.
+    // A DEPLOYMENT COMMANDING ROTARY-WING OR LOITERING PLATFORMS MUST LOWER IT, exactly as it must
+    // lower minAltitudeHaeM. That is a property of this block, not a new burden from this field.
+    double minSpeedMps = 50.0;
+
     double minAltitudeHaeM = 100.0;
     double maxAltitudeHaeM = 20000.0;
     double geofenceRadiusM = 200000.0;
