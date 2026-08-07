@@ -42,7 +42,21 @@ struct OrderSnapshot {
     double latitudeDeg = 0.0;     // Deg, geodetic WGS-84 (schema leaf).
     double longitudeDeg = 0.0;    // Deg, geodetic WGS-84 (schema leaf).
     double altitudeHaeM = 0.0;    // M, height above the WGS-84 ellipsoid (schema leaf).
-    double headingDeg = 0.0;      // Deg clockwise from true north (schema leaf).
+    // Course over ground, degrees clockwise from true north, in [0, 360).
+    //
+    // DERIVED from velocityNed, and this replaced a read of the componentTransform/headingDeg schema
+    // leaf in v1.8.28 (C18). That leaf is documented as the heading "at t=0" on a component whose
+    // runtime motion is "thereafter owned by the physics pass, not by this datablock" - and measured
+    // over a 600 s run it never moved: 270.000 on both entities, one distinct value across fourteen
+    // samples, while velN swung from -280 to +304. At t=40.1 the prompt reported the aircraft flying
+    // WEST while it was flying EAST, 178.4 degrees out.
+    //
+    // NAMED `course`, NOT `heading`, on purpose. atan2(velE, velN) yields the direction of travel,
+    // not nose attitude; true heading would need the orientationBodyToNedQuat runtime columns, which
+    // AIC-ARCH-4 does not probe. In level unaccelerated flight they coincide. Giving it the accurate
+    // name is the point - the defect being fixed here IS a quantity that carried a name it had not
+    // earned, and repeating that in the replacement would be the same mistake twice.
+    double courseDeg = 0.0;
     double velNMps = 0.0;         // m/s North (runtime column velocityNed.x).
     double velEMps = 0.0;         // m/s East  (runtime column velocityNed.y).
     double velDMps = 0.0;         // m/s Down  (runtime column velocityNed.z).
@@ -90,5 +104,14 @@ void canonicalizeSnapshot(OrderSnapshot& snapshot);
 // reachable from the offline suite; a test that re-implemented the norm beside it would assert its
 // own arithmetic and pin nothing.
 [[nodiscard]] double groundSpeedMps(double velNMps, double velEMps, double velDMps);
+
+// Course over ground in degrees clockwise from true north, normalized to [0, 360) (PRD v1.8.28,
+// C18). Free-standing for the same reason groundSpeedMps is: buildSnapshot needs an IEntityManager
+// and cannot be reached from the offline suite, so the shipped definition has to be callable.
+//
+// A stationary entity has no course. This returns 0.0 there, which is indistinguishable from due
+// north - deliberately not papered over with a sentinel, because `speedMps` travels beside it in
+// every consumer and a reader who sees a zero speed already knows the course means nothing.
+[[nodiscard]] double courseOverGroundDeg(double velNMps, double velEMps);
 
 } // namespace arkheon::aicommander

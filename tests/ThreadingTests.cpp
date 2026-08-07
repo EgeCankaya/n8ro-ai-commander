@@ -24,7 +24,7 @@ OrderSnapshot makeSnapshot(const std::string& entityId, std::int64_t serial) {
     snapshot.latitudeDeg = 13.50;
     snapshot.longitudeDeg = 144.80;
     snapshot.altitudeHaeM = 9000.0;
-    snapshot.headingDeg = 270.0;
+    snapshot.courseDeg = 270.0;
     snapshot.velNMps = -10.0;
     snapshot.velEMps = 210.0;
     snapshot.velDMps = 0.0;

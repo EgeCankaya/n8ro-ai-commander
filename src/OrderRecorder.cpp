@@ -161,11 +161,14 @@ void OrderRecorder::recordRequested(
     // it is a digest, it answers "did the picture change?" and never "what WAS the picture?", and
     // position moves every tick, so it changes whether or not any other field did.
     //
-    // The concrete question it exists to answer: when an accepted order commands 1.5 m/s, was that
-    // the model inventing a number or the snapshot reporting one? Before this block those were one
-    // unresolved observation (PRD Corrections item 42(e)). `headingDeg` is here for the same reason
-    // - the schema documents componentTransform/headingDeg as the heading at t=0, so whether it
-    // tracks the physics pass is checkable only by watching it move across a run.
+    // BOTH QUESTIONS IT WAS BUILT FOR ARE NOW ANSWERED, on the first run that carried it (v1.8.28,
+    // PRD Corrections item 44), and the block stays because that is what it is for.
+    //   - "when an order commands 1.5 m/s, did the model invent it or did the snapshot report it?"
+    //     The SNAPSHOT: own.speedMps read 1.503 with velN -0.581 and velE -1.386. And every accepted
+    //     order in that run matched own.speedMps exactly - the model copies the right field, which
+    //     REFUTES item 42(c) and closed C15.
+    //   - "does componentTransform/headingDeg track the physics pass?" It does NOT. 270.000 for
+    //     600 s on both entities while velN swung -280 to +304. courseDeg replaced it (C18).
     //
     // OWN-SHIP ONLY. tracks[] and loadout[] are deliberately excluded: both are already
     // reconstructible from the Tier-1 ingress calls, and both would dominate the record's size for
@@ -174,7 +177,7 @@ void OrderRecorder::recordRequested(
     (void)own.setDouble("latitudeDeg", snapshot.latitudeDeg);
     (void)own.setDouble("longitudeDeg", snapshot.longitudeDeg);
     (void)own.setDouble("altitudeHaeM", snapshot.altitudeHaeM);
-    (void)own.setDouble("headingDeg", snapshot.headingDeg);
+    (void)own.setDouble("courseDeg", snapshot.courseDeg);
     (void)own.setDouble("speedMps", snapshot.speedMps);
     (void)own.setDouble("velN", snapshot.velNMps);
     (void)own.setDouble("velE", snapshot.velEMps);

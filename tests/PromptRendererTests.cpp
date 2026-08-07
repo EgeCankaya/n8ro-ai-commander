@@ -119,7 +119,7 @@ OrderSnapshot sentinelSnapshot() {
     snapshot.latitudeDeg = 13.5;
     snapshot.longitudeDeg = 144.8;
     snapshot.altitudeHaeM = 9000.0;
-    snapshot.headingDeg = 270.0;
+    snapshot.courseDeg = 270.0;
     snapshot.velNMps = -10.0;
     snapshot.velEMps = 210.0;
     snapshot.velDMps = 1.0;
@@ -317,7 +317,7 @@ AIC_TEST(SuffixCarriesOwnSpeedAsAPositiveMagnitude) {
 
     // The C15 geometry: due west, 220 m/s, level.
     OrderSnapshot snapshot = sentinelSnapshot();
-    snapshot.headingDeg = 270.0;
+    snapshot.courseDeg = 270.0;
     snapshot.velNMps = 0.0;
     snapshot.velEMps = -220.0;
     snapshot.velDMps = 0.0;
@@ -358,6 +358,44 @@ AIC_TEST(OwnSpeedIsTheNormOfTheVelocityComponents) {
 
     // Stationary is a legal state and must not produce anything but zero.
     AIC_EXPECT_TRUE(groundSpeedMps(0.0, 0.0, 0.0) == 0.0, "a stopped entity reports zero speed");
+    return true;
+}
+
+// C18 (PRD v1.8.28, §Corrections item 44). Course over ground, derived, replacing a schema leaf that
+// was measured frozen at its t=0 value for an entire 600 s run.
+//
+// THE ERROR THIS PINS is the argument transposition. NED puts North on x and East on y, while
+// compass bearings run clockwise from North - so the call is atan2(East, North), which is the
+// reverse of the usual atan2(y, x) reading. Getting it backwards mirrors every bearing about the
+// 45-degree line, which still reads correctly for due north and due east and is wrong everywhere
+// else. The four cardinals alone would not catch it; the off-axis cases below do.
+AIC_TEST(CourseOverGroundIsACompassBearingFromTheVelocityVector) {
+    AIC_EXPECT_TRUE(courseOverGroundDeg(100.0, 0.0) == 0.0, "due north is 000");
+    AIC_EXPECT_TRUE(courseOverGroundDeg(0.0, 100.0) == 90.0, "due east is 090");
+    AIC_EXPECT_TRUE(courseOverGroundDeg(-100.0, 0.0) == 180.0, "due south is 180");
+    AIC_EXPECT_TRUE(courseOverGroundDeg(0.0, -100.0) == 270.0, "due west is 270");
+
+    // Off-axis, and asymmetric so a transposed atan2 cannot pass: north-east must be 045 and a
+    // mirrored implementation also gives 045 there, so the discriminating case is one where the
+    // two components differ in magnitude.
+    const double neQuadrant = courseOverGroundDeg(100.0, 50.0);   // more north than east
+    AIC_EXPECT_TRUE(neQuadrant > 26.0 && neQuadrant < 27.0,
+                    "north-by-east must be ~026, not its mirror ~063");
+
+    // The range is a compass bearing, never negative: atan2 returns (-180, 180].
+    AIC_EXPECT_TRUE(courseOverGroundDeg(-100.0, -100.0) == 225.0, "south-west wraps to 225");
+    AIC_EXPECT_TRUE(courseOverGroundDeg(100.0, -100.0) == 315.0, "north-west wraps to 315");
+
+    // The real measurement that opened C18: velN -8.689, velE 319.882 was reported as 270 by the
+    // frozen leaf and is actually ~091 - the aircraft flying EAST while the prompt said WEST.
+    const double measured = courseOverGroundDeg(-8.689, 319.882);
+    AIC_EXPECT_TRUE(measured > 91.0 && measured < 92.0,
+                    "the C18 sample must resolve to ~091.6, not the 270.0 the leaf reported");
+
+    // A stationary entity has no course. Zero is what atan2(0,0) yields and it is NOT concealed
+    // behind a sentinel: speedMps travels beside it in every consumer, so a reader who sees a zero
+    // speed already knows the bearing means nothing.
+    AIC_EXPECT_TRUE(courseOverGroundDeg(0.0, 0.0) == 0.0, "a stopped entity reports course 0");
     return true;
 }
 

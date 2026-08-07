@@ -97,7 +97,14 @@ AIC_TEST(SchemaUnitsTraceToTheSchemaReference) {
         {"waypoint.altitudeHaeM", "/datablocks/positionGeodetic/altitudeHaeM", "M"},
         {"cruiseSpeedMps",        "/datablocks/waypoint/speed",                "Mps"},
         {"cruiseSpeedMps (alt)",  "/datablocks/componentTransform/speedMps",   "Mps"},
-        {"own.headingDeg",        "/datablocks/componentTransform/headingDeg", "Deg"},
+        // own.courseDeg is DERIVED from the velocityNed runtime columns, not read from a schema
+        // leaf, so it is not traced as one (v1.8.28, C18). The leaf below is still cited because
+        // it is the unit courseDeg reports in, and keeping the row means a schema change to it
+        // still surfaces here even though nothing reads its VALUE any more. That value is the
+        // authored t=0 heading; measured over a 600 s run it never moved while the aircraft
+        // reversed course, which is the whole reason courseDeg exists.
+        {"course unit (own.courseDeg reports in it)",
+         "/datablocks/componentTransform/headingDeg", "Deg"},
         {"orbitRadiusM",
          "/datablocks/componentNavigation/onWaypointReachedLoiterRadiusM",     "M"},
         {"sensor detection range", "/datablocks/componentSensor/detectionRangeM", "M"},

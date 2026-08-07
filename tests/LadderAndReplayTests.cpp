@@ -347,7 +347,7 @@ AIC_TEST(RequestedRecordCarriesTheOwnShipSnapshot) {
     snapshot.latitudeDeg = 13.49;
     snapshot.longitudeDeg = 144.83;
     snapshot.altitudeHaeM = 10000.0;
-    snapshot.headingDeg = 271.5;
+    snapshot.courseDeg = 271.5;
     snapshot.speedMps = 319.75;
     snapshot.velNMps = 0.5;
     snapshot.velEMps = -319.75;
@@ -364,7 +364,7 @@ AIC_TEST(RequestedRecordCarriesTheOwnShipSnapshot) {
     std::string line;
     AIC_EXPECT_TRUE(static_cast<bool>(std::getline(stream, line)), "a record was written");
 
-    for (const char* needle : {"\"own\"", "\"headingDeg\":271.5", "\"speedMps\":319.75",
+    for (const char* needle : {"\"own\"", "\"courseDeg\":271.5", "\"speedMps\":319.75",
                                "\"velN\":0.5", "\"velE\":-319.75", "\"velD\":0.25",
                                "\"latitudeDeg\":13.49", "\"longitudeDeg\":144.83"}) {
         AIC_EXPECT_TRUE(line.find(needle) != std::string::npos,

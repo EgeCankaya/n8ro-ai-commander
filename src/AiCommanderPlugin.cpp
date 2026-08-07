@@ -438,8 +438,11 @@ bool AiCommanderPlugin::buildSnapshot(
         *entityManager_, entityId, n8ro::sim::kComponentTransform, "positionGeodetic/longitudeDeg");
     const std::optional<double> alt = n8ro::sim::readComponentFieldReal(
         *entityManager_, entityId, n8ro::sim::kComponentTransform, "positionGeodetic/altitudeHaeM");
-    const std::optional<double> heading = n8ro::sim::readComponentFieldReal(
-        *entityManager_, entityId, n8ro::sim::kComponentTransform, "headingDeg");
+    // componentTransform/headingDeg is NOT read (v1.8.28, C18). The leaf exists and resolves - it is
+    // simply the authored t=0 value and does not track the physics pass, exactly as its schema
+    // description says. Measured over a 600 s run it held 270.000 on both entities across fourteen
+    // samples while velN swung -280 to +304, and at t=40.1 it reported the aircraft flying west
+    // while it flew east. Course is derived from velocityNed below instead.
 
     // Runtime columns — DOT-joined paths, owned by TransformRuntimeColumns.h. These resolve or
     // return nullopt (OQ-9), and AIC-ARCH-4 has already verified they resolve on this tree.
@@ -455,7 +458,7 @@ bool AiCommanderPlugin::buildSnapshot(
 
     // A nullopt on ANY required field aborts this entity's snapshot for the tick. Filling a hole
     // with a default would produce an order computed from a state the aircraft was never in.
-    if (!lat || !lon || !alt || !heading || !velN || !velE || !velD) {
+    if (!lat || !lon || !alt || !velN || !velE || !velD) {
         return false;
     }
 
@@ -465,7 +468,6 @@ bool AiCommanderPlugin::buildSnapshot(
     out.latitudeDeg = *lat;
     out.longitudeDeg = *lon;
     out.altitudeHaeM = *alt;
-    out.headingDeg = *heading;
     out.velNMps = *velN;
     out.velEMps = *velE;
     out.velDMps = *velD;
@@ -473,6 +475,7 @@ bool AiCommanderPlugin::buildSnapshot(
     // prompt renderer receives a value rather than a formula and there is one definition of what
     // "own speed" means. See Snapshot.h for why this is not read from componentTransform/speedMps.
     out.speedMps = groundSpeedMps(*velN, *velE, *velD);
+    out.courseDeg = courseOverGroundDeg(*velN, *velE);
     out.team = entity->getTeam();
     return true;
 }

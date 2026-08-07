@@ -123,10 +123,16 @@ std::string PromptRenderer::renderSuffix(const OrderSnapshot& snapshot) const {
     (void)own.setDouble("latitudeDeg", snapshot.latitudeDeg);
     (void)own.setDouble("longitudeDeg", snapshot.longitudeDeg);
     (void)own.setDouble("altitudeHaeM", snapshot.altitudeHaeM);
-    (void)own.setDouble("headingDeg", snapshot.headingDeg);
-    // Emitted BEFORE the three signed components, deliberately. The order a JSON object is written
-    // in is not semantics, but it is what a reader scans, and C15 was a model reaching past the
-    // field it wanted because that field was not there. Now it is there, and it is there first.
+    (void)own.setDouble("courseDeg", snapshot.courseDeg);
+    // Emitted BEFORE the three signed components. C15's original defect was a model reaching past
+    // the field it wanted because that field was not there; it is there now, and it is there first.
+    //
+    // The velocity components STAY, and the plan to delete them is dropped (v1.8.28, item 44(d)).
+    // v1.8.26 read a cluster of copied float values as the model "selecting among" speedMps, velE
+    // and velN, and proposed removing velN/velE as decoys. The first run carrying snapshot content
+    // refuted that outright: all nine accepted orders matched own.speedMps EXACTLY, and the clusters
+    // were simply own.speedMps at different times. Removing fields on a premise the measurement
+    // contradicted would be the same mistake the removal was meant to fix.
     (void)own.setDouble("speedMps", snapshot.speedMps);
     (void)own.setDouble("velN", snapshot.velNMps);
     (void)own.setDouble("velE", snapshot.velEMps);
