@@ -35,6 +35,20 @@ anything here. `docs/summary.md` carries no number that is not also in the PRD, 
 | 2 | `claude` adapter | **ran** — adapter complete, measured, and exercised in-engine. **Not formally closed**, and it cannot ship: see *Authorization* below |
 | 3 | Diagnostics on what Phase 2 carried | **closed** — four results, of which three are negative, null, or a refusal |
 
+**The open-item register** (PRD §Carried out of Phase 3) has three states, not two. A row that
+nobody should touch and a live question used to look identical; a **deferred** row now carries a
+revisit condition you can test without running anything.
+
+| # | State | Item | Revisit when |
+|---|---|---|---|
+| **C23** | **open** | An uncommanded aircraft that runs out of authored route stops flying | — it is a design decision between three layers |
+| **C17** | **open** | Acceptance is measured by two instruments and only one is gated | — owner-decided 2026-08-06; the decision does not make the instruments agree |
+| **C8** | **deferred** | A `maxTokens` ceiling sized from one 48-order run is sized against noise | a **non-Haiku model is proposed** as `claude.model`'s default |
+| **C6** | **deferred** *(dependency)* | Is `n8ro-llm` ever installed — someone else's roadmap, and **nothing here is blocked on it** | **`n8ro-llm` appears in the release tree** (`bin/`, `lib/` or `include/`) — absent as of 2026-08-08 |
+
+Everything else in the register is closed. **Two open rows, and both are on the owner's desk rather
+than an engineer's.**
+
 **Gates, all green as of 2026-08-08:**
 
 | Suite | Result |
@@ -106,7 +120,12 @@ places, on a value appearing nowhere in the prompt. Neither the schema nor the c
 decoder can catch that; **Stage B's geofence is the only thing that does**, and widening
 the bound would not have fixed it — the bound is what caught it.
 
-*(Carried as **C5**, and deliberately not over-claimed: it is a bounded negative at n = 11.)*
+*(**C5**, closed as a bounded negative. It is deliberately not over-claimed and it is deliberately
+not the headline: **n = 11 waypoint-carrying orders support no rate**, and the detector looks for
+Perth specifically, so it would not see a different memorised coordinate. What the record settles is
+that the substitution **can** happen and that the geofence is the only layer that catches it. An
+earlier version of this file led with this finding while the project's largest result — C21, above —
+appeared nowhere in it.)*
 
 ## Known rough edges
 
