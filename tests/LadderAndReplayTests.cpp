@@ -88,13 +88,20 @@ AIC_TEST(FallbackLadderWalksItsLevels) {
     AIC_EXPECT_FALSE(advanceFallbackLadder(state, 100.0 + config.cadenceS + 2.0, config, position),
                      "staying at a level reports no further transition");
 
-    // Past validity: Standing. Hold, at the entity's position, weaponsTight, configured radius.
+    // Past validity: Standing. Hold, at the entity's position, weaponsFree, configured radius.
     AIC_EXPECT_TRUE(advanceFallbackLadder(state, 100.0 + config.orderValidityS + 1.0, config, position),
                     "crossing the validity boundary reports a transition");
     AIC_EXPECT_TRUE(state.level == FallbackLevel::Standing, "level is standing");
     AIC_EXPECT_TRUE(state.published.valid, "a standing order is published");
     AIC_EXPECT_TRUE(state.published.order.posture == Posture::Hold, "standing order holds");
-    AIC_EXPECT_TRUE(state.published.order.roe == Roe::WeaponsTight, "standing order is weapons tight");
+    // AIC-VAL-2 rung 2, PRD v1.8.30. This assertion pinned Roe::WeaponsTight for four revisions
+    // AFTER the specification changed, so a passing test was certifying the behaviour the document
+    // had already condemned - the rung §Corrections item 46(a) calls a state in which the entity
+    // "could neither shoot nor be permitted to choose something to shoot at". A standing order
+    // carries no target, so weaponsTight forbids every shot. See §Corrections item 50(d).
+    AIC_EXPECT_TRUE(state.published.order.roe == Roe::WeaponsFree,
+                    "standing order is weapons FREE - it carries no target, so weaponsTight would "
+                    "forbid every shot and leave the rung less capable than no commander at all");
     AIC_EXPECT_EQ(state.published.order.orbitRadiusM, config.defaultOrbitRadiusM,
                   "standing order uses the configured orbit radius");
     AIC_EXPECT_EQ(state.published.order.latitudeDeg, position.latitudeDeg,

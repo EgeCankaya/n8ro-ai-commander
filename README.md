@@ -98,11 +98,26 @@ moves a single variable:
 Both jets end the fixed-script run in `engage … no order` — fighting, with nothing
 commanding them.
 
-**What that does not say.** It is **one run**. It carries a mechanism — *does the
-uncommanded script ever fire?* — and no rate. The commanded and script-only arms are
-**identical on every column**, which is the first unconfounded commander comparison this
-project has made and **a null at n = 1 that settles nothing in either direction**. Nothing
-has ever scored a kill in this scenario, including the stock script.
+**What that does not say.** It carries a mechanism — *does the uncommanded script ever
+fire?* — and no rate.
+
+**A second complete run has since landed, and it changes two of the sentences above.**
+
+| run | ON | SCRIPT-ONLY | OFF |
+|---|---|---|---|
+| `095026` | 3 / 2 / 0 / 0 | 3 / 2 / 0 / 0 | 2 / 1 / 0 / 0 |
+| `135722` | 3 / 2 / 0 / 0 | **2 / 2 / 1 / 0** | 4 / 2 / 0 / 0 |
+
+**The commanded/script-only identity does not replicate.** *"Identical on every column"* is
+a universal claim and one counter-instance disproves it, so it is **refuted rather than
+merely unsupported**. **Nothing about what the commander is worth follows from that** — n = 2,
+and the columns move in opposite directions: the commanded arm launched *more*, and the
+script-only arm scored the kill.
+
+**That `1` is the first kill in seventeen archived runs**, and it is in the arm with no model
+in the loop at all. **The qualification belongs with the number:** two SAM hits had already
+left `BlueF16_02` `wrecked` (cumPk 0.903) before the Su-35's missile finished it. A kill by
+the engine's definition, and not an unaided one.
 
 ## Why the validator is not optional
 
@@ -131,15 +146,21 @@ appeared nowhere in it.)*
 
 Stated here rather than discovered during a demo.
 
-- **C23 — an uncommanded aircraft that runs out of authored route stops flying.** In the
-  confirming run one aircraft sat at 1.5 m/s for roughly 400 of 600 seconds, after which
-  the model faithfully copied that speed into every order and **all 21 rejections in the
-  run were the same speed-floor check**. The stall path is not new; the aircraft used to be
-  destroyed before it could sit in it. Open, with three candidate layers.
+- **C23 — an aircraft that reaches an ordered `hold` point stops flying.** One aircraft sat
+  at 1.5 m/s for roughly 400 of 600 seconds, after which the model faithfully copied that
+  speed into every order and **all 21 rejections in the run were the same speed-floor
+  check**. *(The mechanism was corrected in v1.8.34: **all 39 archived below-floor samples
+  were under `hold`, none under the route-exhaustion path the row originally named**, which
+  is first reached ~280 s after the collapse. Arrival is not sufficient either — of five
+  arrivals, three collapsed and two recovered.)* Open; the field is narrowed and the layer
+  is still an owner decision.
 - **In-engine acceptance is quoted as an interval, never as a point.** Every interval in
   play is 15–30 points wide.
-- **Nothing has ever scored a kill** in this scenario, in any arm.
-- **Everything measured on 2026-08-08 is n = 1.**
+- **Exactly one kill has ever been scored** — 2026-08-08, script-only arm, and the target was
+  already `wrecked` by two SAM hits when the Su-35's missile finished it. Seventeen runs, one
+  kill, none by a commanded arm.
+- **The commanded/script-only identity of the first three-arm run did not replicate**, and
+  n is still 2. Nothing about the commander's value is established in either direction.
 
 ## Authorization — the hosted backend cannot ship
 
