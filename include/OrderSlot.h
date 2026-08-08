@@ -44,6 +44,10 @@ struct CandidateOrder {
     // Not a rejection - it rides here for the same reason the verdict does, because the counter it
     // increments lives on the simulation thread and the worker may not touch it.
     bool stageAReasonTruncated = false;
+
+    // Stage A substituted safety.defaultOrbitRadiusM into a `hold` order whose radius was at or
+    // below zero, instead of rejecting it (C14, v1.8.30). Rides here for the same reason as above.
+    bool stageAOrbitRadiusRepaired = false;
 };
 
 // A mutex-guarded, latest-wins, single-slot exchange between the simulation thread and a worker.

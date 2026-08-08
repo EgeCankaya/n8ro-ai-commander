@@ -61,6 +61,12 @@ struct CommanderStats {
     // separate question - "is the configured model outgrowing the cap?" - and because a truncation
     // nobody counts is the silent shortening §Corrections item 26 records as a defect.
     std::int64_t reasonTruncated = 0;
+    // `hold` orders whose orbitRadiusM Stage A substituted rather than rejecting the order (C14,
+    // v1.8.30). Same placement and the same argument as reasonTruncated above - and it answers the
+    // question the rejection counter used to answer: how often does the model omit a bound no
+    // decoder on either backend can enforce? reject.shape keeps its own counter, so the repair
+    // makes the failure visible in a new place rather than deleting it from the old one.
+    std::int64_t orbitRadiusRepaired = 0;
     std::map<std::string, std::int64_t> rejectByReason;
 };
 
@@ -118,8 +124,12 @@ public:
     [[nodiscard]] std::vector<std::string> rosterIds() const;
 
     // -- Tier-1 ingress (AIC-API-1, v1.2) -------------------------------------------------------
+    // `kind` and `team` are clamped to their closed vocabularies rather than validated (v1.8.30):
+    // an unrecognised or empty value becomes Other / Unknown and the call still succeeds. See
+    // Snapshot.h for why that is the requirement.
     [[nodiscard]] bool reportTrack(
-        const std::string& entityId, const std::string& targetEntityId, double rangeM, double snrDb);
+        const std::string& entityId, const std::string& targetEntityId, double rangeM, double snrDb,
+        TrackKind kind = TrackKind::Other, TrackTeam team = TrackTeam::Unknown);
     [[nodiscard]] bool reportLoadout(
         const std::string& entityId, const std::string& hardpointName,
         const std::string& weaponProfileName, int ammoCount, int ammoMax);
@@ -153,10 +163,17 @@ public:
     // would force every existing caller — the replay suite, the integration suite, the live harness
     // — to restate a value they have no concept of. Zero means "no boundary declared", which is
     // exactly correct for all of them.
+    //
+    // `defaultOrbitRadiusM` is safety.defaultOrbitRadiusM, forwarded to Stage A's `hold`-radius
+    // repair (AIC-ORD-1, v1.8.30). It is a PARAMETER rather than a read of config_ because this
+    // function is static on purpose - see the first comment in its body - and a worker that could
+    // reach the runtime's config would be a worker that could reach the runtime. Defaulted for the
+    // same reason prefixLength is: the offline suites have no CommanderConfig in hand, and the
+    // compiled-in default is the one their fixtures already assume.
     [[nodiscard]] static CandidateOrder runWorkerCall(
         OrderSnapshot snapshot, const std::string& prompt, ILlmClient& client,
         bool& outAccepted, RejectReason& outReason, std::string& outDetail, std::string& outRawBody,
-        std::size_t prefixLength = 0);
+        std::size_t prefixLength = 0, double defaultOrbitRadiusM = kDefaultOrbitRadiusM);
 
     // The form the worker actually uses: packs the Stage-A verdict into the returned candidate so
     // it survives the thread boundary. Prefer this over the out-parameter overload — a caller that
@@ -164,12 +181,13 @@ public:
     // the order log.
     [[nodiscard]] static CandidateOrder runWorkerCall(
         OrderSnapshot snapshot, const std::string& prompt, ILlmClient& client,
-        std::size_t prefixLength = 0);
+        std::size_t prefixLength = 0, double defaultOrbitRadiusM = kDefaultOrbitRadiusM);
 
     void countRejection(RejectReason reason);
     void countAcceptance(std::int64_t latencyMs);
     void countRequest();
     void countReasonTruncation();
+    void countOrbitRadiusRepair();
     void countDroppedSnapshot() { ++stats_.droppedSnapshots; }
 
     // Clears all per-entity state. Called on scenario stop.

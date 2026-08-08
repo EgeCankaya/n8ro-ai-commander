@@ -234,7 +234,8 @@ std::string sanitizeText(const std::string& text, std::size_t maxChars) {
 }
 
 StageAOutcome validateStageA(
-    const std::string& body, const std::string& requestingEntityId, EnvelopeFormat envelope) {
+    const std::string& body, const std::string& requestingEntityId, EnvelopeFormat envelope,
+    double defaultOrbitRadiusM) {
     // -- A0: size ------------------------------------------------------------------------------
     // Before the parse, deliberately. A 10 MB body is not an order and parsing it to discover that
     // spends the worker's time on the adversary's terms. Measured against the body as received,
@@ -407,9 +408,29 @@ StageAOutcome validateStageA(
     if (doc.has("orbitRadiusM") && !readNumber(doc, "orbitRadiusM", order.orbitRadiusM)) {
         return reject(RejectReason::Schema, "'orbitRadiusM' must be a number");
     }
+    // The two directions of this rule are NOT symmetric, and the asymmetry is the requirement
+    // (AIC-ORD-1, v1.8.30, closing C14). Below zero on `hold` is REPAIRED; above zero on a posture
+    // that forbids a radius is still REJECTED.
+    //
+    // The reason is a property of the encoding rather than a preference. Three of the four-branch
+    // schema's conditional rules are forced-to-a-constant rules and every layer holds them: the
+    // local decoder honours `const`, and the hosted projection's pinToConst turns a zero-width
+    // range into one. The hold branch's [1, 50000] is the only rule shaped "greater than zero", and
+    // it is held by nothing anywhere - the local decoder was measured ignoring numeric bounds in
+    // both directions on four models across three families, and the hosted projection strips the
+    // keywords outright because pinToConst cannot rescue a range that is not zero-width.
+    //
+    // So a model emitting a positive radius on `defend` is SAYING SOMETHING WRONG against a rule
+    // the runtime does enforce; a model emitting zero on `hold` is OMITTING SOMETHING the runtime
+    // never compelled it to supply. Rejecting the second discards a posture, waypoint, speed and
+    // ROE that are all sound, over one scalar - and AIC-VAL-2 then holds the PREVIOUS order in
+    // force, which is strictly worse than a repaired one. That is C16's argument, unchanged, and
+    // this was the largest rejection class in the archive at 16 of 55.
+    bool orbitRadiusRepaired = false;
     if (order.posture == Posture::Hold) {
         if (order.orbitRadiusM <= 0.0) {
-            return reject(RejectReason::Shape, "posture 'hold' requires orbitRadiusM > 0");
+            order.orbitRadiusM = defaultOrbitRadiusM;
+            orbitRadiusRepaired = true;
         }
     } else if (order.orbitRadiusM != 0.0) {
         return reject(RejectReason::Shape,
@@ -513,6 +534,14 @@ StageAOutcome validateStageA(
         if (!normalized.has("orbitRadiusM")) {
             (void)normalized.setDouble("orbitRadiusM", 0.0);
         }
+        // The REPAIRED radius, not the one the model sent, and this line is load-bearing for
+        // exactly the reason the `reason` line below is. The hold branch bounds orbitRadiusM to
+        // [1, 50000], so validating the original here would fail every repaired order as `schema`
+        // and give back the whole-order loss the repair exists to prevent - one check later, under
+        // a less informative reason code. Stage A validates the order it is going to ACCEPT.
+        if (orbitRadiusRepaired) {
+            (void)normalized.setDouble("orbitRadiusM", order.orbitRadiusM);
+        }
         // The TRUNCATED reason, not the one the model sent - and this line is load-bearing rather
         // than tidy. The branch document bounds `reason` by maxLength, so validating the original
         // here would fail every over-long order as `schema` and give back exactly the whole-order
@@ -532,6 +561,7 @@ StageAOutcome validateStageA(
     outcome.accepted = true;
     outcome.reason = RejectReason::None;
     outcome.reasonTruncated = reasonTruncated;
+    outcome.orbitRadiusRepaired = orbitRadiusRepaired;
     outcome.order = std::move(order);
     return outcome;
 }

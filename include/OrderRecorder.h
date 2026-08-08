@@ -70,9 +70,14 @@ public:
         int cacheCreationTokens = 0;
     };
 
+    // `orbitRadiusRepaired` marks an order whose `hold` orbit radius Stage A substituted rather
+    // than rejecting (AIC-DET-1, v1.8.30, C14). Written only when true, so it is greppable across
+    // an archive without adding a byte to the records that were not repaired - and written at all
+    // because a field the plugin rewrote without saying so is the silent shortening §Corrections
+    // item 26 already records as a defect, one field over.
     void recordAccepted(
         double publishedSimTimeS, std::int64_t frame, const Order& order, std::int64_t serial,
-        std::int64_t latencyMs, const TokenUsage& usage);
+        std::int64_t latencyMs, const TokenUsage& usage, bool orbitRadiusRepaired = false);
 
     // `usage` is new here (v1.8.18) and it is the half of AIC-DET-1's widening that was not asked
     // for by C4 or C9. A rejected order is still billed: PRD §Corrections item 27(d) records four

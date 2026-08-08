@@ -151,17 +151,30 @@ std::string PromptRenderer::renderSuffix(const OrderSnapshot& snapshot) const {
     (void)own.set("loadout", loadout);
     (void)root.set("own", own);
 
-    // Tracks carry ONLY the three scalars aiCommander.reportTrack accepts. No team, no kind, no
-    // domain: the ingress verb does not carry them and the plugin will not infer them (PRD v1.2,
-    // §Exactly what is transmitted). Every componentTrackIdentity free-text field is excluded
-    // entirely — those are documented as ingested from an external feed and are the injection
-    // channel the threat model names.
+    // Tracks carry ONLY what aiCommander.reportTrack accepts. No domain, and NO SCENARIO TEAM NAME:
+    // the ingress verb does not carry them and the plugin will not infer them (PRD v1.2 as amended
+    // v1.8.30, §Exactly what is transmitted). Every componentTrackIdentity free-text field is
+    // excluded entirely — those are documented as ingested from an external feed and are the
+    // injection channel the threat model names.
+    //
+    // `kind` and `team` were added in v1.8.30 and are rendered from the ENUMS, never from the
+    // strings Tier 1 passed. That is the property AIC-SEC-2 asserts and it is what keeps the
+    // widened row from being a free-text channel: a value outside the five-value and three-value
+    // vocabularies cannot reach these bytes, because by this point it is not a string any more.
+    // `team` is a RELATION to the reporting entity - hostile/friendly/unknown - not a team name,
+    // which is why widening the row does not widen what scenario content leaves the machine.
+    //
+    // Why they exist at all: 14 of 55 archived rejections were the model failing a discrimination
+    // the prompt structurally denied it, while the doctrine simultaneously forbade inferring
+    // anything from the id. §Corrections item 46(c).
     JsonValue tracks = JsonValue::array();
     for (const TrackReport& row : snapshot.tracks) {
         JsonValue entry = JsonValue::object();
         (void)entry.setString("targetEntityId", row.targetEntityId);
         (void)entry.setDouble("rangeM", row.rangeM);
         (void)entry.setDouble("snrDb", row.snrDb);
+        (void)entry.setString("kind", toString(row.kind));
+        (void)entry.setString("team", toString(row.team));
         (void)tracks.pushBack(entry);
     }
     (void)root.set("tracks", tracks);

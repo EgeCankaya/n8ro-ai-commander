@@ -76,7 +76,8 @@ const EntityCommandState* CommanderRuntime::find(const std::string& entityId) co
 }
 
 bool CommanderRuntime::reportTrack(
-    const std::string& entityId, const std::string& targetEntityId, double rangeM, double snrDb) {
+    const std::string& entityId, const std::string& targetEntityId, double rangeM, double snrDb,
+    TrackKind kind, TrackTeam team) {
     if (!config_.enabled) {
         // Reporting into a disabled commander accumulates no state (AIC-API-1, v1.2).
         return false;
@@ -99,6 +100,8 @@ bool CommanderRuntime::reportTrack(
         if (existing.targetEntityId == targetEntityId) {
             existing.rangeM = rangeM;
             existing.snrDb = snrDb;
+            existing.kind = kind;
+            existing.team = team;
             return true;
         }
     }
@@ -107,7 +110,7 @@ bool CommanderRuntime::reportTrack(
         // had reported, and the script has no way to notice.
         return false;
     }
-    state->pendingTracks.push_back(TrackReport{targetEntityId, rangeM, snrDb});
+    state->pendingTracks.push_back(TrackReport{targetEntityId, rangeM, snrDb, kind, team});
     return true;
 }
 
@@ -171,7 +174,7 @@ void CommanderRuntime::setClient(std::unique_ptr<ILlmClient> client) {
 CandidateOrder CommanderRuntime::runWorkerCall(
     OrderSnapshot snapshot, const std::string& prompt, ILlmClient& client,
     bool& outAccepted, RejectReason& outReason, std::string& outDetail, std::string& outRawBody,
-    std::size_t prefixLength) {
+    std::size_t prefixLength, double defaultOrbitRadiusM) {
     // Everything this function can reach is its arguments. There is no `this`, no runtime, no
     // recorder, no entity manager — which is what makes AIC-ARCH-2's "the worker captures only a
     // POD snapshot and the ILlmClient" a property of the signature rather than a review note.
@@ -221,14 +224,15 @@ CandidateOrder CommanderRuntime::runWorkerCall(
 
     // A2 needs to know how this backend wrapped the order, and it takes that as a value rather than
     // as a client — so Stage A stays a pure function and holds nothing live.
-    const StageAOutcome outcome =
-        validateStageA(result.body, candidate.snapshot.entityId, client.envelopeFormat());
+    const StageAOutcome outcome = validateStageA(
+        result.body, candidate.snapshot.entityId, client.envelopeFormat(), defaultOrbitRadiusM);
     outAccepted = outcome.accepted;
     outReason = outcome.reason;
     outDetail = outcome.detail;
     // Set on the candidate directly rather than through an out-parameter, because unlike the
-    // verdict it is not consulted by the overload below - it only has to survive the slot.
+    // verdict they are not consulted by the overload below - they only have to survive the slot.
     candidate.stageAReasonTruncated = outcome.reasonTruncated;
+    candidate.stageAOrbitRadiusRepaired = outcome.orbitRadiusRepaired;
     if (outcome.accepted) {
         candidate.order = outcome.order;
     }
@@ -237,13 +241,14 @@ CandidateOrder CommanderRuntime::runWorkerCall(
 
 CandidateOrder CommanderRuntime::runWorkerCall(
     OrderSnapshot snapshot, const std::string& prompt, ILlmClient& client,
-    std::size_t prefixLength) {
+    std::size_t prefixLength, double defaultOrbitRadiusM) {
     bool accepted = false;
     RejectReason reason = RejectReason::None;
     std::string detail;
     std::string rawBody;
     CandidateOrder candidate = runWorkerCall(
-        std::move(snapshot), prompt, client, accepted, reason, detail, rawBody, prefixLength);
+        std::move(snapshot), prompt, client, accepted, reason, detail, rawBody, prefixLength,
+        defaultOrbitRadiusM);
 
     // The verdict travels WITH the candidate rather than being discarded here. The worker cannot
     // touch the counters or the recorder — both are simulation-thread-only — so the only way a
@@ -269,6 +274,10 @@ void CommanderRuntime::countAcceptance(std::int64_t latencyMs) {
 
 void CommanderRuntime::countReasonTruncation() {
     ++stats_.reasonTruncated;
+}
+
+void CommanderRuntime::countOrbitRadiusRepair() {
+    ++stats_.orbitRadiusRepaired;
 }
 
 void CommanderRuntime::countRejection(RejectReason reason) {
@@ -309,6 +318,11 @@ std::string CommanderRuntime::statsJson() const {
     // Reported next to the totals rather than inside rejectByReason: it is not a rejection, and a
     // reader scanning that map for what went wrong must not find it there (C16, v1.8.25).
     (void)root.setInt64("reasonTruncated", stats_.reasonTruncated);
+    // Beside reasonTruncated and outside rejectByReason, for the identical reason: a repair is not
+    // a rejection. Note that reject.shape KEEPS its counter - the repair does not retire the class,
+    // because a metric that goes green by having its subject deleted is worse than a red one
+    // (C14, v1.8.30).
+    (void)root.setInt64("orbitRadiusRepaired", stats_.orbitRadiusRepaired);
 
     n8ro::core::JsonValue byReason = n8ro::core::JsonValue::object();
     for (const auto& entry : stats_.rejectByReason) {

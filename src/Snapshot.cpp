@@ -5,6 +5,44 @@
 
 namespace arkheon::aicommander {
 
+const char* toString(TrackKind kind) {
+    switch (kind) {
+        case TrackKind::Air:      return "air";
+        case TrackKind::Ground:   return "ground";
+        case TrackKind::Surface:  return "surface";
+        case TrackKind::Munition: return "munition";
+        case TrackKind::Other:    break;
+    }
+    return "other";
+}
+
+const char* toString(TrackTeam team) {
+    switch (team) {
+        case TrackTeam::Hostile:  return "hostile";
+        case TrackTeam::Friendly: return "friendly";
+        case TrackTeam::Unknown:  break;
+    }
+    return "unknown";
+}
+
+// Both parsers CLAMP rather than fail - see the header for why that is the requirement and not a
+// convenience. An exact, case-sensitive match is required: accepting "AIR" or " air " would put a
+// normalization step between Tier 1 and the prompt, and the point of a closed vocabulary is that
+// there is nothing between them.
+TrackKind parseTrackKind(const std::string& text) {
+    if (text == "air")      return TrackKind::Air;
+    if (text == "ground")   return TrackKind::Ground;
+    if (text == "surface")  return TrackKind::Surface;
+    if (text == "munition") return TrackKind::Munition;
+    return TrackKind::Other;
+}
+
+TrackTeam parseTrackTeam(const std::string& text) {
+    if (text == "hostile")  return TrackTeam::Hostile;
+    if (text == "friendly") return TrackTeam::Friendly;
+    return TrackTeam::Unknown;
+}
+
 double groundSpeedMps(double velNMps, double velEMps, double velDMps) {
     // std::sqrt of the sum of squares, not std::hypot: hypot's three-argument overload is C++17 and
     // is the better choice for extreme magnitudes, but the inputs here are aircraft velocities in

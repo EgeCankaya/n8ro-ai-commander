@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Order.h"
+
 #include <plugin/PluginConfigField.h>
 
 #include <optional>
@@ -118,7 +120,10 @@ struct CommanderConfig {
     double minAltitudeHaeM = 100.0;
     double maxAltitudeHaeM = 20000.0;
     double geofenceRadiusM = 200000.0;
-    double defaultOrbitRadiusM = 8000.0;
+    // Published by AIC-VAL-2 rung 2, and - since v1.8.30 - substituted by Stage A into a `hold`
+    // order whose orbitRadiusM arrived at or below zero. One value, two users, so the fallback the
+    // ladder flies and the fallback the validator repairs to cannot drift apart.
+    double defaultOrbitRadiusM = kDefaultOrbitRadiusM;
 
     // -- record.* / replay.* : the order log and its replay source (AIC-DET-1/2) ------------------
     bool recordEnabled = true;            // On by default — determinism depends on it.

@@ -68,8 +68,22 @@ def analyse(path, prefix):
     return Tally(launches, detonations, kills, losses)
 
 
+# The archived engine log for one arm of a run.
+#
+# THREE ARMS, NOT TWO (PRD v1.8.30, C22). `on` and `off` differ in TWO variables - the commander AND
+# the mission script, because the harness restores the shipped script before the control run, which
+# PRD item 45(b) records being published before anyone noticed. `script-only` is the arm that holds
+# the script fixed and moves only the commander, and it is the one that says whether the reference
+# Tier-1 script is as good as the stock one when nothing is commanding it.
+ARM_GLOB = {
+    "on": "commander-on-*.log",
+    "off": "commander-off-*.log",
+    "script-only": "script-only-*.log",
+}
+
+
 def arm_log(run_dir, arm):
-    hits = [p for p in glob.glob(os.path.join(run_dir, "commander-%s-*.log" % arm))
+    hits = [p for p in glob.glob(os.path.join(run_dir, ARM_GLOB[arm]))
             if not p.endswith(".err")]
     return hits[0] if hits else None
 
@@ -86,40 +100,62 @@ def main():
         print("not a directory: %s" % args.archive_root)
         return 1
 
-    totals = {"on": [0, 0, 0, 0], "off": [0, 0, 0, 0]}
+    arms = ("on", "script-only", "off")
+    totals = {arm: [0, 0, 0, 0] for arm in arms}
+    seen = {arm: 0 for arm in arms}
     pairs = 0
-    print("%-10s %-26s %-26s" % ("pair", "ON  launch/det/kill/lost", "OFF launch/det/kill/lost"))
-    print("-" * 64)
+
+    header = "%-8s" % "pair"
+    for arm in arms:
+        header += " %-24s" % ("%s L/D/K/lost" % arm.upper())
+    print(header)
+    print("-" * len(header))
+
     for name in sorted(os.listdir(args.archive_root)):
         run_dir = os.path.join(args.archive_root, name)
         if not os.path.isdir(run_dir) or name < args.since:
             continue
-        on, off = arm_log(run_dir, "on"), arm_log(run_dir, "off")
-        if not on or not off:
-            continue          # an unpaired run compares against nothing
+        logs = {arm: arm_log(run_dir, arm) for arm in arms}
+        # `on` and `off` are still what makes a run a PAIR: script-only is the third arm and is
+        # reported when present rather than required, so every archived run from before v1.8.30
+        # still reads correctly here instead of vanishing from the table.
+        if not logs["on"] or not logs["off"]:
+            continue
         pairs += 1
-        cells = []
-        for arm, path in (("on", on), ("off", off)):
-            t = analyse(path, args.prefix)
+        row = "%-8s" % name[9:15]
+        for arm in arms:
+            if not logs[arm]:
+                row += " %-24s" % "-"
+                continue
+            t = analyse(logs[arm], args.prefix)
+            seen[arm] += 1
             for i, v in enumerate(t):
                 totals[arm][i] += v
-            cells.append("%2d / %2d / %2d / %2d" % t)
-        print("%-10s %-26s %-26s" % (name[9:15], cells[0], cells[1]))
+            row += " %-24s" % ("%2d / %2d / %2d / %2d" % t)
+        print(row)
 
     if not pairs:
         print("no paired runs found under %s" % args.archive_root)
         return 1
 
-    print("-" * 64)
-    print("%-10s %-26s %-26s" % (
-        "POOLED %d" % pairs,
-        "%2d / %2d / %2d / %2d" % tuple(totals["on"]),
-        "%2d / %2d / %2d / %2d" % tuple(totals["off"])))
+    print("-" * len(header))
+    pooled = "%-8s" % ("POOLED%d" % pairs)
+    for arm in arms:
+        pooled += " %-24s" % (("%2d / %2d / %2d / %2d" % tuple(totals[arm])) if seen[arm] else "-")
+    print(pooled)
+    for arm in arms:
+        if seen[arm] != pairs:
+            print("note: %s present in %d of %d runs" % (arm, seen[arm], pairs))
     print()
     print("launch = weapon spawned by a commanded aircraft")
     print("det    = one of those weapons detonated (NOT a kill - see the module docstring)")
     print("kill   = one of those weapons destroyed something")
     print("lost   = a commanded aircraft was destroyed")
+    print()
+    print("ON vs OFF differ in TWO variables - the commander AND the mission script, because the")
+    print("harness restores the shipped script before the control arm. SCRIPT-ONLY holds the script")
+    print("fixed and moves only the commander; it is the arm that says whether the reference Tier-1")
+    print("script fights as well as the stock one. See PRD C21 and C22.")
     return 0
 
 

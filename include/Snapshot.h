@@ -6,12 +6,67 @@
 
 namespace arkheon::aicommander {
 
+// What kind of thing a reported track is (PRD v1.8.30, AIC-API-1, §Corrections item 46(c)).
+//
+// A CLOSED VOCABULARY, and that is the whole reason this is an enum rather than a string. §Out of
+// scope deferred track attributes on the stated cost that "each added string is a new injection
+// surface to charset-filter" - which is true of free text and false of five fixed values. An enum
+// cannot carry an injection payload into a prompt no matter what Tier 1 passes.
+//
+// Derived from the SISO-REF-010 entity kind Tier 1 already reads. Unknown maps to Other rather
+// than rejecting, for the same reason Stage-B check B9 passes an unknown kind: refusing what we
+// could not classify would take every scenario omitting entityType offline.
+enum class TrackKind {
+    Other,
+    Air,
+    Ground,
+    Surface,
+    Munition,
+};
+
+// Whose side a reported track is on, RELATIVE TO THE REPORTING ENTITY (PRD v1.8.30).
+//
+// The relativity is load-bearing for the allowlist, not a convenience: a scenario team NAME is
+// scenario content and would widen what leaves the machine, while a three-valued relation is a
+// comparison result Tier 1 already computed. AIC-SEC-2 asserts that no team name is ever rendered.
+//
+// Friendly is expected to be rare in practice - AIC-ORD-2 requires Tier 1 to omit own-team contacts
+// entirely - and the value exists so a script that does not filter is still describable, and so
+// Unknown stays distinguishable from Friendly.
+enum class TrackTeam {
+    Unknown,
+    Hostile,
+    Friendly,
+};
+
+[[nodiscard]] const char* toString(TrackKind kind);
+[[nodiscard]] const char* toString(TrackTeam team);
+
+// Parse a Lua-supplied attribute into its vocabulary. Both CLAMP rather than fail: an unrecognised,
+// empty, or omitted value becomes Other / Unknown.
+//
+// Clamping rather than rejecting is deliberate and is asserted by its own test. A verb that
+// returned false on an unfamiliar attribute would make a script reporting a contact it cannot
+// classify report NO TRACK AT ALL - and Stage-B check B3 would then reject every targeted order,
+// which is an outage no operator would connect to a vocabulary mismatch. It is also what keeps a
+// script written against the pre-v1.8.30 four-argument form working: it degrades to the old
+// picture instead of losing its tracks.
+[[nodiscard]] TrackKind parseTrackKind(const std::string& text);
+[[nodiscard]] TrackTeam parseTrackTeam(const std::string& text);
+
 // One reported sensor track. Pushed in by Tier 1 via aiCommander.reportTrack, because the plugin
 // has no C++ read seam for sensor detections (PRD Corrections, item 4).
 struct TrackReport {
     std::string targetEntityId;
     double rangeM = 0.0;   // metres, slant range (sensor stub's range_m)
     double snrDb = 0.0;    // decibels (sensor stub's snr_DB)
+
+    // v1.8.30. 14 of 55 archived rejections were the model failing a discrimination the prompt
+    // structurally denied it: the row carried {id, rangeM, snrDb} while the doctrine forbade
+    // inferring anything from the id, and Stage B then rejected the model for engaging munitions
+    // and its own side's SAM radar. These two fields are that gap closed.
+    TrackKind kind = TrackKind::Other;
+    TrackTeam team = TrackTeam::Unknown;
 };
 
 // One hardpoint's remaining stores. Pushed in by Tier 1 via aiCommander.reportLoadout.

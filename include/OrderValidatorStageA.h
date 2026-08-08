@@ -27,6 +27,15 @@ struct StageAOutcome {
     // in rejectByReason - it rides out to the simulation thread only so the event can be counted,
     // because a truncation nobody counts is the silent shortening §Corrections item 26 is about.
     bool reasonTruncated = false;
+
+    // True when a `hold` order's orbitRadiusM was at or below zero and Stage A substituted
+    // safety.defaultOrbitRadiusM rather than rejecting the order (AIC-ORD-1, PRD v1.8.30, C14).
+    //
+    // Same footing as reasonTruncated, and for the same reason: it is NOT a rejection, it does not
+    // appear in rejectByReason, and it rides out to the simulation thread only so the event can be
+    // counted. A repair nobody counts is a silent rewrite of a field the model emitted, which is
+    // the defect §Corrections item 26 already names one field over.
+    bool orbitRadiusRepaired = false;
 };
 
 // Stage A — syntactic validation, worker thread, **no SDK access** (AIC-VAL-1).
@@ -47,10 +56,16 @@ struct StageAOutcome {
 // `envelope` names how the backend wrapped the order (check A2). It arrives as a value so this
 // function keeps holding nothing: with EnvelopeFormat::Raw — the default, and what `stub` and
 // `replay` return — `body` is the order document itself and A2 is a no-op.
+//
+// `defaultOrbitRadiusM` is the value A6 substitutes into a `hold` order that arrived without a
+// usable orbit radius (AIC-ORD-1, v1.8.30). It arrives as a value for the same reason `envelope`
+// does — Stage A stays a pure function of its arguments and reads no config — and the caller passes
+// safety.defaultOrbitRadiusM so the repair and AIC-VAL-2's rung-2 standing order agree.
 [[nodiscard]] StageAOutcome validateStageA(
     const std::string& body,
     const std::string& requestingEntityId,
-    EnvelopeFormat envelope = EnvelopeFormat::Raw);
+    EnvelopeFormat envelope = EnvelopeFormat::Raw,
+    double defaultOrbitRadiusM = kDefaultOrbitRadiusM);
 
 // Charset filter applied to every string that can reach a prompt or an order record.
 //

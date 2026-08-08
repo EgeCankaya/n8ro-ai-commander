@@ -205,12 +205,15 @@ void writeUsage(JsonValue& record, const OrderRecorder::TokenUsage& usage) {
 
 void OrderRecorder::recordAccepted(
     double publishedSimTimeS, std::int64_t frame, const Order& order, std::int64_t serial,
-    std::int64_t latencyMs, const TokenUsage& usage) {
+    std::int64_t latencyMs, const TokenUsage& usage, bool orbitRadiusRepaired) {
     JsonValue record = baseRecord(publishedSimTimeS, frame, OrderEvent::OrderAccepted);
     (void)record.setString("entityId", order.entityId);
     (void)record.setInt64("serial", serial);
     (void)record.setInt64("latencyMs", latencyMs);
     writeUsage(record, usage);
+    if (orbitRadiusRepaired) {
+        (void)record.setBool("orbitRadiusRepaired", true);
+    }
     (void)record.set("order", orderToJson(order));
     writeLine(record.toString());
 }

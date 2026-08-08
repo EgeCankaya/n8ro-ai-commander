@@ -534,6 +534,12 @@ void AiCommanderPlugin::drainCompletedOrders(double simTimeS, std::int64_t frame
         if (candidate->stageAReasonTruncated) {
             runtime_.countReasonTruncation();
         }
+        // Same placement and the same argument for the orbit-radius repair (C14, v1.8.30): the
+        // question "how often does the model omit a bound no decoder can enforce?" does not depend
+        // on whether that particular order survived a later check.
+        if (candidate->stageAOrbitRadiusRepaired) {
+            runtime_.countOrbitRadiusRepair();
+        }
 
         // -- Stage A verdict, acted on here because the worker could not ---------------------------
         // A syntactic rejection must increment its counter and write its record just as a semantic
@@ -604,7 +610,8 @@ void AiCommanderPlugin::drainCompletedOrders(double simTimeS, std::int64_t frame
         runtime_.countAcceptance(candidate->latencyMs);
         // `t` is PUBLICATION time, which is what replay keys on.
         runtime_.recorder().recordAccepted(simTimeS, frame, candidate->order,
-            candidate->snapshot.serial, candidate->latencyMs, usage);
+            candidate->snapshot.serial, candidate->latencyMs, usage,
+            candidate->stageAOrbitRadiusRepaired);
     }
 }
 
@@ -695,12 +702,17 @@ void AiCommanderPlugin::dispatchRequests(double simTimeS, std::int64_t frame) {
         // worker's to touch — and crosses as a plain integer.
         const std::size_t prefixLength = runtime_.promptRenderer().prefix().size();
 
-        auto work = [snapshot, prompt, client, slot, prefixLength]() mutable {
+        // Read here, on the simulation thread, and captured BY VALUE for the same reason as
+        // everything else the worker sees: Stage A's `hold`-radius repair needs the configured
+        // default (AIC-ORD-1, v1.8.30), and the worker may not reach the runtime to ask for it.
+        const double defaultOrbitRadiusM = runtime_.config().defaultOrbitRadiusM;
+
+        auto work = [snapshot, prompt, client, slot, prefixLength, defaultOrbitRadiusM]() mutable {
             // The verdict rides across the slot with the candidate. A Stage-A rejection must reach
             // the simulation thread both so the entity's requestInFlight flag clears — otherwise it
             // goes permanently silent — and so the rejection can be counted and recorded there.
-            (void)slot->publish(
-                CommanderRuntime::runWorkerCall(std::move(snapshot), prompt, *client, prefixLength));
+            (void)slot->publish(CommanderRuntime::runWorkerCall(
+                std::move(snapshot), prompt, *client, prefixLength, defaultOrbitRadiusM));
         };
 
         if (threadRunner_ != nullptr) {

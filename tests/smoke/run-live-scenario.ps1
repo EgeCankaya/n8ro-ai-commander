@@ -59,6 +59,24 @@ param(
     [int]$RunSeconds = 600,
     [switch]$SkipControl,
 
+    # THE THIRD ARM, AND THE ONE THAT HAS NEVER EXISTED (PRD v1.8.30, C22).
+    #
+    # Two arms cannot answer the question this project is asking. The control arm restores the
+    # SHIPPED mission script AND removes the commander config, so commander-on and commander-off
+    # differ in TWO variables - script and commander - and §Corrections item 45(b) records that the
+    # first version of that comparison was published before anyone noticed.
+    #
+    # This arm holds the script fixed and moves only the commander: the commander-AWARE script, run
+    # with no config and no inference server. It separates "the reference script is now as good as
+    # stock" from "the commander adds or subtracts on top of a competent script", and until it
+    # passes the commanded arm measures nothing about the model.
+    #
+    # It is the SUCCESSOR to §Corrections item 45's arm C rather than a repeat of it. Arm C was run
+    # against the BROKEN script and established a mechanism; this one is run against the fixed
+    # script and establishes whether the fix worked. It needs no inference server and costs nothing
+    # but wall clock.
+    [switch]$SkipScriptOnlyArm,
+
     # `claude` REACHES THE NETWORK, and it is the one parameter here that needs an owner grant.
     #
     # This is C1. Every hosted measurement in this project before 2026-08-05 ran against the six
@@ -407,7 +425,29 @@ local.grammarEnabled=true
 
     Assert-That (-not ($log -match '\[ERROR\].*aiCommander')) "plugin emitted no ERROR-level line"
 
-    # -- 4. commander-off control run --------------------------------------------------------------
+    # -- 4. script-only arm: the commander-AWARE script with the commander OFF (C22) ----------------
+    #
+    # RUN ORDER MATTERS AND IS DELIBERATE. This must run BEFORE the control arm below, because the
+    # control arm restores the shipped mission script and cannot be undone without another copy.
+    # Here the swapped script is still in place; only the config goes away.
+    #
+    # What this arm answers: does the reference Tier-1 script fight as well as the stock one when
+    # nothing is commanding it? Before PRD v1.8.30 the answer was no, and the cost was 22 of 24
+    # commanded aircraft - §Corrections item 45's arm C measured exactly this configuration against
+    # the broken script and got 0 launches and 2 of 2 lost.
+    if (-not $SkipScriptOnlyArm) {
+        Write-Host "`n-- script-only arm: commander-aware script, commander OFF (C22) --"
+        if (Test-Path $deployedCfg) { Remove-Item $deployedCfg -Force }
+
+        $scriptOnly = Invoke-Scenario -Name "Mariana Shield" -Seconds $RunSeconds -Tag "script-only"
+        Assert-That ($scriptOnly -notmatch 'enabled=true') `
+            "script-only arm really is commander-off (no config, no orders)"
+        Write-Host "  This arm holds the SCRIPT fixed and moves only the commander, which the"
+        Write-Host "  commander-on/commander-off pair below cannot do: that pair swaps the mission"
+        Write-Host "  script as well (PRD Corrections item 45(b))."
+    }
+
+    # -- 5. commander-off control run --------------------------------------------------------------
     if (-not $SkipControl) {
         Write-Host "`n-- commander-off control run (H1 pair) --"
         # Restore the shipped script FIRST, so the control run is the scenario exactly as it ships.
@@ -470,7 +510,7 @@ finally {
         Copy-Item $orderLog (Join-Path $archiveDir "orders.jsonl") -Force
         $archived++
     }
-    foreach ($tag in @("commander-on", "commander-off")) {
+    foreach ($tag in @("commander-on", "commander-off", "script-only")) {
         foreach ($suffix in @("", ".err")) {
             $src = Join-Path $workDir "$tag-$stamp.log$suffix"
             if (Test-Path $src) {
@@ -486,6 +526,55 @@ finally {
         Write-Host "  *.jsonl ignore rule and check-artifacts.ps1 exist to keep them out of it."
     } else {
         Write-Host "  nothing to archive (no order log and no engine log produced)"
+    }
+
+    # -- the outcome comparison (PRD v1.8.30, §Success metrics) ------------------------------------
+    #
+    # WHY THIS BLOCK EXISTS. For twenty-nine revisions this harness reported acceptance, postures,
+    # frame cost, timeouts and reject rates - and NOT ONE OF THEM IS AN OUTCOME. So a commander
+    # could score green on every published metric while making the entity it commands shoot 87 %
+    # less, hit nothing, and die, which is what §Corrections item 45 eventually measured from logs
+    # that had been on disk since Phase 1b. The instrument already existed; nobody had run it.
+    #
+    # WHY IT IS AN ASSERTION ON THE COMPUTATION AND NOT ON THE RESULT. §Success metrics puts this
+    # row on "report, don't bar" footing, following v1.7.5's precedent and for its reason: at twelve
+    # pairs, one scenario and one force laydown, a bar on KILLS would bar a quantity that is zero in
+    # BOTH arms, and a bar on losses would fail every run. Both would train readers to ignore the
+    # row. What IS asserted is that the comparison RAN - the same category of harness-integrity
+    # check as "the commander is really ON", and for the same reason: a comparison that silently
+    # fails to run looks exactly like a comparison that found nothing wrong.
+    #
+    # It runs in the FINALLY, after archiving, because the analyser reads the archived arm logs.
+    Write-Host "`n-- outcome comparison (launches / detonations / kills / losses) --"
+    $analyser = Join-Path $repoRoot "tools\analyse-outcomes.py"
+    $python = $null
+    foreach ($candidate in @("python", "py")) {
+        $found = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($found) { $python = $found.Source; break }
+    }
+    if (-not (Test-Path $analyser)) {
+        Assert-That $false "tools/analyse-outcomes.py present (the outcome comparison has no instrument)"
+    }
+    elseif (-not $python) {
+        # NOT a silent skip. An outcome row nobody can compute is the gap this whole block closes,
+        # and reporting the run green while the comparison never ran would reproduce it exactly.
+        Assert-That $false "python available to run the outcome comparison (install it or pass -SkipControl)"
+    }
+    elseif ($SkipControl) {
+        Write-Host "  skipped: -SkipControl leaves no arm to compare against"
+    }
+    else {
+        # `--since` is the run's own stamp, so this compares THIS run's arms and not the archive's
+        # history. The pooled figures across the whole archive are a separate question and are read
+        # by running the analyser over $ArchiveRoot by hand.
+        $outcome = & $python $analyser $ArchiveRoot --since $stamp 2>&1 | Out-String
+        Write-Host $outcome
+        Assert-That ($outcome -match 'POOLED') `
+            "outcome comparison was computed for this run's arms (reported, not barred)"
+        Write-Host "  REPORTED, NOT BARRED. A commanded arm launching or surviving materially less"
+        Write-Host "  than its control is a finding to be EXPLAINED before the next gate - not a"
+        Write-Host "  threshold that fails this run. And a detonation is not a kill: the four"
+        Write-Host "  columns are separate because PRD item 40 conflated two of them."
     }
 }
 
