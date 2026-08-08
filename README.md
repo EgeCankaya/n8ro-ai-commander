@@ -12,33 +12,87 @@ thread, and the order schema has no property for heading, velocity, or accelerat
 so "never produces raw kinematics" is enforced by the absence of vocabulary, not by a
 check someone might forget to write.
 
-**The specification is [`docs/prd.md`](docs/prd.md).** It is the contract: 17 functional
-requirements, each with acceptance criteria and a matching user-acceptance criterion.
-Read it before changing anything here.
+## Start here
+
+| If you want… | Read |
+|---|---|
+| **Two pages, and the honest state** | [`docs/summary.md`](docs/summary.md) |
+| The contract — 17 functional requirements, each with acceptance criteria | [`docs/prd.md`](docs/prd.md) |
+| Exactly what leaves the machine on the hosted path | [`docs/egress.md`](docs/egress.md) |
+| Everything that is open, and what it would cost to close | [`docs/open-issues-review.md`](docs/open-issues-review.md) |
+
+`docs/prd.md` is the specification and it is the contract. Read it before changing
+anything here. `docs/summary.md` carries no number that is not also in the PRD, and
+`tools/lint-prd.ps1` fails the build if its version stamp drifts from the PRD's.
 
 ## Status
 
 | Phase | Scope | State |
 |---|---|---|
-| 0 | Scaffold, repo, empty `aiCommander` namespace | **done** |
-| 1a | Full pipeline on the `stub` / `replay` backends | **done** (PR #1) |
-| 1b | `local` adapter against Ollama | **done** — every gate item has a result |
-| 2 | `claude` adapter | not started; needs owner authorization |
+| 0 | Scaffold, repo, empty `aiCommander` namespace | **closed** |
+| 1a | Full pipeline on the `stub` / `replay` backends | **closed** |
+| 1b | `local` adapter against Ollama | **closed** — every gate item has a result |
+| 2 | `claude` adapter | **ran** — adapter complete, measured, and exercised in-engine. **Not formally closed**, and it cannot ship: see *Authorization* below |
+| 3 | Diagnostics on what Phase 2 carried | **closed** — four results, of which three are negative, null, or a refusal |
 
-Phase 1b measured, through the shipping adapter against Ollama 0.32.5 /
-`qwen2.5:7b-instruct-q8_0`: **100 % acceptance over a 200-order soak**, `reject.schema`
-**0.00 %**, `reject.shape` **0.00 %**, p95 **2,163 ms**, and the first order of a run
-completes from a cold model in 4,566 ms against a 90 s budget. Unit suite 98/98, also
-98/98 under AddressSanitizer; deployed-artifact smoke 30/30.
+**Gates, all green as of 2026-08-08:**
 
-The two gate items that were previously unreachable have now **run**, and the in-engine
-live smoke **passes — 17 checks, 0 failed** (PRD v1.7.6). The headless host applies
-`data/config/plugins/ai-commander.cfg` as of v1.7.2, so the commander can be switched on
-for an automated run; the H1 paired logs exist for review.
+| Suite | Result |
+|---|---|
+| Unit | **156 / 156** |
+| Deployed-artifact smoke | **30 / 30** |
+| Live three-arm scenario smoke | **22 checks, 0 failed** |
+| `tools/lint-prd.ps1` · `tools/check-artifacts.ps1` | 10 checks, 0 errors, 0 warnings · 101 files, PASS |
 
-**The phase's most useful finding.** The live runs reject a low rate of orders, every one of
-them the Stage-B safety envelope working. With `rawBody` delivered on Stage-B rejections
-(v1.7.5) the offending order names itself:
+**Measured against the PRD's success metrics:** cost **$1.05** per four-ship
+scenario-hour against a ≤ $1.10 target (**met**); `reject.schema` **0.00 %** over 776
+orders across two backends and three models (**met**); order acceptance **100 %** on the
+synthetic-fixture soaks and **79.8 % [71, 87]** in-engine against real scenario state
+(**two instruments, one bar — see C17**); local 7B round-trip p95 **7,975 ms** against a
+≤ 20 s target (**met**), hosted Haiku p95 **4,615 ms** over the 240-order soak against
+≤ 2.5 s (**missed**, and not control-loop-binding — the 20 s cadence absorbs a p99 of
+7,099 ms). Plugin frame cost p95 **0.0059 ms**, max **0.5334 ms** over 12,001 frames
+against a 5 ms bar.
+
+Total spend across six owner-authorized egress grants: **≈$2.57 of $5**.
+
+## The finding that matters most
+
+**For most of this project's life the commander made the aircraft it commanded worse, and
+nobody had measured it.** §Success metrics carried six metrics and not one of them was an
+outcome, so every published verdict was green while, across twelve paired runs, the
+commanded aircraft launched **4 times against the shipped script's 32**, scored **0 kills
+against 0**, and were **destroyed 22 times out of 24 against 0 of 24**.
+
+**The cause was this project's own deterministic tier, not the language model.** The
+reference Tier-1 script stopped fighting whenever no order was in force, its fire path was
+reachable from one posture out of six, all three rungs of the fallback ladder were
+non-fighting, and it had no automatic defensive reflex at all — while the shipped script's
+first action every tick is a missile-defeat check.
+
+**It is fixed, and the arm built to test it confirms the fix.** The confirming run holds
+the commander off and changes only the script — the one comparison in this project that
+moves a single variable:
+
+| Arm | launches | detonations | kills | aircraft lost |
+|---|---|---|---|---|
+| **broken** script, no commander, no model | 0 | 0 | 0 | **2 of 2** |
+| **fixed** script, no commander, no model | **3** | **2** | 0 | **0 of 2** |
+| fixed script **+ commander** | 3 | 2 | 0 | 0 of 2 |
+| shipped `oppint_red_interceptor.lua` | 2 | 1 | 0 | 0 of 2 |
+
+Both jets end the fixed-script run in `engage … no order` — fighting, with nothing
+commanding them.
+
+**What that does not say.** It is **one run**. It carries a mechanism — *does the
+uncommanded script ever fire?* — and no rate. The commanded and script-only arms are
+**identical on every column**, which is the first unconfounded commander comparison this
+project has made and **a null at n = 1 that settles nothing in either direction**. Nothing
+has ever scored a kill in this scenario, including the stock script.
+
+## Why the validator is not optional
+
+A live run once rejected this order, and every field in it is well-formed and in range:
 
 ```
 posture: hold,  reason: "Maintain orbit over friendly positions."
@@ -46,27 +100,38 @@ waypoint: { latitudeDeg: -31.952876, longitudeDeg: 115.860450 }
 ```
 
 **−31.952876, 115.860450 is Perth, Western Australia** — against an own-ship position near
-Guam. The model substitutes a memorised real-world coordinate for a waypoint whose correct
-value was own-ship position. **It reproduces:** a later run drew the same coordinate on a
-different entity, agreeing to four decimal places, on a value that appears nowhere in the
-prompt.
+Guam. The model substituted a memorised real-world coordinate for a waypoint whose correct
+value was own-ship position, and it reproduced on a different entity to four decimal
+places, on a value appearing nowhere in the prompt. Neither the schema nor the constrained
+decoder can catch that; **Stage B's geofence is the only thing that does**, and widening
+the bound would not have fixed it — the bound is what caught it.
 
-Every field it emits is well-formed and in range, so neither the schema nor the constrained
-decoder can catch it — **Stage B is the only thing that does.** That is the clearest
-evidence this project has produced for why the validator is not optional.
+*(Carried as **C5**, and deliberately not over-claimed: it is a bounded negative at n = 11.)*
 
-It is **not** resolved by widening the geofence. The bound is what caught it.
+## Known rough edges
 
-Two caveats on that run, both in the PRD: the commanded entities are **destroyed at
-~85 s** by the scenario, so a "10-minute run" measures about 85 seconds of commanding on
-~10 requests — the gate is re-specified in v1.7.5 to assert over the commanded window and
-to report acceptance rather than bar it, with the ≥ 95 % bar staying on the 200-order soak
-where the sample size supports it. `reject.shape` held at **0 %** against situations nobody
-authored. Plugin frame cost over **12,001 frames**: p50 0.0018 ms, max 0.262 ms against a
-5 ms bar.
+Stated here rather than discovered during a demo.
 
-**H2 was measured and is not supported** — a byte-stable prefix is worth 3.1 %, not the
-predicted ≥ 30 %, on a GPU where prompt evaluation is a small share of the round trip.
+- **C23 — an uncommanded aircraft that runs out of authored route stops flying.** In the
+  confirming run one aircraft sat at 1.5 m/s for roughly 400 of 600 seconds, after which
+  the model faithfully copied that speed into every order and **all 21 rejections in the
+  run were the same speed-floor check**. The stall path is not new; the aircraft used to be
+  destroyed before it could sit in it. Open, with three candidate layers.
+- **In-engine acceptance is quoted as an interval, never as a point.** Every interval in
+  play is 15–30 points wide.
+- **Nothing has ever scored a kill** in this scenario, in any arm.
+- **Everything measured on 2026-08-08 is n = 1.**
+
+## Authorization — the hosted backend cannot ship
+
+`commander.backend = claude` reaches the network and transmits real scenario state.
+All six egress grants to date authorize **measurement**, each scoped to named experiments,
+and a later grant does not inherit an earlier one's boundary. **There is therefore no
+authorization under which an operator other than the measurer may turn the hosted backend
+on.** `claude.enabled` defaults false and is independent of `commander.backend`.
+
+`docs/egress.md` enumerates every field that leaves the machine. Any change to that set is
+a PRD revision **and** an `egress.md` revision, made before the next hosted request.
 
 ## Prerequisites
 
@@ -114,17 +179,43 @@ Expected: `create_plugin`, `destroy_plugin`, `get_plugin_signature`.
 
 | Suite | Command | Needs |
 |---|---|---|
-| Unit (87) | build `tests\ai-commander-tests.vcxproj`, run `tests\bin\release\ai-commander-tests.exe` **from the release root** | SDK only — **no server, no network** |
+| **Unit (156)** | build `tests\ai-commander-tests.vcxproj`, run `tests\bin\release\ai-commander-tests.exe` **from the release root** | SDK only — **no server, no network** |
 | ASan | same, with `/p:EnableASAN=true /p:IntDir=x64\asan\ /p:OutDir=bin\asan\`. Run it from a shell that has sourced `dev\setup-dev.cmd`, or the ASan runtime DLL will not resolve | SDK only |
-| Deployed-artifact smoke (25) | `tests\smoke\run-smoke.ps1 -ReleaseRoot C:\N8RO` | a deployed DLL |
+| **Deployed-artifact smoke (30)** | `tests\smoke\run-smoke.ps1 -ReleaseRoot C:\N8RO` | a deployed DLL |
 | **Live** gate harness | build `tests\live\ai-commander-live-tests.vcxproj`, run from the repo root: `--mode all --orders 200` | **a running inference server** |
-| **Live** scenario smoke | `tests\smoke\run-live-scenario.ps1 -RunSeconds 600` | a server, and the commander enabled |
+| **Live** scenario smoke (22 checks, 3 arms) | `tests\smoke\run-live-scenario.ps1 -RunSeconds 600` | a server, and the commander enabled |
 
 The first three are the CI gate and are required to run with no inference server and no
 network. The two live suites are separate projects invoked by hand, deliberately — the
 PRD requires that separation rather than merely recommending it.
 
-## Running the local backend
+**The unit suite exercises the reference Lua script in a real Lua VM**
+(`tests/ReferenceScriptTests.cpp`), driving `onTick` against recording stubs for the six
+global tables the script touches. Nothing checked that file until 2026-08-08, which is how
+the defect above survived: it was validated by being run inside a 22-minute scenario and
+read afterwards in an order log.
+
+## Running a live scenario
+
+Three arms, ~11 minutes each, ~35 minutes total:
+
+```bat
+tests\smoke\run-live-scenario.ps1 -RunSeconds 600 -Backend local -LocalModel "qwen2.5:7b-instruct-q8_0"
+```
+
+**Do not interrupt it.** Its `finally` block restores the shipped mission script, the
+doctrine, and the deployed config. Killing it mid-run leaves the swapped script in place
+and the commander silently enabled for every later run of that release tree, interactive
+ones included.
+
+Run evidence is archived **outside this repository**, to
+`Documents\N8RO AI Commander logs\<stamp>-<backend>\`. Order logs carry live scenario
+state — positions, ORBAT, team assignments, loadouts — which inherits the release tree's
+proprietary classification. `*.jsonl` is a security-relevant ignore rule and
+`tools/check-artifacts.ps1` enforces it over the tracked file list, because an
+already-tracked file stays tracked and `git add -f` bypasses `.gitignore` entirely.
+
+### The local backend
 
 You need an [Ollama](https://ollama.com) server and a model **tag** — not a GGUF
 filename, which is what the default used to be and what fails with model-not-found:
@@ -141,8 +232,9 @@ on the first run, both of which the plugin logs:
   could not find, the prompt is running without doctrine and order quality is degraded
   silently. The post-build event seeds `data/doctrine.txt` into the release tree if it is
   absent; it never overwrites an edited one.
-- `backend=local enabled=true` — the headless `n8ro-sim-local.exe` does **not** apply
-  per-plugin config, so a `.cfg` file alone will not turn the commander on there.
+- `backend=local enabled=true` — if this is missing the run measured the stub backend, and
+  a green result against canned orders is worse than a red one because it looks like
+  evidence.
 
 ## Conventions
 
@@ -153,10 +245,14 @@ on the first run, both of which the plugin logs:
 - **The plugin never mutates entity state.** No `entityControl.requestUpdate*`, no
   `writeComponentField*`. Every motion originates from a Tier-1 `navigation.*` or
   `weapon.*` call.
-- **Scope Authority.** A new Lua function, posture, order field, config field, or
-  backend requires a PRD revision first. See the PRD's Scope Authority section.
+- **Scope Authority — the PRD changes before the code.** A new Lua function, posture, order
+  field, config field, backend, record field, or transmitted field requires a PRD revision
+  first, in its own commit. See the PRD's Scope Authority section.
+- **A single run may open a question; it may not close one** — unless the question is a
+  mechanism readable directly off recorded values. A mechanism is not a rate, and a
+  mechanism must never be inferred from a distribution of outputs.
 - Order logs are gitignored. They contain live scenario state.
 
 ## License
 
-See [`NOTICE`](NOTICE). Default to private; publication requires owner authorization.
+See [`NOTICE`](NOTICE). Private; publication requires owner authorization.

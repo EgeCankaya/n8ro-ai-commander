@@ -7,7 +7,7 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # N8RO AI Entity Commander — summary
 
-**PRD version:** v1.8.31
+**PRD version:** v1.8.32
 **Date:** 2026-08-08
 **Audience:** the platform owner, and whoever picks up the next block of work.
 
@@ -90,7 +90,7 @@ headroom. Only the hosted entry of that row had ever been measured, and only the
 | Parse/schema rejection rate | **MET** — 0.00 % over 776 orders, two backends, three models |
 | Plugin cost per frame | **MET** |
 | Replay reproducibility | **MET** |
-| Order round-trip latency | **MET** on the shipped local default; **MISSED** on the hosted path, informational and not control-loop-binding |
+| Order round-trip latency | **MET** on the shipped local default (p95 7,975 ms against ≤ 20 s); **MISSED** on the hosted path (240-order soak p95 4,615 ms against ≤ 2.5 s), informational and not control-loop-binding |
 | **Engagement outcome** | **Reported, not barred.** New in v1.8.30 — the row that did not exist while the system was doing harm |
 
 *Source: §Success metrics.*
