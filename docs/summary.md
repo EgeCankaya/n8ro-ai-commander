@@ -7,8 +7,8 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # N8RO AI Entity Commander — summary
 
-**PRD version:** v1.8.30
-**Date:** 2026-08-07
+**PRD version:** v1.8.31
+**Date:** 2026-08-08
 **Audience:** the platform owner, and whoever picks up the next block of work.
 
 > **This document carries no number that is not also in `docs/prd.md`.** Every figure below cites the
@@ -49,10 +49,19 @@ readable off the source, and an isolating arm with no model in the loop at all r
 
 *Source: §Corrections items 45 and 46(a); C21.*
 
-**All four are fixed in v1.8.30**, specified in the PRD first and then implemented: AIC-VAL-2's ladder
-is re-specified so every rung fights, AIC-ORD-2 gains the reference script's engagement obligations,
-and the script is now the shipped script's behaviour **plus** an order-override layer rather than a
-parallel implementation of part of it. **The fix is not yet confirmed by a run** — that is C22.
+**All four were fixed in v1.8.30 and the fix is confirmed in v1.8.31.** The arm that had never
+existed — the **fixed** script run with the commander off and no model, which is the only comparison
+in the project that changes exactly one thing — goes from **0 launches and 2 of 2 aircraft lost** to
+**3 launches, 2 detonations, 0 of 2 lost**, ending the run with both jets fighting under no order at
+all. **C21 and C22 close on that mechanism, and explicitly not on a rate:** one run does not establish
+what the defect was worth. *Source: §Corrections item 47(a).*
+
+**Two results from that run that should travel with it.** The commanded arm and the script-only arm
+are **identical on every column** — the first unconfounded commander comparison this project has made,
+and **a null at n = 1 that settles nothing in either direction.** And the fix immediately revealed a
+second defect it had been masking: an uncommanded aircraft that runs out of authored route **stops
+flying**, after which every order is rejected for copying its own stopped speed. Carried as **C23**.
+*Source: §Corrections item 47(b), 47(d).*
 
 **A second finding, independent of the first.** The largest rejection class in the archive
 (`reject.shape`, **16 of 55, 29.1 %**) was diagnosed by a controlled probe of the local decoder:
@@ -97,17 +106,16 @@ controlled requests to a local inference server carrying no scenario state. *Sou
 
 | # | Action | Cost | Needs |
 |---|---|---|---|
-| 1 | **Run C22's arm** — the fixed script with the commander off. Until it passes, the commanded arm measures nothing about the model | ~35 min | No grant, no model, no network |
-| 2 | Re-measure the outcome comparison over the fixed script, and fold the result into §Success metrics' new row | ~1 h | The same runs |
-| 3 | Decide the standing hosted-egress authorization — **and revise `docs/egress.md` and AIC-SEC-2 first**, because v1.8.30 changed what leaves the machine | minutes | The owner |
-| 4 | Re-run the domain review of posture appropriateness against a Tier 1 that fights (H1's marks were taken against one that did not) | ~2 h | A domain reviewer |
+| 1 | **Decide C23's layer** — an uncommanded aircraft that runs out of route stops flying, and it took 21 of 21 rejections in the confirming run. Script, doctrine or snapshot; the choice is a design decision | ~half a day | No grant, no model |
+| 2 | **Repeat the three-arm run** — everything from 2026-08-08 is n = 1, including the neutral commander result | ~35 min each | No grant, no model, no network |
+| 3 | Re-run the domain review of posture appropriateness against a Tier 1 that fights (H1's marks were taken against one that did not) | ~2 h | A domain reviewer |
+| 4 | Decide the standing hosted-egress authorization. `docs/egress.md` is accurate again as of v1.8.31, having been stale on three counts | minutes | The owner |
 
 ## What is still open
 
 | # | Item |
 |---|---|
-| **C21** | The reference script's engagement gap — **specified and implemented in v1.8.30, open until a run confirms it** |
-| **C22** | The script-only arm has never been run. The harness gained it in v1.8.30 |
+| **C23** | An uncommanded aircraft that runs out of authored route **stops flying**, after which every order is rejected for copying its own stopped speed. Not a new defect — the aircraft used to die before it could sit in it. Three candidate layers, and picking one now would be picking it blind |
 | **C17** | Acceptance is measured by two instruments and only one is gated. **Owner-decided 2026-08-06: the bar stays on the fixtures.** The row stays open because the decision does not make the instruments agree |
 | **C8** | A `maxTokens` ceiling sized from one 48-order run. Binds only if a non-Haiku model is adopted |
 | **C5** | A bounded negative at n = 11; changes no conclusion |
@@ -123,7 +131,7 @@ measuring itself, and it is a decision someone has to make. *Source: §Review ch
 ## The one sentence an owner should take away
 
 The project built a careful, well-instrumented pipeline and **never once measured whether it helps**;
-when it finally did, the answer was no — **and the reason was in its own deterministic tier**, which
-means no run to date has given the language model a fair test. That defect is now fixed and
-specified. **Whether the fix works is one 35-minute run away, and it needs no money and no
-authorization.**
+when it finally did, the answer was no — **and the reason was in its own deterministic tier**, not in
+the language model. **That defect is now fixed, and the arm built to test it confirms the fix.** What
+the commander itself is worth remains genuinely unmeasured: the first clean comparison ever run
+returned a null at n = 1, and the fix immediately exposed a second defect it had been hiding.
