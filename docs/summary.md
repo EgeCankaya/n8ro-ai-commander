@@ -7,7 +7,7 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # N8RO AI Entity Commander — summary
 
-**PRD version:** v1.8.35
+**PRD version:** v1.8.36
 **Date:** 2026-08-08
 **Audience:** the platform owner, and whoever picks up the next block of work.
 
@@ -112,7 +112,8 @@ headroom. Only the hosted entry of that row had ever been measured, and only the
 | Metric | Verdict |
 |---|---|
 | Cost per four-ship scenario-hour | **MET** — $1.05 against ≤ $1.10 |
-| Order acceptance rate | **MET (fixtures)** · **79.8 % [71, 87] in-engine, not gated** — two instruments, one bar (**C17**, owner-decided) |
+| **Fixture** acceptance rate | **MET** — 100 % on the synthetic soaks. *(v1.8.36 — the row is named for its instrument now, so it cannot be read as the engine's)* |
+| **In-engine** acceptance rate | **Not gated, by owner decision.** **64.8 % [59.3, 70.0]** over 324 resolved orders — and **82.0 % [76.8, 86.5]** once the two non-model-failure classes are removed. **More than half the shortfall is C23** |
 | Parse/schema rejection rate | **MET** — 0.00 % over 776 orders, two backends, three models |
 | Plugin cost per frame | **MET** |
 | Replay reproducibility | **MET** |
@@ -120,6 +121,15 @@ headroom. Only the hosted entry of that row had ever been measured, and only the
 | **Engagement outcome** | **Reported, not barred.** New in v1.8.30 — the row that did not exist while the system was doing harm |
 
 *Source: §Success metrics.*
+
+<!-- in-engine-acceptance: 64.8 [59.3, 70.0] n=324 runs=23 -->
+
+***(v1.8.36 — the in-engine figure now has an owner and a pin.)*** It had gone stale **four times**,
+always the same way: a run was archived, nobody recomputed, and the old number was requoted until a
+reader caught it. **`tools/acceptance-report.py` regenerates it** — refusing to print until its
+interval code reproduces the PRD's own published 50/58 → [74.6 %, 93.9 %] — and
+**`tools/lint-prd.ps1` fails the build if this document, the PRD and the README disagree.** Same
+mechanism as the version stamp above, which has never drifted. *Source: §Corrections item 52(c).*
 
 ## What it cost
 
@@ -152,26 +162,30 @@ condition a reader can test without running anything. *Source: §Carried out of 
 | **C23** | **The model orders every `hold` at the aircraft's own position; the aircraft stops there**, after which every order is rejected for copying its own stopped speed. Not a new defect — the aircraft used to die before it could sit in it. *(v1.8.35 — **19 of 19** holds ordered at 0.0 m, so there is no "arrival"; and **the stall survives a full release to Tier 1**, so the fallback ladder is not what sustains it. **The question now has two ends and they are different layers** — the onset, and the failure to recover. **The counter-instance cannot be got by running more scenarios; it must be injected.** The layer is still the owner's to pick)* |
 | **C17** | Acceptance is measured by two instruments and only one is gated. **Owner-decided 2026-08-06: the bar stays on the fixtures.** The row stays open because the decision does not make the instruments agree |
 
-**DEFERRED — dormant on purpose, each with the condition that wakes it.**
+**CLOSED AND CANCELLED v1.8.36 — two owner decisions, and the register is down to two live rows.**
 
-| # | Item | Revisit when |
-|---|---|---|
-| **C8** | A `maxTokens` ceiling sized from one 48-order run is sized against noise. **512 is right for the shipped default and no other value is derivable** — 673 is a *sample* maximum, not a bound | **A non-Haiku model is proposed as `claude.model`'s default.** It then needs re-measurement over **at least two independent runs**, and must **not** be scaled from another model's headroom — that method would have said ~2,000 against a real 673 |
-| **C6** | **A dependency row, not a work row.** Whether `n8ro-llm` is ever installed is someone else's roadmap answer, and **nothing in this project is blocked on it** — the `ILlmClient` seam makes a "yes" an added adapter rather than a redesign | **`n8ro-llm` appears in the release tree** — a DLL in `bin/`, an import library in `lib/`, or headers under `include/`. **Re-verified absent 2026-08-08.** One directory listing, where the old target was the date "v1.1 planning" |
+- **C8 CLOSES.** `claude-haiku-4-5` is and will remain the default, so `claude.maxTokens = 512` is
+  simply correct and the row's condition does not arise. **Closed on the decision, not on the
+  measurement** — 673 is still a *sample* maximum that says nothing about any other model. The
+  revisit condition is **kept as a tripwire**: a non-Haiku default needs re-measurement over ≥ 2
+  runs and must never be scaled from another model's headroom.
+- **C6 is CANCELLED — not closed, and not answered.** Whether `n8ro-llm` is ever installed is
+  someone else's roadmap answer, **nothing here is blocked on it**, and the row implied a debt that
+  never existed. **The design decision is untouched:** §Out of scope, §Alternatives Option 3 and
+  ADR-2's seam already say what to do if it ever lands. Two checklist boxes now stand unticked and
+  **both are governance**.
 
-**CLOSED this revision — C5**, as a bounded negative at n = 11, on the mechanism and explicitly not
+**CLOSED earlier — C5**, as a bounded negative at n = 11, on the mechanism and explicitly not
 on a rate. The Perth substitution is the standing argument for Stage B's geofence — the bound is
 what caught it — and 11 waypoint-carrying orders support no rate at all. **It carries one rule
 forward: a bounded negative at n = 11 must never lead a summary of this project**, which is what the
 pre-v1.8.32 README did while C21 appeared nowhere in it. *Source: §Corrections items 48(e), 49(b).*
 
-**Three checklist boxes are unticked, and they are not three debts.** **Two are governance
-decisions**: repository visibility is confirmed private (checked 2026-08-07), and there is **still
-no standing authorization for hosted egress outside a measurement grant** — so
+**Two checklist boxes are unticked and both are governance** *(v1.8.36 — it was three; OQ-3's was
+cancelled rather than answered)*: repository visibility is confirmed private (checked 2026-08-07),
+and there is **still no standing authorization for hosted egress outside a measurement grant** — so
 `commander.backend = claude` cannot ship to anyone, which is the right posture for a project still
-measuring itself and is a decision someone has to make. **The third is OQ-3**, the external
-dependency above, which nobody here can resolve. *Source: §Review checklist;
-`docs/open-issues-review.md` Appendix A.*
+measuring itself and is a decision someone has to make. *Source: §Review checklist.*
 
 ---
 

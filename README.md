@@ -39,15 +39,14 @@ anything here. `docs/summary.md` carries no number that is not also in the PRD, 
 nobody should touch and a live question used to look identical; a **deferred** row now carries a
 revisit condition you can test without running anything.
 
-| # | State | Item | Revisit when |
-|---|---|---|---|
-| **C23** | **open** | An uncommanded aircraft that runs out of authored route stops flying | — it is a design decision between three layers |
-| **C17** | **open** | Acceptance is measured by two instruments and only one is gated | — owner-decided 2026-08-06; the decision does not make the instruments agree |
-| **C8** | **deferred** | A `maxTokens` ceiling sized from one 48-order run is sized against noise | a **non-Haiku model is proposed** as `claude.model`'s default |
-| **C6** | **deferred** *(dependency)* | Is `n8ro-llm` ever installed — someone else's roadmap, and **nothing here is blocked on it** | **`n8ro-llm` appears in the release tree** (`bin/`, `lib/` or `include/`) — absent as of 2026-08-08 |
+| # | State | Item |
+|---|---|---|
+| **C23** | **open** | The model orders every `hold` at the aircraft's own position; the aircraft stops there. **Fix specified in v1.8.36** (AIC-ORD-2 clauses 7 and 8), not yet coded |
+| **C17** | **open** | Acceptance was measured by two instruments under one name. **v1.8.36 splits the row and gives the in-engine figure a tool and a lint pin.** The bar stays on the fixtures, by owner decision |
+| ~~C8~~ | closed | *(v1.8.36 — Haiku is and will remain the default, so `maxTokens = 512` is correct. Revisit condition kept as a tripwire)* |
+| ~~C6~~ | cancelled | *(v1.8.36 — not answered; **nothing here is blocked on it**, and §Out of scope already specifies both branches)* |
 
-Everything else in the register is closed. **Two open rows, and both are on the owner's desk rather
-than an engineer's.**
+Everything else in the register is closed. **Two live rows.**
 
 **Gates, all green as of 2026-08-08:**
 
@@ -61,8 +60,10 @@ than an engineer's.**
 **Measured against the PRD's success metrics:** cost **$1.05** per four-ship
 scenario-hour against a ≤ $1.10 target (**met**); `reject.schema` **0.00 %** over 776
 orders across two backends and three models (**met**); order acceptance **100 %** on the
-synthetic-fixture soaks and **79.8 % [71, 87]** in-engine against real scenario state
-(**two instruments, one bar — see C17**); local 7B round-trip p95 **7,975 ms** against a
+synthetic-fixture soaks and **64.8 % [59.3, 70.0]** in-engine against real scenario
+state — **82.0 % [76.8, 86.5]** once the two non-model-failure classes are removed, and
+**more than half the shortfall is C23** (**two instruments, now two named rows — see
+C17**); local 7B round-trip p95 **7,975 ms** against a
 ≤ 20 s target (**met**), hosted Haiku p95 **4,615 ms** over the 240-order soak against
 ≤ 2.5 s (**missed**, and not control-loop-binding — the 20 s cadence absorbs a p99 of
 7,099 ms). Plugin frame cost p95 **0.0059 ms**, max **0.5334 ms** over 12,001 frames
@@ -163,7 +164,11 @@ Stated here rather than discovered during a demo.
   fallback ladder is not what sustains it.)* Open. **The question has two ends — the onset and
   the failure to recover — and they are different layers.** Still an owner decision.
 - **In-engine acceptance is quoted as an interval, never as a point.** Every interval in
-  play is 15–30 points wide.
+  play is 15–30 points wide. *(v1.8.36 — it had gone stale four times under that rule alone,
+  so `tools/acceptance-report.py` now owns the number and `tools/lint-prd.ps1` fails the
+  build if this file, the PRD and the summary disagree.)*
+
+<!-- in-engine-acceptance: 64.8 [59.3, 70.0] n=324 runs=23 -->
 - **Two kills have ever been scored** — both 2026-08-08, both in the script-only arm, and in
   each the target was already `wrecked` by two SAM hits when the Su-35's missile finished it.
   Eighteen runs, two kills, **none by a commanded arm** — and no rate follows from that.
