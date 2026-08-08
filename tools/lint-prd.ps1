@@ -266,7 +266,42 @@ if (-not $statusLine) {
 }
 
 # ---------------------------------------------------------------------------------------------
-# 7. Required sections for the Comprehensive tier
+# 7. The summary artifact must not go stale
+# ---------------------------------------------------------------------------------------------
+# docs/summary.md is the two-page front door to a 4,000-line document (PRD v1.8.30, §Corrections
+# item 46). A summary that drifts is worse than none, and this project has demonstrated twice that
+# continuously-maintained duplicate figures drift: §Success metrics' headline in-engine acceptance
+# figure was ONE RUN STALE when v1.8.30 recomputed it, sitting under a subsection about why that
+# number needed watching.
+#
+# So the summary carries a version stamp and this check pins it to the PRD's. The failure mode it
+# catches is not a typo - it is a PRD revision that changed a verdict while the summary kept quoting
+# the old one, which is exactly the failure a reader consults a summary to avoid.
+Write-Host "[Summary artifact]"
+
+$summaryPath = Join-Path (Split-Path -Parent $Path) "summary.md"
+if (-not (Test-Path $summaryPath)) {
+    Warn "docs/summary.md is missing - the PRD has no short front door (PRD v1.8.30, item 46)"
+    Check "summary artifact: absent"
+} else {
+    $summaryLines = Get-Content -Path $summaryPath
+    $stamp = @(Find-Lines $summaryLines '^\*\*PRD version:\*\*\s*(v[\d.]+)') | Select-Object -First 1
+    if (-not $stamp) {
+        Fail "docs/summary.md has no '**PRD version:** vN.N' stamp - without it nothing can tell whether it is current"
+        Check "summary artifact: unstamped"
+    } else {
+        $summaryVersion = $stamp.Match.Groups[1].Value
+        Check "summary artifact: $summaryVersion"
+        if ($statusLine -and $summaryVersion -ne $statusLine.Match.Groups[1].Value) {
+            Fail ("docs/summary.md is stamped $summaryVersion but the PRD is " `
+                + "$($statusLine.Match.Groups[1].Value) - regenerate the summary, or the front door " `
+                + "quotes a verdict the document no longer holds") $stamp.LineNumber
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------------------------
+# 8. Required sections for the Comprehensive tier
 # ---------------------------------------------------------------------------------------------
 Write-Host "[Required sections]"
 
