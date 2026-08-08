@@ -7,7 +7,7 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # N8RO AI Entity Commander — summary
 
-**PRD version:** v1.8.34
+**PRD version:** v1.8.35
 **Date:** 2026-08-08
 **Audience:** the platform owner, and whoever picks up the next block of work.
 
@@ -64,27 +64,30 @@ Carried as **C23**. *Source: §Corrections item 47(b), 47(d).*
 
 ***(v1.8.34 — a second complete run changes both of those, and adds a first.)***
 
-| run | ON | SCRIPT-ONLY | OFF |
-|---|---|---|---|
-| `095026` | 3 / 2 / 0 / 0 | 3 / 2 / 0 / 0 | 2 / 1 / 0 / 0 |
-| `135722` | 3 / 2 / 0 / 0 | **2 / 2 / 1 / 0** | 4 / 2 / 0 / 0 |
+| run | build | ON | SCRIPT-ONLY | OFF |
+|---|---|---|---|---|
+| `095026` | old | 3 / 2 / 0 / 0 | 3 / 2 / 0 / 0 | 2 / 1 / 0 / 0 |
+| `135722` | old | 3 / 2 / 0 / 0 | **2 / 2 / 1 / 0** | 4 / 2 / 0 / 0 |
+| `185750` | new | 3 / 2 / 0 / 0 | **2 / 2 / 1 / 0** | 4 / 2 / 0 / 0 |
 
 **The identity does not replicate, and is refuted rather than merely unsupported** — *"identical on
 every column"* is a universal claim and one counter-instance disproves it. **Nothing about what the
-commander is worth follows:** n = 2, and the columns move in opposite directions — the commanded arm
-launched *more*, and the script-only arm scored the kill.
+commander is worth follows**, and the obvious reading of the repeat is too strong: **the script-only
+arm carries no model and is near-deterministic** — its two kills are byte-identical — so those two
+runs are nearer one observation than two, and **`095026` is the outlier that wants explaining.** The
+commanded arm was 3 / 2 / 0 / 0 in all three runs; **the variance sits in the arm without the model.**
 
-**That `1` is the first kill in seventeen archived runs**, and it is in the arm with no model in the
-loop at all. **The qualification belongs with the number:** two SAM hits had already left the target
-`wrecked` before the Su-35's missile finished it. A kill by the engine's definition; not an unaided
-one. **Every document in this project previously said no arm had ever scored one.**
+**Those kills are the only two in eighteen archived runs**, both in the arm with no model in the loop.
+**The qualification belongs with the number:** two SAM hits had already left the target `wrecked`
+before the Su-35's missile finished it. A kill by the engine's definition; not an unaided one.
 
-**And C23's mechanism was misread.** All **39** archived samples below the speed floor — three runs,
-two aircraft — had **`hold`** in force; **not one** was under the route-exhaustion path the row
-named, which is first reached ~280 s *after* the collapse. The aircraft sits 1.6–1.9 km from a point
-it was ordered to orbit at 5–8 km and 320 m/s. Arrival is **not sufficient**, though: of five
-arrivals three collapsed and two recovered — from 148.9 / 149.9 m/s, which is the copied-speed latch
-showing on the aircraft that did *not* stall. *Source: §Corrections item 50.*
+**And C23's mechanism was misread twice — the second time by this project's own analysis.** **All 19
+archived `hold` orders were issued at 0.0 m from the aircraft's own position:** the model echoes own
+position back as the waypoint, so **there is no "arrival"** — the aircraft is told to hold where it
+already is, has nowhere to fly, and coasts 320 → ~128 → 1.5 m/s. **And the stall survives a full
+release to Tier 1** — twelve archived samples sit below the floor with **no order in force at all**,
+while the reference script calls `resumeWaypointFollowing`. So the fallback ladder is **not** what
+makes it permanent, which is what v1.8.34 claimed. *Source: §Corrections items 50, 51.*
 
 **A second finding, independent of the first.** The largest rejection class in the archive
 (`reject.shape`, **16 of 55, 29.1 %**) was diagnosed by a controlled probe of the local decoder:
@@ -146,7 +149,7 @@ condition a reader can test without running anything. *Source: §Carried out of 
 
 | # | Item |
 |---|---|
-| **C23** | **An aircraft that reaches an ordered `hold` point stops flying**, after which every order is rejected for copying its own stopped speed. Not a new defect — the aircraft used to die before it could sit in it. *(v1.8.34 — the mechanism is corrected: 39 of 39 below-floor samples were under `hold`, none under route exhaustion, so the script's resume path is **refuted as the onset**. The field is narrowed; **the layer is still the owner's to pick**)* |
+| **C23** | **The model orders every `hold` at the aircraft's own position; the aircraft stops there**, after which every order is rejected for copying its own stopped speed. Not a new defect — the aircraft used to die before it could sit in it. *(v1.8.35 — **19 of 19** holds ordered at 0.0 m, so there is no "arrival"; and **the stall survives a full release to Tier 1**, so the fallback ladder is not what sustains it. **The question now has two ends and they are different layers** — the onset, and the failure to recover. **The counter-instance cannot be got by running more scenarios; it must be injected.** The layer is still the owner's to pick)* |
 | **C17** | Acceptance is measured by two instruments and only one is gated. **Owner-decided 2026-08-06: the bar stays on the fixtures.** The row stays open because the decision does not make the instruments agree |
 
 **DEFERRED — dormant on purpose, each with the condition that wakes it.**

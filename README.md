@@ -103,21 +103,28 @@ fire?* — and no rate.
 
 **A second complete run has since landed, and it changes two of the sentences above.**
 
-| run | ON | SCRIPT-ONLY | OFF |
-|---|---|---|---|
-| `095026` | 3 / 2 / 0 / 0 | 3 / 2 / 0 / 0 | 2 / 1 / 0 / 0 |
-| `135722` | 3 / 2 / 0 / 0 | **2 / 2 / 1 / 0** | 4 / 2 / 0 / 0 |
+| run | build | ON | SCRIPT-ONLY | OFF |
+|---|---|---|---|---|
+| `095026` | old | 3 / 2 / 0 / 0 | 3 / 2 / 0 / 0 | 2 / 1 / 0 / 0 |
+| `135722` | old | 3 / 2 / 0 / 0 | **2 / 2 / 1 / 0** | 4 / 2 / 0 / 0 |
+| `185750` | new | 3 / 2 / 0 / 0 | **2 / 2 / 1 / 0** | 4 / 2 / 0 / 0 |
 
 **The commanded/script-only identity does not replicate.** *"Identical on every column"* is
 a universal claim and one counter-instance disproves it, so it is **refuted rather than
-merely unsupported**. **Nothing about what the commander is worth follows from that** — n = 2,
-and the columns move in opposite directions: the commanded arm launched *more*, and the
-script-only arm scored the kill.
+merely unsupported**.
 
-**That `1` is the first kill in seventeen archived runs**, and it is in the arm with no model
-in the loop at all. **The qualification belongs with the number:** two SAM hits had already
-left `BlueF16_02` `wrecked` (cumPk 0.903) before the Su-35's missile finished it. A kill by
-the engine's definition, and not an unaided one.
+**The obvious reading of the repeat is too strong, though.** The script-only arm carries **no
+model** and is near-deterministic — its two kills are byte-identical, same munition id and
+`pk` to six decimals — so those two runs are nearer one observation than two, and
+**`095026`'s script-only row is the outlier that wants explaining**, on the same build and
+script. The commanded arm was 3 / 2 / 0 / 0 in all three runs: **the variance in this
+comparison sits in the arm without the model.** **Nothing about what the commander is worth
+is established in either direction.**
+
+**Those are the only two kills in eighteen archived runs**, both in the arm with no model in
+the loop. **The qualification belongs with the number:** two SAM hits had already left
+`BlueF16_02` `wrecked` (cumPk 0.903) before the Su-35's missile finished it. A kill by the
+engine's definition, and not an unaided one.
 
 ## Why the validator is not optional
 
@@ -146,21 +153,23 @@ appeared nowhere in it.)*
 
 Stated here rather than discovered during a demo.
 
-- **C23 — an aircraft that reaches an ordered `hold` point stops flying.** One aircraft sat
-  at 1.5 m/s for roughly 400 of 600 seconds, after which the model faithfully copied that
-  speed into every order and **all 21 rejections in the run were the same speed-floor
-  check**. *(The mechanism was corrected in v1.8.34: **all 39 archived below-floor samples
-  were under `hold`, none under the route-exhaustion path the row originally named**, which
-  is first reached ~280 s after the collapse. Arrival is not sufficient either — of five
-  arrivals, three collapsed and two recovered.)* Open; the field is narrowed and the layer
-  is still an owner decision.
+- **C23 — the model orders every `hold` at the aircraft's own position, and the aircraft
+  stops there.** One aircraft sat at 1.5 m/s for roughly 400 of 600 seconds, after which the
+  model faithfully copied that speed into every order and **all 21 rejections in the run were
+  the same speed-floor check**. *(v1.8.35: **all 19 archived holds were issued at 0.0 m from
+  own position**, so there is no "arrival" — the aircraft is told to hold where it already is.
+  **And the stall survives a full release to Tier 1**: twelve archived below-floor samples
+  have no order in force at all, while the script calls `resumeWaypointFollowing`. The
+  fallback ladder is not what sustains it.)* Open. **The question has two ends — the onset and
+  the failure to recover — and they are different layers.** Still an owner decision.
 - **In-engine acceptance is quoted as an interval, never as a point.** Every interval in
   play is 15–30 points wide.
-- **Exactly one kill has ever been scored** — 2026-08-08, script-only arm, and the target was
-  already `wrecked` by two SAM hits when the Su-35's missile finished it. Seventeen runs, one
-  kill, none by a commanded arm.
-- **The commanded/script-only identity of the first three-arm run did not replicate**, and
-  n is still 2. Nothing about the commander's value is established in either direction.
+- **Two kills have ever been scored** — both 2026-08-08, both in the script-only arm, and in
+  each the target was already `wrecked` by two SAM hits when the Su-35's missile finished it.
+  Eighteen runs, two kills, **none by a commanded arm** — and no rate follows from that.
+- **The commanded/script-only identity of the first three-arm run did not replicate.** It is
+  refuted; nothing about the commander's value is established in either direction, and the
+  script-only arm is near-deterministic so the repeat counts for less than it looks.
 
 ## Authorization — the hosted backend cannot ship
 
