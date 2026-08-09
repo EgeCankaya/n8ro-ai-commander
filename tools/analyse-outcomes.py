@@ -39,14 +39,34 @@ import sys
 RE_SPAWN = re.compile(r"Weapon spawned: (\S+) profile \S+ owner (\S+) target (\S+)")
 RE_DETONATE = re.compile(r"Detonation: (\S+) outcome=detonation target=(\S+)")
 RE_KILL = re.compile(r"Warhead damage applied: source=(\S+) target=(\S+) .*state=destroyed")
+# THE GRADED FORM OF THE SAME LINE, ADDED v1.8.46 (PRD §Corrections item 58(b)-(d), 62).
+#
+# For thirty revisions this tool read `state=destroyed` and threw the `pk` away. The consequence was
+# not a rounding error: re-derived as paired ON - SCRIPT-ONLY differences over five three-arm runs,
+# NONE of the four columns below can answer "what is the commander worth" at a feasible n -
+# launches need 17 runs, detonations 42, kills 140 - and `losses` has been IDENTICALLY ZERO in all
+# three arms of every three-arm run since the reference-script fix. The column that carried this
+# project's starkest finding, 26 losses against 0, now carries no information at all, because the
+# defect it detected was fixed thoroughly enough to blind the detector.
+#
+# The signal is in the pk. Damage absorbed gives d = 3.37 and needs THREE runs. So these two columns
+# are the ones a reader should look at, and they are printed first for that reason.
+#
+# THIS TOOL STILL DOES NOT DECIDE ANYTHING. The pre-registered test, its decision rule and its
+# verdict belong to tools/outcome-campaign.py, exactly as the in-engine acceptance figure belongs to
+# tools/acceptance-report.py. This one reports; it does not conclude.
+RE_DAMAGE = re.compile(
+    r"Warhead damage applied: source=(\S+) target=(\S+) pk=([0-9.]+) cumPk=([0-9.]+) state=(\S+)")
 
-Tally = collections.namedtuple("Tally", "launches detonations kills losses")
+Tally = collections.namedtuple(
+    "Tally", "launches detonations kills losses absorbed dealt")
 
 
 def analyse(path, prefix):
     """Counts for entities whose id starts with `prefix` (the commanded aircraft)."""
     owner_of = {}
     launches = detonations = kills = losses = 0
+    absorbed = dealt = 0.0
     for line in open(path, encoding="utf-8", errors="ignore"):
         m = RE_SPAWN.search(line)
         if m:
@@ -65,7 +85,16 @@ def analyse(path, prefix):
                 kills += 1
             if victim.startswith(prefix):
                 losses += 1
-    return Tally(launches, detonations, kills, losses)
+        m = RE_DAMAGE.search(line)
+        if m:
+            munition, victim, pk, _cum, _state = m.groups()
+            pk = float(pk)
+            src = owner_of.get(munition, "")
+            if victim.startswith(prefix):
+                absorbed += pk
+            elif src.startswith(prefix):
+                dealt += pk
+    return Tally(launches, detonations, kills, losses, round(absorbed, 4), round(dealt, 4))
 
 
 # The archived engine log for one arm of a run.
@@ -101,13 +130,13 @@ def main():
         return 1
 
     arms = ("on", "script-only", "off")
-    totals = {arm: [0, 0, 0, 0] for arm in arms}
+    totals = {arm: [0, 0, 0, 0, 0.0, 0.0] for arm in arms}
     seen = {arm: 0 for arm in arms}
     pairs = 0
 
     header = "%-8s" % "pair"
     for arm in arms:
-        header += " %-24s" % ("%s L/D/K/lost" % arm.upper())
+        header += " %-34s" % ("%s absorbed/dealt L/D/K/lost" % arm.upper())
     print(header)
     print("-" * len(header))
 
@@ -125,13 +154,14 @@ def main():
         row = "%-8s" % name[9:15]
         for arm in arms:
             if not logs[arm]:
-                row += " %-24s" % "-"
+                row += " %-34s" % "-"
                 continue
             t = analyse(logs[arm], args.prefix)
             seen[arm] += 1
             for i, v in enumerate(t):
                 totals[arm][i] += v
-            row += " %-24s" % ("%2d / %2d / %2d / %2d" % t)
+            row += " %-34s" % ("%.3f / %.3f  %2d/%2d/%2d/%2d" % (
+                t.absorbed, t.dealt, t.launches, t.detonations, t.kills, t.losses))
         print(row)
 
     if not pairs:
@@ -141,16 +171,27 @@ def main():
     print("-" * len(header))
     pooled = "%-8s" % ("POOLED%d" % pairs)
     for arm in arms:
-        pooled += " %-24s" % (("%2d / %2d / %2d / %2d" % tuple(totals[arm])) if seen[arm] else "-")
+        pooled += " %-34s" % (("%.3f / %.3f  %2d/%2d/%2d/%2d" % (
+            totals[arm][4], totals[arm][5], totals[arm][0], totals[arm][1],
+            totals[arm][2], totals[arm][3])) if seen[arm] else "-")
     print(pooled)
     for arm in arms:
         if seen[arm] != pairs:
             print("note: %s present in %d of %d runs" % (arm, seen[arm], pairs))
     print()
+    print("absorbed = SUM of pk applied TO a commanded aircraft. THE ONLY COLUMN HERE THAT CAN")
+    print("           SEPARATE THE ARMS AT A FEASIBLE n (d = 3.37, three runs). PRD item 58.")
+    print("dealt    = sum of pk applied BY a commanded aircraft to anything else")
     print("launch = weapon spawned by a commanded aircraft")
     print("det    = one of those weapons detonated (NOT a kill - see the module docstring)")
     print("kill   = one of those weapons destroyed something")
     print("lost   = a commanded aircraft was destroyed")
+    print()
+    print("THE FOUR COUNT COLUMNS CANNOT ANSWER 'what is the commander worth' AT A FEASIBLE n:")
+    print("launches need 17 paired runs, detonations 42, kills 140 - and `lost` has been")
+    print("IDENTICALLY ZERO in all three arms of every three-arm run since the reference-script")
+    print("fix, so it carries no information at all. Use `absorbed`. The pre-registered test and")
+    print("its verdict live in tools/outcome-campaign.py; this tool reports and does not conclude.")
     print()
     print("ON vs OFF differ in TWO variables - the commander AND the mission script, because the")
     print("harness restores the shipped script before the control arm. SCRIPT-ONLY holds the script")
