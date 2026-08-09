@@ -7,7 +7,7 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # N8RO AI Entity Commander — summary
 
-**PRD version:** v1.8.37
+**PRD version:** v1.8.38
 **Date:** 2026-08-09
 **Audience:** the platform owner, and whoever picks up the next block of work.
 
@@ -104,6 +104,20 @@ loop. **Clauses 7 and 8 are implemented, 162/162, three of six new tests falsifi
 pre-fix script. C23 stays open** — the offline suite asserts the *command*, not the achieved speed.
 *Source: §Corrections item 53; `docs/c23-report.md`.*
 
+***(v1.8.38 — the confirming run was made, and it answers both of C23's open questions in about two
+minutes each.)*** Commander asserted OFF, no model, no network, no cost. **A `hold` ordered 20 km
+away stops the aircraft too:** it holds 320.0000 m/s for fifty seconds while outside the orbit and
+decelerates at −20 m/s² **from the first sample after crossing inside it** — so the trigger is the
+orbit boundary, the archive's 16.5–17.1 s onset delay was purely its 20 s sampling, and **clause 7's
+per-tick test is the only reading that covers this.** **The recovery is achieved, not merely
+commanded:** from exactly 1.5000 m/s a commanded 300 put both aircraft above the floor in **3.1
+seconds** against clause 8's twenty. **And AIC-VAL-2 rung 2's own geometry stalls an aircraft with no
+model present at all** — 220 → 1.5000 in 23 s — which the previous revision could only infer. **The
+run also found a defect in the fix**: the recovery latch cleared at 150 m/s, inside the 132–147 m/s
+band a recovering aircraft settles in, so it might never have cleared; corrected to 100 with a test
+pinning the ceiling. **C23 closes on everything except its governance tail.** *Source: §Corrections
+item 54; `docs/c23-report.md` §10.2.*
+
 **A second finding, independent of the first.** The largest rejection class in the archive
 (`reject.shape`, **16 of 55, 29.1 %**) was diagnosed by a controlled probe of the local decoder:
 **numeric bounds are not enforced by the constrained decoder at all**, confirmed on four models across
@@ -157,7 +171,7 @@ controlled requests to a local inference server carrying no scenario state. *Sou
 
 | # | Action | Cost | Needs |
 |---|---|---|---|
-| 1 | ***(v1.8.37 — done. C23's layer was decided and built: AIC-ORD-2 clauses 7 and 8, in Tier 1, 162/162.)*** **What replaces it is a ~5-minute confirming run** — the offline suite asserts the *command*, not the achieved speed. Specified in `docs/c23-report.md` §10.2 | ~5 min | No grant, no model, no network |
+| 1 | ***(v1.8.38 — done, and confirmed. C23's layer was decided and built (clauses 7 and 8, 162/162), and the confirming run was made: the recovery is achieved in 3.1 s, a distant hold stalls the aircraft too, and the run found and fixed a bad threshold in the fix itself.)*** **What is left is not engineering** — five judgement calls in `docs/c23-report.md` §7.3, and whether clause 8's criterion names the run or the suite | minutes | The owner |
 | 2 | **Repeat the three-arm run** — everything from 2026-08-08 is n = 1, including the neutral commander result | ~35 min each | No grant, no model, no network |
 | 3 | Re-run the domain review of posture appropriateness against a Tier 1 that fights (H1's marks were taken against one that did not) | ~2 h | A domain reviewer |
 | 4 | Decide the standing hosted-egress authorization. `docs/egress.md` is accurate again as of v1.8.31, having been stale on three counts | minutes | The owner |
@@ -174,7 +188,7 @@ condition a reader can test without running anything. *Source: §Carried out of 
 
 | # | Item |
 |---|---|
-| **C23** | **The model orders every `hold` at the aircraft's own position; the aircraft stops there**, after which every order is rejected for copying its own stopped speed. Not a new defect — the aircraft used to die before it could sit in it. *(v1.8.37 — **THE FIX IS IMPLEMENTED**: AIC-ORD-2 clauses 7 and 8, 162/162, three of six new tests falsified against the pre-fix script. **The row stays open because the offline suite asserts the command and not the achieved speed** — this archive shows a commanded 320 m/s producing a sustained ~150. Closing needs a **~5-minute run that costs nothing and is blocked on nothing**; the row also still carries the doctrine correction owed since v1.8.36 and five judgement calls for the owner. **And the onset is not what v1.8.35 said**: the aircraft flies 3.2–4.4 km out at 320 m/s and collapses on re-entering the ordered orbit radius. See `docs/c23-report.md`)* |
+| **C23** | **The model orders every `hold` at the aircraft's own position; the aircraft stops there**, after which every order is rejected for copying its own stopped speed. Not a new defect — the aircraft used to die before it could sit in it. *(v1.8.37 — **THE FIX IS IMPLEMENTED**: AIC-ORD-2 clauses 7 and 8, 162/162, three of six new tests falsified against the pre-fix script. **The row stays open because the offline suite asserts the command and not the achieved speed** — this archive shows a commanded 320 m/s producing a sustained ~150. Closing needs a **~5-minute run that costs nothing and is blocked on nothing**; the row also still carries the doctrine correction owed since v1.8.36 and five judgement calls for the owner. **And the onset is not what v1.8.35 said**: the aircraft flies 3.2–4.4 km out at 320 m/s and collapses on re-entering the ordered orbit radius. See `docs/c23-report.md`)* ***(v1.8.38 — the confirming run was made and both questions are answered: a distant hold stalls the aircraft too, and the recovery is achieved in **3.1 s** against clause 8's twenty. The run also caught a bad threshold in the fix. **What is left on this row is governance, not engineering.**)*** |
 | **C17** | Acceptance is measured by two instruments and only one is gated. **Owner-decided 2026-08-06: the bar stays on the fixtures.** The row stays open because the decision does not make the instruments agree |
 
 **CLOSED AND CANCELLED v1.8.36 — two owner decisions, and the register is down to two live rows.**
