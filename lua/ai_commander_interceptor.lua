@@ -32,15 +32,17 @@
 -- working when the model is silent.
 --
 -- Tick order, and every step before step 5 runs WHETHER OR NOT a commander exists:
---   0. REPORT what this aircraft can see (tracks and stores), when a commander is present. Pure
+--   0. MEASURE. Is this aircraft still flying? Pure observation, before any navigation, so every
+--      verb issued below goes out under the right authority (AIC-ORD-2 clause 8, C23).
+--   1. REPORT what this aircraft can see (tracks and stores), when a commander is present. Pure
 --      observation, no navigation -- so it happens even on the defensive path below, because the
 --      model most needs the picture on the tick the aircraft is being shot at.
---   1. SURVIVE. A munition inside the threat range overrides every other consideration including
+--   2. SURVIVE. A munition inside the threat range overrides every other consideration including
 --      an order. No order, and no absence of an order, may suppress it.
---   2. EGRESS when winchester. An aircraft with empty rails does not shadow a fight.
---   3. Read the published order, if one is in force.
---   4. Execute it -- and the launch path is reachable from every posture except `rtb`.
---   5. With NO order in force, fall through to this script's own deconflicted target selection,
+--   3. EGRESS when winchester. An aircraft with empty rails does not shadow a fight.
+--   4. Read the published order, if one is in force.
+--   5. Execute it -- and the launch path is reachable from every posture except `rtb`.
+--   6. With NO order in force, fall through to this script's own deconflicted target selection,
 --      not to waypoint following alone.
 --
 -- It degrades to ordinary waypoint following when `aiCommander` is nil (plugin not deployed) or
@@ -55,7 +57,8 @@
 --              an assessment window. NOT weapon.canFire -- see considerFiring.
 --   crank   -> navigation.requestGoTo(...) with a SCRIPT-computed offset steer point
 --   defend  -> navigation.requestGoTo(...) with a SCRIPT-computed cold point
---   hold    -> navigation.requestHoldPosition(id, lat, lon, alt, orbitRadiusM, speed)
+--   hold    -> navigation.requestHoldPosition WHILE OUTSIDE the ordered orbit; a SCRIPT-computed
+--              orbit once inside it (AIC-ORD-2 clause 7 -- see flyHold)
 --   rtb     -> navigation.requestGoTo(...) + weapon.requestCeaseFire
 
 local kCrankOffsetDeg   = 40.0     -- Off the own->target bearing while a shot is assessed.
@@ -64,6 +67,48 @@ local kDefendAltM       = 3000.0   -- Descend while defending.
 local kDefendSpeedMps   = 320.0
 local kEngageSpeedMps   = 300.0    -- Used only when no order supplies a speed.
 local kEarthRadiusM     = 6371000.0
+
+-- AIC-ORD-2 CLAUSE 7 (PRD v1.8.36, C23). How far around the orbit the script aims when it is flying
+-- the hold itself. A LEAD ANGLE off our own angular position on the circle, recomputed from the
+-- current position every tick -- so the aim point advances only as the aircraft advances, and the
+-- orbit is stable. An accumulating angle would spin the aim point at the tick rate instead.
+--
+-- Every aircraft orbits the same way round. Crank deliberately splits the section left and right
+-- for lateral separation; an orbit is the opposite case, where two aircraft turning opposite ways
+-- about one point meet head-on twice per circuit.
+local kOrbitLeadDeg = 30.0
+
+-- AIC-ORD-2 CLAUSE 8 (PRD v1.8.36, C23). THE SPEED FLOOR, AND TIER 1'S OWN RECOVERY SPEED.
+--
+-- WHAT THIS IS FOR. Three archived runs put RedSu35_02 at exactly 1.5000 m/s for 320-360 seconds
+-- apiece -- 58 archived orders were rejected for copying that speed back -- and the aircraft did
+-- not recover when the commander retained its order, did not recover when the ladder published a
+-- standing order, and did not recover when the ladder released it to this script entirely. The
+-- release path is the reason: `navigation.resumeWaypointFollowing` TAKES NO SPEED ARGUMENT, so the
+-- verb this script falls back to cannot command an aircraft to fly faster than it currently is.
+--
+-- kRecoverSpeedMps IS TIER 1'S OWN VALUE AND IS NEVER READ FROM AN ORDER. That is the whole of the
+-- clause: across every accepted order in the archive that can be checked against the snapshot it
+-- was answering, `cruiseSpeedMps` equalled `own.speedMps` to the last bit -- 61 of 61, on all four
+-- postures that carry a speed. An order's speed is the aircraft's own current speed handed back to
+-- it, so it can re-command a stall and can never break one.
+local kRecoverSpeedMps      = 300.0   -- == kEngageSpeedMps, and for a different reason.
+
+-- Below this the aircraft is not flying, whatever any order says.
+--
+-- IT IS THIS SCRIPT'S FLOOR, NOT THE PLUGIN'S. The `aiCommander` namespace does not publish
+-- `safety.minSpeedMps`, and it should not be needed: a recovery that only triggered where the
+-- validator would have rejected an order would not trigger at all with the commander absent, which
+-- is where 12 of the 58 archived below-floor samples sit. 50.0 is the shipped `safety.minSpeedMps`
+-- default and is chosen to agree with it, NOT derived from it -- an operator who lowers that bound
+-- for rotary-wing or loitering platforms must lower this constant too.
+local kMinFlyingSpeedMps    = 50.0
+
+-- Hysteresis, and it is load-bearing rather than tidiness. Recovery owns navigation until the
+-- aircraft is properly flying again, not merely one metre per second above the floor. With a single
+-- threshold the aircraft crosses it, hands navigation straight back to the posture that stalled it,
+-- decays, and crosses again -- satisfying the letter of clause 8 and none of its intent.
+local kResumeFlyingSpeedMps = 150.0
 
 -- Hardpoint engagement priority, longest reach first, matching the shipped script's table. The
 -- disciplined launch range is engageRangeM * kLaunchRangeFrac -- a shot at the very edge of the
@@ -114,6 +159,11 @@ local function ensureState(entityId)
         state[entityId] = {
             mode = "", enrolled = false, lastSerial = -1, nextFireTime = 0.0,
             team = nil, winchester = false,
+            -- AIC-ORD-2 clause 8. `recovering` latches: it is set when the aircraft drops below
+            -- kMinFlyingSpeedMps and cleared only at kResumeFlyingSpeedMps. `navigatedAtS` is the
+            -- simulation time of the last navigation verb this script issued for this entity, and
+            -- exists so a tick that commands nothing cannot leave a stalled aircraft stalled.
+            recovering = false, speedMps = nil, navigatedAtS = nil, tickTimeS = nil,
         }
     end
     return state[entityId]
@@ -170,6 +220,194 @@ local function positionOf(entityId)
         return nil
     end
     return entityControl.getPositionGeodetic(entityId)
+end
+
+-- ---------------------------------------------------------------------------------------------
+-- AIC-ORD-2 clause 8: is this aircraft still flying, and if not, whose problem is it?
+-- ---------------------------------------------------------------------------------------------
+
+-- NED velocity, m/s, or nil when the runtime cannot supply it. `entityControl.getVelocityNed` is on
+-- the shipped stub surface and this script did not call it until v1.8.36; a release tree that
+-- somehow lacks it leaves every check below inert rather than failing, which is the right direction
+-- for a safety net -- it degrades to the behaviour that shipped before it existed.
+local function velocityNedOf(entityId)
+    if entityControl == nil or entityControl.getVelocityNed == nil then
+        return nil
+    end
+    local velN, velE, velD = entityControl.getVelocityNed(entityId)
+    if velN == nil or velE == nil or velD == nil then
+        return nil
+    end
+    return velN, velE, velD
+end
+
+-- Ground speed as a MAGNITUDE, m/s: ||(velN, velE, velD)||.
+--
+-- Deliberately the same definition the plugin uses for `own.speedMps` (Snapshot.h, groundSpeedMps),
+-- so this script's floor and Stage B's `safety.minSpeedMps` bound describe the SAME QUANTITY. A
+-- script that measured horizontal speed while the validator measured the full norm would disagree
+-- with it in a descent, and the two numbers would have to be reconciled by a reader every time.
+--
+-- Returns nil when the velocity is unavailable. UNKNOWN IS NOT STOPPED: inventing a stall would
+-- hand navigation to the recovery on an aircraft that is flying perfectly well.
+local function groundSpeedOf(entityId)
+    local velN, velE, velD = velocityNedOf(entityId)
+    if velN == nil then
+        return nil
+    end
+    return math.sqrt(velN * velN + velE * velE + velD * velD)
+end
+
+-- Course over ground, degrees clockwise from true north. Matches the plugin's courseOverGroundDeg,
+-- INCLUDING its convention that a stationary entity returns 0.0 rather than a sentinel: at 1.5 m/s
+-- the course is nearly meaningless, and the recovery below needs a direction rather than a good one.
+local function courseOverGroundDeg(velN, velE)
+    if math.abs(velN) < 1e-9 and math.abs(velE) < 1e-9 then
+        return 0.0
+    end
+    return (math.atan(velE, velN) * 180.0 / math.pi + 360.0) % 360.0
+end
+
+-- The leg Tier 1 flies to get an aircraft moving again: straight ahead, level, at kRecoverSpeedMps.
+-- Straight ahead rather than anywhere in particular because the recovery is not a tactic -- it is
+-- the precondition for having one, and a stopped aircraft has no tactical geometry to preserve.
+local function recoveryLeg(entityId)
+    local ownLat, ownLon, ownAlt = positionOf(entityId)
+    if ownLat == nil then
+        return nil
+    end
+    local velN, velE = velocityNedOf(entityId)
+    local bearing = 0.0
+    if velN ~= nil then
+        bearing = courseOverGroundDeg(velN, velE)
+    end
+    local lat, lon = pointAtBearing(ownLat, ownLon, bearing, kManeuverLegM)
+    return lat, lon, ownAlt
+end
+
+local function isRecovering(entityId)
+    local s = state[entityId]
+    return s ~= nil and s.recovering == true
+end
+
+-- ---------------------------------------------------------------------------------------------
+-- EVERY navigation call in this script goes through these four wrappers, and that is the whole of
+-- clause 8's enforcement.
+--
+-- WHY A WRAPPER RATHER THAN A CHECK AT EACH SITE. The clause reads "SHALL NOT leave an entity below
+-- safety.minSpeedMps for longer than one cadence window, under any posture and whether or not an
+-- order is in force". That is a property of the WHOLE FILE. There are eleven navigation call sites
+-- across six postures, the winchester egress, the defensive reflex and the no-order path; enforced
+-- by eleven guards it would be one forgotten guard away from being false again, and §Corrections
+-- item 50(e) is this project's record of exactly that failure mode surviving four revisions.
+--
+-- WHAT RECOVERY CHANGES, AND WHAT IT DELIBERATELY DOES NOT. The posture still decides WHERE and
+-- WHAT; Tier 1 decides only HOW FAST, and only while the aircraft is below flying speed. It is
+-- never a REDUCTION -- math.max, so the defensive pump's 320 m/s is not pulled down to 300 -- and
+-- it suppresses no shot. AIC-VAL-2 requires that no rung leave the entity less capable than the
+-- same entity with no commander installed, and a recovery that also grounded the launch path would
+-- breach that requirement while fixing this one.
+-- ---------------------------------------------------------------------------------------------
+
+local function markNavigated(entityId)
+    local s = state[entityId]
+    if s ~= nil then
+        s.navigatedAtS = s.tickTimeS
+    end
+end
+
+local function navGoTo(entityId, lat, lon, alt, speedMps)
+    if navigation == nil or navigation.requestGoTo == nil then
+        return false
+    end
+    local commandedMps = speedMps or 0.0
+    if isRecovering(entityId) then
+        commandedMps = math.max(commandedMps, kRecoverSpeedMps)
+    end
+    markNavigated(entityId)
+    return navigation.requestGoTo(entityId, lat, lon, alt, commandedMps) and true or false
+end
+
+local function navTrackTarget(entityId, targetId, speedMps)
+    if navigation == nil or navigation.requestTrackTarget == nil then
+        return false
+    end
+    local commandedMps = speedMps or 0.0
+    if isRecovering(entityId) then
+        commandedMps = math.max(commandedMps, kRecoverSpeedMps)
+    end
+    markNavigated(entityId)
+    return navigation.requestTrackTarget(entityId, targetId, commandedMps) and true or false
+end
+
+-- THE TWO VERBS THAT CANNOT CARRY TIER 1'S SPEED ARE THE TWO THAT STALLED THE AIRCRAFT.
+--
+-- `resumeWaypointFollowing` takes no speed argument at all, and `requestHoldPosition`'s speed was
+-- measured not being honoured once the aircraft was inside the ordered orbit. So while recovering,
+-- both are replaced outright by the recovery leg rather than being issued with a better argument:
+-- there is no better argument to give them.
+local function navHoldPosition(entityId, lat, lon, alt, radiusM, speedMps)
+    if isRecovering(entityId) then
+        local lat2, lon2, alt2 = recoveryLeg(entityId)
+        if lat2 ~= nil then
+            return navGoTo(entityId, lat2, lon2, alt2, kRecoverSpeedMps)
+        end
+    end
+    if navigation == nil or navigation.requestHoldPosition == nil then
+        return false
+    end
+    markNavigated(entityId)
+    return navigation.requestHoldPosition(entityId, lat, lon, alt, radiusM, speedMps) and true
+        or false
+end
+
+local function navResume(entityId)
+    if isRecovering(entityId) then
+        local lat, lon, alt = recoveryLeg(entityId)
+        if lat ~= nil then
+            return navGoTo(entityId, lat, lon, alt, kRecoverSpeedMps)
+        end
+    end
+    if navigation == nil or navigation.resumeWaypointFollowing == nil then
+        return false
+    end
+    markNavigated(entityId)
+    return navigation.resumeWaypointFollowing(entityId) and true or false
+end
+
+-- Reads the speed and moves the latch. Pure observation -- it issues no verb -- so it runs first
+-- every tick, before the survival reflex and before the order is read.
+local function updateFlyingSpeed(entityId, s)
+    local speedMps = groundSpeedOf(entityId)
+    if speedMps == nil then
+        return
+    end
+    s.speedMps = speedMps
+    if speedMps < kMinFlyingSpeedMps then
+        if not s.recovering then
+            s.recovering = true
+            log(string.format("%s below flying speed at %.4f m/s; Tier 1 takes navigation",
+                entityId, speedMps))
+        end
+    elseif s.recovering and speedMps >= kResumeFlyingSpeedMps then
+        s.recovering = false
+        log(string.format("%s recovered to %.1f m/s; navigation returns to the posture",
+            entityId, speedMps))
+    end
+end
+
+-- Clause 8's backstop, for the branches that legitimately command no navigation at all -- `engage`
+-- and `crank` both issue nothing when the ordered target is empty. A tick that commands nothing
+-- leaves a stalled aircraft stalled, and "under any posture" includes the postures that decline to
+-- steer. Called once, where every non-returning path converges.
+local function ensureRecoveryNavigated(entityId, s)
+    if not s.recovering or s.navigatedAtS == s.tickTimeS then
+        return
+    end
+    local lat, lon, alt = recoveryLeg(entityId)
+    if lat ~= nil then
+        navGoTo(entityId, lat, lon, alt, kRecoverSpeedMps)
+    end
 end
 
 -- Own team, read once per aircraft. Unlike the shipped script this carries NO scenario-specific
@@ -369,7 +607,10 @@ local function flyDefensiveIfThreatened(entityId, s)
     -- Bearing FROM the threat TO us, extended: that is the cold vector.
     local fleeBearing = bearingAndDistance(threatLat, threatLon, ownLat, ownLon)
     local fleeLat, fleeLon = pointAtBearing(ownLat, ownLon, fleeBearing, kManeuverLegM)
-    navigation.requestGoTo(entityId, fleeLat, fleeLon, kDefendAltM, kDefendSpeedMps)
+    -- kDefendSpeedMps already exceeds kRecoverSpeedMps, so the pump is its own recovery: an
+    -- aircraft that is both stalled and under fire is turned cold AND re-accelerated by this one
+    -- call, and clause 8 does not need to preempt survival to be satisfied.
+    navGoTo(entityId, fleeLat, fleeLon, kDefendAltM, kDefendSpeedMps)
     setMode(s, entityId, "defend", string.format("%s at %.0f m", threatId, threatRangeM))
     return true
 end
@@ -558,7 +799,49 @@ local function flyOrderedWaypoint(entityId, speedMps)
     if lat == nil then
         return false
     end
-    return navigation.requestGoTo(entityId, lat, lon, alt, speedMps)
+    return navGoTo(entityId, lat, lon, alt, speedMps)
+end
+
+-- AIC-ORD-2 CLAUSE 7 (PRD v1.8.36, C23). TIER 1 OWNS `hold`'s GEOMETRY.
+--
+-- WHAT THE ARCHIVE SHOWS, AND WHY THE TEST IS PER-TICK RATHER THAN PER-ORDER.
+--
+-- Every archived `hold` order that can be checked against the snapshot it answered was issued at
+-- 0.00 m from the aircraft's own reported position -- 19 of 19 -- because the model reads
+-- `own.latitudeDeg` / `own.longitudeDeg` out of the prompt and hands them back as the waypoint. And
+-- AIC-VAL-2 rung 2 synthesizes THE SAME GEOMETRY BY SPECIFICATION: "waypoint at the entity's
+-- position at expiry". So the degenerate case is not a model quirk this script can wait out; it is
+-- also what the fallback ladder publishes when the backend dies.
+--
+-- But the aircraft does NOT stay on that point, and this is where the archive corrected its own
+-- earlier reading. Under the hold it ranges 3.2-4.4 km out at the ordered 320 m/s, for up to sixty
+-- seconds, with no decay at all. The collapse begins in the first 20 s sampling interval after the
+-- aircraft is INSIDE the ordered orbitRadiusM -- four times out of four, and twice by the radius
+-- changing underneath a stationary aircraft rather than by the aircraft moving. Inside the orbit,
+-- `requestHoldPosition` does not hold the ordered cruise speed: 320 -> ~128 -> 1.5000 m/s, latched.
+--
+-- Hence: OUTSIDE the orbit there is somewhere to fly to and the engine's hold controller flies it,
+-- which is the measured-good state and is left alone. INSIDE it, Tier 1 flies the orbit itself,
+-- from the same pointAtBearing arithmetic crank and defend already use, at the ORDERED cruise
+-- speed. The model still supplies where and how wide; it no longer supplies the geometry -- which
+-- is the division of labour the posture table already states for `crank`, applied to the one
+-- posture where the model was supplying both.
+local function flyHold(entityId, lat, lon, alt, radiusM, speedMps)
+    local ownLat, ownLon = positionOf(entityId)
+    if ownLat == nil or radiusM == nil or radiusM <= 0.0 then
+        return navHoldPosition(entityId, lat, lon, alt, radiusM, speedMps)
+    end
+    local bearingFromCentre, distanceM = bearingAndDistance(lat, lon, ownLat, ownLon)
+    if distanceM >= radiusM then
+        return navHoldPosition(entityId, lat, lon, alt, radiusM, speedMps)
+    end
+    -- Inside. Aim at a point on the orbit a fixed angle round from our own angular position on it.
+    -- At distanceM == 0 -- the case the model produces every single time -- bearingAndDistance
+    -- returns 0.0, so the first leg is due north of the ordered point and the orbit builds from
+    -- there. Arbitrary, deterministic, and the aircraft is flying by the next tick.
+    local aimLat, aimLon =
+        pointAtBearing(lat, lon, bearingFromCentre + kOrbitLeadDeg, radiusM)
+    return navGoTo(entityId, aimLat, aimLon, alt, speedMps)
 end
 
 -- crank: the model supplies the TARGET; the geometry is ours. Steering an offset off the
@@ -574,7 +857,7 @@ local function flyCrank(entityId, targetId, speedMps, rank)
     local side = (rank % 2 == 0) and -1.0 or 1.0
     local crankLat, crankLon =
         pointAtBearing(ownLat, ownLon, bearing + side * kCrankOffsetDeg, kManeuverLegM)
-    return navigation.requestGoTo(entityId, crankLat, crankLon, ownAlt, speedMps)
+    return navGoTo(entityId, crankLat, crankLon, ownAlt, speedMps)
 end
 
 -- defend, as an ORDERED posture. Distinct from flyDefensiveIfThreatened above, which is the
@@ -603,7 +886,7 @@ local function flyDefend(entityId, speedMps)
         end
     end
     local fleeLat, fleeLon = pointAtBearing(ownLat, ownLon, fleeBearing, kManeuverLegM)
-    return navigation.requestGoTo(entityId, fleeLat, fleeLon, kDefendAltM, speedMps)
+    return navGoTo(entityId, fleeLat, fleeLon, kDefendAltM, speedMps)
 end
 
 -- The commander-absent path, and the rollback path: with the DLL deleted, `aiCommander` is nil and
@@ -619,13 +902,19 @@ end
 -- scenario's geography, and a reference script that hardcoded them would fly two aircraft toward a
 -- point in the Marianas in every scenario that adopts it. `resumeWaypointFollowing` returns the
 -- aircraft to its own authored route, which is the scenario-independent form of the same intent.
+--
+-- THE "waypoints" BRANCH BELOW IS WHERE C23 SURVIVED THE COMMANDER GETTING ENTIRELY OUT OF THE WAY.
+-- Twelve archived samples sit below the speed floor with no order in force at all -- rung 3 has
+-- released, `aiCommander.isValid` is false, this function is running -- and the speed stays at
+-- exactly 1.5000 m/s. The reason is visible in the stub surface rather than in any run:
+-- `navigation.resumeWaypointFollowing(entityId)` TAKES NO SPEED ARGUMENT. It is the only verb this
+-- path calls, and it cannot ask for a speed, so a stalled aircraft handed back to Tier 1 is handed
+-- to the one verb that has no way to un-stall it. navResume is what closes that.
 local function fightWithoutAnOrder(entityId, s, simulationTimeS, ammoByHardpoint, ownTeam)
     local candidates = listHostileAirPlatforms(entityId, ownTeam)
     if #candidates == 0 then
         setMode(s, entityId, "waypoints", "no order, no contact")
-        if navigation ~= nil and navigation.resumeWaypointFollowing ~= nil then
-            navigation.resumeWaypointFollowing(entityId)
-        end
+        navResume(entityId)
         return
     end
 
@@ -633,9 +922,7 @@ local function fightWithoutAnOrder(entityId, s, simulationTimeS, ammoByHardpoint
     local targetId = assignedTargetId(entityId, simulationTimeS, candidates)
     if targetId == nil then
         setMode(s, entityId, "waypoints", "no order, no assignment")
-        if navigation ~= nil and navigation.resumeWaypointFollowing ~= nil then
-            navigation.resumeWaypointFollowing(entityId)
-        end
+        navResume(entityId)
         return
     end
 
@@ -643,21 +930,19 @@ local function fightWithoutAnOrder(entityId, s, simulationTimeS, ammoByHardpoint
     if simulationTimeS < (s.nextFireTime or 0.0) then
         setMode(s, entityId, "crank", targetId)
         if not flyCrank(entityId, targetId, kEngageSpeedMps, rank) then
-            if navigation ~= nil and navigation.requestTrackTarget ~= nil then
-                navigation.requestTrackTarget(entityId, targetId, kEngageSpeedMps)
-            end
+            navTrackTarget(entityId, targetId, kEngageSpeedMps)
         end
+        ensureRecoveryNavigated(entityId, s)
         return
     end
 
     setMode(s, entityId, "engage", targetId .. ", no order")
-    if navigation ~= nil and navigation.requestTrackTarget ~= nil then
-        navigation.requestTrackTarget(entityId, targetId, kEngageSpeedMps)
-    end
+    navTrackTarget(entityId, targetId, kEngageSpeedMps)
     -- weaponsFree, because that is what an aircraft with no commander has always had: the shipped
     -- script fires under its own discipline with no ROE gate above it at all. A fallback that
     -- granted less than the commander's absence would be a fallback that made things worse.
     considerFiring(entityId, s, simulationTimeS, targetId, "weaponsFree", ammoByHardpoint)
+    ensureRecoveryNavigated(entityId, s)
 end
 
 function onInit(entityId)
@@ -666,10 +951,16 @@ end
 
 function onTick(entityId, simulationTimeS, deltaTimeS)
     local s = ensureState(entityId)
+    s.tickTimeS = simulationTimeS
     local commanderPresent = aiCommander ~= nil and aiCommander.requestCommand ~= nil
     local ownTeam = ownTeamOf(entityId, s)
 
-    -- Step 0: enrol and REPORT. Pure observation, no navigation, so it happens before the survival
+    -- Step 0: MEASURE (AIC-ORD-2 clause 8). Is this aircraft still flying? Pure observation, no
+    -- verb issued, so it runs before everything -- including the survival reflex, whose own
+    -- requestGoTo then goes out with the right speed on the same tick.
+    updateFlyingSpeed(entityId, s)
+
+    -- Step 1: enrol and REPORT. Pure observation, no navigation, so it happens before the survival
     -- check -- the model most needs the picture on the tick the aircraft is being shot at, and a
     -- report withheld this tick is a snapshot that describes the previous one.
     if commanderPresent then
@@ -682,7 +973,7 @@ function onTick(entityId, simulationTimeS, deltaTimeS)
         end
     end
 
-    -- Step 1: SURVIVE. Unconditional, before the order is read, and not gated on the commander
+    -- Step 2: SURVIVE. Unconditional, before the order is read, and not gated on the commander
     -- existing at all. No order and no absence of an order may suppress this.
     if flyDefensiveIfThreatened(entityId, s) then
         return
@@ -691,7 +982,7 @@ function onTick(entityId, simulationTimeS, deltaTimeS)
     local ammoByHardpoint = readAmmoByHardpoint(entityId)
     local rounds = totalRounds(ammoByHardpoint)
 
-    -- Step 2: EGRESS when winchester. Also unconditional: an aircraft with empty rails does not
+    -- Step 3: EGRESS when winchester. Also unconditional: an aircraft with empty rails does not
     -- shadow a fight waiting for an order it cannot execute.
     if rounds == 0 then
         if commanderPresent and s.enrolled then
@@ -705,17 +996,19 @@ function onTick(entityId, simulationTimeS, deltaTimeS)
             end
         end
         setMode(s, entityId, "rtb", "winchester")
-        if navigation ~= nil and navigation.resumeWaypointFollowing ~= nil then
-            navigation.resumeWaypointFollowing(entityId)
-        end
+        -- navResume rather than the bare verb: a winchester aircraft is exactly as capable of
+        -- stopping as a held one, and the egress path must not be the one place clause 8 does not
+        -- reach. An aircraft that runs itself dry and then parks over the fight is worse than one
+        -- that goes home.
+        navResume(entityId)
         if weapon ~= nil and weapon.requestCeaseFire ~= nil then
             weapon.requestCeaseFire(entityId)
         end
         return
     end
 
-    -- Step 3: read the order. Anything that is not a valid, in-force order falls through to
-    -- step 5 -- which fights.
+    -- Step 4: read the order. Anything that is not a valid, in-force order falls through to
+    -- step 6 -- which fights.
     if not commanderPresent or not s.enrolled or not aiCommander.isValid(entityId) then
         fightWithoutAnOrder(entityId, s, simulationTimeS, ammoByHardpoint, ownTeam)
         return
@@ -734,23 +1027,25 @@ function onTick(entityId, simulationTimeS, deltaTimeS)
         weapon.requestCeaseFire(entityId)
     end
 
-    -- Step 4: execute the posture. Navigation only -- the launch decision is made once, below, so
+    -- Step 5: execute the posture. Navigation only -- the launch decision is made once, below, so
     -- it cannot be reachable from some branches and not others. THAT was the defect: considerFiring
     -- used to sit inside the `engage` branch, and `engage` is 8.2% of every accepted order.
     if posture == "ingress" then
         setMode(s, entityId, "ingress")
         if not flyOrderedWaypoint(entityId, speedMps) then
-            navigation.resumeWaypointFollowing(entityId)
+            navResume(entityId)
         end
 
     elseif posture == "hold" then
         setMode(s, entityId, "hold")
         local lat, lon, alt = aiCommander.getWaypoint(entityId)
         local radiusM = aiCommander.getOrbitRadiusM(entityId)
-        if lat ~= nil and radiusM > 0.0 then
-            navigation.requestHoldPosition(entityId, lat, lon, alt, radiusM, speedMps)
+        if lat ~= nil and radiusM ~= nil and radiusM > 0.0 then
+            -- AIC-ORD-2 clause 7. flyHold, not the bare verb -- see its comment for why the test
+            -- is on the CURRENT distance and is re-evaluated every tick rather than once per order.
+            flyHold(entityId, lat, lon, alt, radiusM, speedMps)
         else
-            navigation.resumeWaypointFollowing(entityId)
+            navResume(entityId)
         end
 
     elseif posture == "rtb" then
@@ -759,32 +1054,34 @@ function onTick(entityId, simulationTimeS, deltaTimeS)
             weapon.requestCeaseFire(entityId)
         end
         if not flyOrderedWaypoint(entityId, speedMps) then
-            navigation.resumeWaypointFollowing(entityId)
+            navResume(entityId)
         end
         -- `rtb` is the ONE posture that keeps its cease-fire, and it returns here so no shot is
-        -- taken below. Egressing while shooting is not egressing.
+        -- taken below. Egressing while shooting is not egressing. The recovery backstop still runs:
+        -- clause 8 says "under any posture", and `rtb` is a posture.
+        ensureRecoveryNavigated(entityId, s)
         s.lastSerial = aiCommander.getOrderSerial(entityId)
         return
 
     elseif posture == "engage" then
         setMode(s, entityId, "engage", targetId)
-        if navigation.requestTrackTarget ~= nil and targetId ~= nil and targetId ~= "" then
-            navigation.requestTrackTarget(entityId, targetId, speedMps)
+        if targetId ~= nil and targetId ~= "" then
+            navTrackTarget(entityId, targetId, speedMps)
         end
 
     elseif posture == "crank" then
         setMode(s, entityId, "crank", targetId)
         if not flyCrank(entityId, targetId, speedMps, rank) then
             -- Geometry unavailable this tick; pursue rather than doing nothing.
-            if navigation.requestTrackTarget ~= nil and targetId ~= nil and targetId ~= "" then
-                navigation.requestTrackTarget(entityId, targetId, speedMps)
+            if targetId ~= nil and targetId ~= "" then
+                navTrackTarget(entityId, targetId, speedMps)
             end
         end
 
     elseif posture == "defend" then
         setMode(s, entityId, "defend", "ordered")
         if not flyDefend(entityId, kDefendSpeedMps) then
-            navigation.resumeWaypointFollowing(entityId)
+            navResume(entityId)
         end
 
     else
@@ -806,6 +1103,11 @@ function onTick(entityId, simulationTimeS, deltaTimeS)
     local candidates = listHostileAirPlatforms(entityId, ownTeam)
     local shootAt = firingTargetId(targetId, roe, entityId, simulationTimeS, candidates)
     considerFiring(entityId, s, simulationTimeS, shootAt, roe, ammoByHardpoint)
+
+    -- Clause 8's backstop, AFTER the launch decision so it cannot suppress a shot. `engage` and
+    -- `crank` command no navigation at all when the ordered target is empty, and those two branches
+    -- are the only way to reach this line having steered nothing.
+    ensureRecoveryNavigated(entityId, s)
 
     s.lastSerial = aiCommander.getOrderSerial(entityId)
 end

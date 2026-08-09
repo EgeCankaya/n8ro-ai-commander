@@ -90,12 +90,34 @@ end
 -- tests need to place a contact at a chosen range.
 world = {
     positions = { OWN = {13.50, 144.80, 10000.0} },
+    -- NED velocity per entity, m/s. The default is the shipped scenario's spawn speed, so every
+    -- test that is not ABOUT clause 8 drives an aircraft that is plainly flying and the recovery
+    -- stays latched off. A nil entry means the runtime cannot report a velocity, which the script
+    -- must read as "unknown", never as "stopped".
+    velocity  = { OWN = {0.0, 220.0, 0.0} },
     tracks = {},                 -- { {id=, rangeM=, snrDb=}, ... }
     info = {},                   -- id -> { team=, entityTypeCode = { kind=, domain= } }
     closestByKind = {},          -- kind -> { id, rangeM }
     ammo = { { hardpointName = "R77_BVR", weaponProfileName = "P", ammoCount = 4, ammoMax = 4 },
              { hardpointName = "R73_IR",  weaponProfileName = "P", ammoCount = 2, ammoMax = 2 } },
 }
+
+-- The last call of each navigation verb, kept STRUCTURED as well as noted. `calls` answers "was
+-- this verb reached"; these answer "with what geometry and what speed", which is the whole subject
+-- of AIC-ORD-2 clauses 7 and 8 - a hold that reaches requestGoTo at 1.5 m/s is not a fix.
+lastGoTo, lastTrack, lastHold = nil, nil, nil
+
+-- Great-circle distance in metres, on the same spherical approximation the script uses, so an
+-- orbit assertion compares against the arithmetic that produced the point rather than a second
+-- opinion about the shape of the Earth.
+function distanceM(latA, lonA, latB, lonB)
+    local rad = math.pi / 180.0
+    local phi1, phi2 = latA * rad, latB * rad
+    local dPhi, dLambda = (latB - latA) * rad, (lonB - lonA) * rad
+    local a = math.sin(dPhi / 2.0) ^ 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(dLambda / 2.0) ^ 2
+    return 2.0 * 6371000.0 * math.atan(math.sqrt(a), math.sqrt(1.0 - a))
+end
 
 mission = { log = function(m) note("mission.log %s", m) end,
             markRunning = function() end, markCompleted = function() note("markCompleted") end }
@@ -107,6 +129,11 @@ entityControl = {
         return p[1], p[2], p[3]
     end,
     getEntityInfo = function(id) return world.info[id] end,
+    getVelocityNed = function(id)
+        local v = world.velocity[id]
+        if v == nil then return nil end
+        return v[1], v[2], v[3]
+    end,
 }
 
 sensor = {
@@ -125,12 +152,15 @@ sensor = {
 
 navigation = {
     requestGoTo = function(id, lat, lon, alt, spd)
+        lastGoTo = { id = id, lat = lat, lon = lon, alt = alt, spd = spd }
         note("navigation.requestGoTo %s alt=%.0f spd=%.0f", id, alt or -1, spd or -1); return true
     end,
     requestTrackTarget = function(id, tgt, spd)
-        note("navigation.requestTrackTarget %s -> %s", id, tgt); return true
+        lastTrack = { id = id, target = tgt, spd = spd }
+        note("navigation.requestTrackTarget %s -> %s spd=%.0f", id, tgt, spd or -1); return true
     end,
     requestHoldPosition = function(id, lat, lon, alt, r, spd)
+        lastHold = { id = id, lat = lat, lon = lon, alt = alt, r = r, spd = spd }
         note("navigation.requestHoldPosition %s r=%.0f", id, r); return true
     end,
     resumeWaypointFollowing = function(id) note("navigation.resumeWaypointFollowing %s", id); return true end,
@@ -456,5 +486,361 @@ AIC_TEST(ReferenceScriptEgressesWhenWinchesterWithoutWaitingForAnOrder) {
     AIC_LUA_OK(fired, "checking that nothing was fired from nowhere");
     AIC_EXPECT_EQ(unquote(fired.returnValue), std::string("false"),
                   "and it must not fire from a rail that carries nothing");
+    return true;
+}
+
+// =============================================================================================
+// C23 - AIC-ORD-2 CLAUSES 7 AND 8 (PRD v1.8.36). See docs/c23-report.md for the evidence.
+//
+// WHAT THE DEFECT IS, IN THE ONE PARAGRAPH THESE TESTS EXIST TO PIN. The model reads the
+// aircraft's own position out of the prompt and hands it back as the `hold` waypoint - 19 of 19
+// archived hold orders were issued at 0.00 m from own position - and AIC-VAL-2 rung 2 synthesizes
+// the same geometry by specification. Under that order the aircraft ranges out and comes back, and
+// in the first 20 s sampling interval after it is INSIDE the ordered orbitRadiusM its speed
+// collapses 320 -> ~128 -> exactly 1.5000 m/s and latches there for the rest of the run. Every
+// subsequent order is then rejected for copying that speed back: 58 of the archive's 114
+// rejections, 50.9 %. It survives rung 1's retention, rung 2's standing order, and rung 3's full
+// release to this script - because the verb this script falls back to,
+// `navigation.resumeWaypointFollowing`, TAKES NO SPEED ARGUMENT.
+//
+// WHY THESE ARE THE TESTS THAT WOULD HAVE CAUGHT IT AND NO EXISTING ONE DOES. AIC-VAL-2's
+// "no error state and no stall" is satisfied in full by an aircraft parked at 1.5 m/s, which is
+// what happened for 320-360 seconds in three consecutive runs while every published metric stayed
+// green. The recorded stall geometry - velN 0.0544, velE 1.4990, velD 0.0 - is driven verbatim
+// below, so these are regressions against a state the archive actually contains rather than
+// against one imagined for the occasion.
+// =============================================================================================
+
+// The recorded stall: ||(0.0544, 1.4990, 0.0)|| = 1.4999 m/s, against safety.minSpeedMps = 50.
+constexpr const char* kArchivedStallVelocity = "world.velocity.OWN = {0.0544, 1.4990, 0.0}\n";
+
+// A commander publishing one order, with every getter the script touches. Postures that carry no
+// waypoint still answer getWaypoint, exactly as the plugin does.
+std::string commanderPublishing(const char* posture, const char* roe, const char* target,
+                                const char* waypointLat, const char* waypointLon,
+                                const char* orbitRadiusM, const char* cruiseSpeedMps) {
+    std::ostringstream out;
+    out << "aiCommander = {\n"
+           "  requestCommand = function() return true end,\n"
+           "  isValid = function() return true end,\n"
+           "  getPosture = function() return '" << posture << "', '" << target << "', "
+        << cruiseSpeedMps << " end,\n"
+           "  getRoe = function() return '" << roe << "' end,\n"
+           "  getWaypoint = function() return " << waypointLat << ", " << waypointLon
+        << ", 9000.0 end,\n"
+           "  getOrbitRadiusM = function() return " << orbitRadiusM << " end,\n"
+           "  getOrderSerial = function() return 1 end,\n"
+           "  reportTrack = function() return true end,\n"
+           "  reportLoadout = function() return true end,\n"
+           "  setSituationNote = function() return true end,\n"
+           "}\n";
+    return out.str();
+}
+
+// CLAUSE 7, THE ONSET. Tier 1 owns `hold`'s geometry when the ordered point is one the aircraft is
+// already sitting inside.
+//
+// The order below is the archived one exactly: waypoint == own position, orbitRadiusM = 8000,
+// cruiseSpeedMps = 320. Handing that to navigation.requestHoldPosition is what parked three
+// aircraft; the script must instead fly an orbit it computed, AT THE ORDERED SPEED - the model
+// still supplies where and how wide, and only the geometry moves to Tier 1.
+AIC_TEST(ReferenceScriptFliesHoldItselfWhenTheOrderedPointIsInsideTheOrbit) {
+    std::string error;
+    const std::string source = readReferenceScript(error);
+    AIC_EXPECT_TRUE(error.empty(), error);
+
+    LuaHarness lua("ref-hold-inside");
+    AIC_EXPECT_TRUE(lua.ok(), "the SDK's Lua eval runtime could not be created");
+    AIC_LUA_OK(lua.eval(kStubWorld), "the stub world must load");
+    AIC_LUA_OK(lua.eval(source), "the reference script must compile");
+
+    AIC_LUA_OK(lua.eval(
+        commanderPublishing("hold", "weaponsTight", "", "13.50", "144.80", "8000.0", "320.0")
+        + "onInit('OWN'); onTick('OWN', 100.0, 0.05)"),
+        "driving one tick under a hold ordered at the aircraft's own position");
+
+    const auto handedOver = lua.eval("return tostring(called('navigation.requestHoldPosition'))");
+    AIC_LUA_OK(handedOver, "checking that the ordered point was not handed straight to the engine");
+    AIC_EXPECT_EQ(unquote(handedOver.returnValue), std::string("false"),
+                  "AIC-ORD-2 clause 7: a hold whose waypoint lies INSIDE the ordered orbitRadiusM "
+                  "of the current position must NOT be satisfied by navigation.requestHoldPosition. "
+                  "That call is C23's onset - 19 of 19 archived holds were ordered at 0.00 m and "
+                  "the aircraft's speed collapsed to 1.5000 m/s within one cadence window of being "
+                  "inside the orbit");
+
+    const auto flew = lua.eval("return tostring(called('navigation.requestGoTo'))");
+    AIC_LUA_OK(flew, "checking that the script flew something");
+    AIC_EXPECT_EQ(unquote(flew.returnValue), std::string("true"),
+                  "and it must fly an orbit it computes itself rather than doing nothing - a hold "
+                  "that commands no navigation is the same parked aircraft by another route");
+
+    // ON the circle, not merely somewhere: the aim point must sit at the ORDERED radius from the
+    // ORDERED centre. A point at an arbitrary distance would be a steer, not an orbit.
+    const auto radius = lua.eval(
+        "return string.format('%.0f', distanceM(13.50, 144.80, lastGoTo.lat, lastGoTo.lon))");
+    AIC_LUA_OK(radius, "measuring the computed aim point against the ordered radius");
+    AIC_EXPECT_EQ(unquote(radius.returnValue), std::string("8000"),
+                  "the computed aim point must lie on the ORDERED orbit radius - the model supplies "
+                  "where and how wide, and only the geometry is Tier 1's");
+
+    // AT THE ORDERED SPEED. Clause 7 says "at the ordered cruiseSpeedMps"; substituting Tier 1's
+    // own speed here would be clause 8 leaking into a case that is not a stall.
+    const auto speed = lua.eval("return string.format('%.0f', lastGoTo.spd)");
+    AIC_LUA_OK(speed, "checking the commanded speed");
+    AIC_EXPECT_EQ(unquote(speed.returnValue), std::string("320"),
+                  "clause 7 flies the orbit at the ORDERED cruise speed. This aircraft is not "
+                  "stalled, so Tier 1 has no business overriding the speed it was given");
+    return true;
+}
+
+// CLAUSE 7'S BOUNDARY, AND IT IS AS IMPORTANT AS THE CLAUSE.
+//
+// Outside the orbit there is somewhere to fly to, and the archive says that state is FINE: under a
+// hold ordered 3.2-4.4 km away the aircraft sustained 320 m/s for up to sixty seconds with no decay
+// at all, in every run. Clause 7 takes the geometry ONLY where the evidence puts the pathology, so
+// this test pins what the fix deliberately does not touch. Without it, a later "simplification" to
+// "Tier 1 always computes hold" would pass every other test in this file.
+AIC_TEST(ReferenceScriptLeavesADistantHoldToTheEngineUntilItIsInsideTheOrbit) {
+    std::string error;
+    const std::string source = readReferenceScript(error);
+    AIC_EXPECT_TRUE(error.empty(), error);
+
+    LuaHarness lua("ref-hold-outside");
+    AIC_EXPECT_TRUE(lua.ok(), "the SDK's Lua eval runtime could not be created");
+    AIC_LUA_OK(lua.eval(kStubWorld), "the stub world must load");
+    AIC_LUA_OK(lua.eval(source), "the reference script must compile");
+
+    // Own is at 13.50/144.80; the hold centre is 0.50 deg north, ~55.6 km, against a 5 km radius.
+    AIC_LUA_OK(lua.eval(
+        commanderPublishing("hold", "weaponsTight", "", "14.00", "144.80", "5000.0", "320.0")
+        + "onInit('OWN'); onTick('OWN', 100.0, 0.05)"),
+        "driving one tick under a hold ordered 55 km away");
+
+    const auto handedOver = lua.eval("return tostring(called('navigation.requestHoldPosition'))");
+    AIC_LUA_OK(handedOver, "checking the outside-the-orbit case");
+    AIC_EXPECT_EQ(unquote(handedOver.returnValue), std::string("true"),
+                  "a hold ordered OUTSIDE the orbit radius must still go to the engine's hold "
+                  "controller. Clause 7 is scoped to the case the archive indicts and no wider - "
+                  "the aircraft held 320 m/s for up to sixty seconds in exactly this state");
+
+    const auto radius = lua.eval("return string.format('%.0f', lastHold.r)");
+    AIC_LUA_OK(radius, "checking the ordered radius was passed through");
+    AIC_EXPECT_EQ(unquote(radius.returnValue), std::string("5000"),
+                  "and the ordered radius must reach the engine unaltered");
+    return true;
+}
+
+// CLAUSE 8, AND THIS IS THE REGRESSION TEST FOR C23 ITSELF.
+//
+// The aircraft is driven at the ARCHIVED stall velocity under every posture the script can be in,
+// and under no order at all - which is the case that matters most, because the stall survived a
+// full release to Tier 1 and twelve archived below-floor samples have no order in force.
+//
+// The assertion is not "some verb was called". It is that the aircraft was commanded a speed AT OR
+// ABOVE Tier 1's own cruise value, by a verb that can carry one. Before this fix, the `hold` row
+// reached navigation.requestHoldPosition and the no-order row reached
+// navigation.resumeWaypointFollowing - which takes no speed argument at all - and both left the
+// aircraft at 1.5000 m/s for the remaining 320-360 seconds of the run.
+AIC_TEST(ReferenceScriptRecoversFromTheArchivedStallUnderEveryPostureAndUnderNone) {
+    std::string error;
+    const std::string source = readReferenceScript(error);
+    AIC_EXPECT_TRUE(error.empty(), error);
+
+    struct Case {
+        const char* name;
+        std::string setup;
+        const char* why;
+    };
+    const Case cases[] = {
+        {"no order at all (aiCommander nil - the rollback path)", "aiCommander = nil\n",
+         "the DLL is deleted and the entity is Tier 1's alone"},
+        {"released by the ladder (rung 3)",
+         "aiCommander = { requestCommand = function() return true end,\n"
+         "  isValid = function() return false end,\n"
+         "  reportTrack = function() return true end,\n"
+         "  reportLoadout = function() return true end,\n"
+         "  setSituationNote = function() return true end }\n",
+         "rung 3 released the entity and the script is on its own behaviour - twelve archived "
+         "below-floor samples sit in exactly this state at exactly 1.5000 m/s"},
+        {"hold at own position (the archived order)",
+         commanderPublishing("hold", "weaponsFree", "", "13.50", "144.80", "8000.0", "1.4999"),
+         "the order the model actually issued, with the speed it actually copied"},
+        {"ingress",
+         commanderPublishing("ingress", "weaponsFree", "", "13.50", "144.80", "0.0", "1.4999"),
+         "ingress carries a waypoint and a copied speed like any other posture"},
+        {"rtb",
+         commanderPublishing("rtb", "weaponsFree", "", "13.50", "144.80", "0.0", "1.4999"),
+         "rtb returns early with its cease-fire, and clause 8 says 'under any posture'"},
+        {"defend",
+         commanderPublishing("defend", "weaponsFree", "", "13.50", "144.80", "0.0", "1.4999"),
+         "defend is the ONE posture that already satisfied this clause before it was written - the "
+         "branch passes kDefendSpeedMps and discards the ordered speed outright - and it is also "
+         "the only posture under which no archived aircraft ever went below the floor. It is here "
+         "as a positive control: this row passed before the fix and must still pass after it"},
+        {"engage with no target (commands no navigation at all)",
+         commanderPublishing("engage", "weaponsFree", "", "13.50", "144.80", "0.0", "1.4999"),
+         "this branch issues NO navigation verb when the target is empty, so only the backstop "
+         "can reach it - a tick that commands nothing leaves a stalled aircraft stalled"},
+        {"crank with no target (commands no navigation at all)",
+         commanderPublishing("crank", "weaponsFree", "", "13.50", "144.80", "0.0", "1.4999"),
+         "same branch shape as engage, and crank is the posture C21 showed nobody tests"},
+    };
+
+    for (const Case& c : cases) {
+        LuaHarness lua(std::string("ref-c23-recover-") + c.name);
+        AIC_EXPECT_TRUE(lua.ok(), "the SDK's Lua eval runtime could not be created");
+        AIC_LUA_OK(lua.eval(kStubWorld), "the stub world must load");
+        AIC_LUA_OK(lua.eval(source), "the reference script must compile");
+
+        AIC_LUA_OK(lua.eval(kArchivedStallVelocity + c.setup
+                            + "onInit('OWN'); onTick('OWN', 100.0, 0.05)"),
+                   "driving one tick at the archived stall velocity under " << c.name);
+
+        const auto commanded = lua.eval(
+            "local best = -1\n"
+            "if lastGoTo ~= nil and lastGoTo.spd ~= nil and lastGoTo.spd > best then "
+            "best = lastGoTo.spd end\n"
+            "if lastTrack ~= nil and lastTrack.spd ~= nil and lastTrack.spd > best then "
+            "best = lastTrack.spd end\n"
+            "return string.format('%.0f', best)");
+        AIC_LUA_OK(commanded, "reading the highest commanded speed under " << c.name);
+        const std::string best = unquote(commanded.returnValue);
+        AIC_EXPECT_TRUE(best != "-1" && std::stod(best) >= 300.0,
+                        "AIC-ORD-2 clause 8, case '"
+                            << c.name << "': an entity below safety.minSpeedMps must be commanded "
+                            << "back to Tier 1's OWN cruise value within one cadence window, and "
+                            << "the highest speed any verb carried this tick was " << best
+                            << " m/s. " << c.why);
+
+        // AND IT MUST NOT BE THE TWO VERBS THAT CANNOT CARRY A SPEED. This is the half that makes
+        // it a regression rather than a restatement: requestHoldPosition's speed was measured not
+        // being honoured inside the orbit, and resumeWaypointFollowing has no speed parameter at
+        // all, so reaching either one while stalled is the defect reproducing.
+        const auto parked = lua.eval(
+            "return tostring(called('navigation.resumeWaypointFollowing') "
+            "or called('navigation.requestHoldPosition'))");
+        AIC_LUA_OK(parked, "checking the speedless verbs under " << c.name);
+        AIC_EXPECT_EQ(unquote(parked.returnValue), std::string("false"),
+                      "case '"
+                          << c.name
+                          << "': a stalled aircraft must not be handed to resumeWaypointFollowing "
+                             "(which takes NO speed argument) or to requestHoldPosition (whose "
+                             "speed was measured not being honoured inside the orbit). Those two "
+                             "verbs are how C23 survived all three rungs of AIC-VAL-2's ladder");
+    }
+    return true;
+}
+
+// AIC-VAL-2's standing requirement, applied to this fix: "no rung SHALL leave the entity less
+// capable than the same entity with no commander installed."
+//
+// A recovery that seized the whole tick would be the cheapest implementation and would re-create
+// the defect class C21 was: an aircraft that cannot shoot. Tier 1 takes the SPEED and nothing else,
+// so the launch path is reached from a stalled aircraft exactly as it is from a flying one.
+AIC_TEST(ReferenceScriptStillFiresWhileRecoveringFromAStall) {
+    std::string error;
+    const std::string source = readReferenceScript(error);
+    AIC_EXPECT_TRUE(error.empty(), error);
+
+    LuaHarness lua("ref-c23-still-fires");
+    AIC_EXPECT_TRUE(lua.ok(), "the SDK's Lua eval runtime could not be created");
+    AIC_LUA_OK(lua.eval(kStubWorld), "the stub world must load");
+    AIC_LUA_OK(lua.eval(source), "the reference script must compile");
+
+    AIC_LUA_OK(lua.eval(
+        std::string(kArchivedStallVelocity)
+        + "placeContact('BANDIT_01', 25.0, 'Blue', 1, 2)\n"
+        + commanderPublishing("hold", "weaponsFree", "", "13.50", "144.80", "8000.0", "1.4999")
+        + "onInit('OWN'); onTick('OWN', 100.0, 0.05)"),
+        "driving one tick at the archived stall velocity with a bandit in range");
+
+    const auto fired = lua.eval("return tostring(called('weapon.requestFire'))");
+    AIC_LUA_OK(fired, "checking the launch path is still reachable while recovering");
+    AIC_EXPECT_EQ(unquote(fired.returnValue), std::string("true"),
+                  "recovering from a stall must not suppress the launch path. AIC-VAL-2 requires "
+                  "that no rung leave the entity less capable than one with no commander at all, "
+                  "and a fix for C23 that grounded the aircraft would breach that requirement "
+                  "while closing this one - which is the shape of C21");
+    return true;
+}
+
+// THE LATCH, AND WHY IT NEEDS TWO THRESHOLDS.
+//
+// Recovery entered at safety.minSpeedMps and left at safety.minSpeedMps would hand navigation back
+// to the posture that stalled the aircraft the moment it crossed 50 m/s, and the aircraft would
+// oscillate about the floor forever - satisfying the letter of clause 8 and none of its intent.
+// So it clears at kResumeFlyingSpeedMps (150), not at the floor.
+AIC_TEST(ReferenceScriptHoldsTheRecoveryUntilTheAircraftIsProperlyFlyingAgain) {
+    std::string error;
+    const std::string source = readReferenceScript(error);
+    AIC_EXPECT_TRUE(error.empty(), error);
+
+    LuaHarness lua("ref-c23-hysteresis");
+    AIC_EXPECT_TRUE(lua.ok(), "the SDK's Lua eval runtime could not be created");
+    AIC_LUA_OK(lua.eval(kStubWorld), "the stub world must load");
+    AIC_LUA_OK(lua.eval(source), "the reference script must compile");
+
+    const std::string commander =
+        commanderPublishing("hold", "weaponsTight", "", "13.50", "144.80", "8000.0", "1.4999");
+
+    // Tick 1: stalled. Tick 2: above the floor but not yet flying. Tick 3: properly flying.
+    AIC_LUA_OK(lua.eval(std::string(kArchivedStallVelocity) + commander
+                        + "onInit('OWN'); onTick('OWN', 100.0, 0.05)\n"
+                          "world.velocity.OWN = {0.0, 60.0, 0.0}\n"
+                          "onTick('OWN', 100.05, 0.05)\n"
+                          "midSpd = lastGoTo.spd\n"
+                          "world.velocity.OWN = {0.0, 200.0, 0.0}\n"
+                          "calls = {}; lastGoTo = nil\n"
+                          "onTick('OWN', 100.10, 0.05)"),
+               "driving three ticks across the recovery band");
+
+    const auto mid = lua.eval("return string.format('%.0f', midSpd)");
+    AIC_LUA_OK(mid, "checking the speed commanded at 60 m/s");
+    AIC_EXPECT_EQ(unquote(mid.returnValue), std::string("300"),
+                  "at 60 m/s the aircraft is above safety.minSpeedMps and still not flying. "
+                  "Releasing the recovery here hands navigation straight back to the hold that "
+                  "stalled it, and the aircraft oscillates about the floor instead of recovering");
+
+    const auto released = lua.eval("return string.format('%.0f', lastGoTo.spd)");
+    AIC_LUA_OK(released, "checking the speed commanded at 200 m/s");
+    AIC_EXPECT_EQ(unquote(released.returnValue), std::string("1"),
+                  "at 200 m/s the recovery must have cleared and the ORDERED speed must be back in "
+                  "force - 1.4999 m/s, which Stage B's safety.minSpeedMps floor would never let "
+                  "through in production and is used here precisely because no other value "
+                  "distinguishes 'the order's speed' from 'Tier 1's'. Tier 1 takes the speed only "
+                  "while the aircraft is not flying; it does not acquire it permanently");
+    return true;
+}
+
+// UNKNOWN IS NOT STOPPED.
+//
+// entityControl.getVelocityNed can return a nil triplet - the stub documents it - and a release
+// tree could in principle lack the verb entirely. Either way the script must behave exactly as it
+// did before v1.8.36 rather than concluding that an aircraft it cannot measure has stopped: a
+// recovery that fires on every entity whose velocity is unreadable would seize navigation from a
+// fully serviceable aircraft, which is a worse defect than the one it is here to fix.
+AIC_TEST(ReferenceScriptDoesNotInventAStallWhenTheVelocityIsUnreadable) {
+    std::string error;
+    const std::string source = readReferenceScript(error);
+    AIC_EXPECT_TRUE(error.empty(), error);
+
+    LuaHarness lua("ref-c23-unknown-velocity");
+    AIC_EXPECT_TRUE(lua.ok(), "the SDK's Lua eval runtime could not be created");
+    AIC_LUA_OK(lua.eval(kStubWorld), "the stub world must load");
+    AIC_LUA_OK(lua.eval(source), "the reference script must compile");
+
+    AIC_LUA_OK(lua.eval(
+        "world.velocity.OWN = nil\n"          // a nil triplet, as the stub documents
+        "entityControl.getVelocityNed = nil\n" // and the verb missing entirely
+        "aiCommander = nil\n"
+        "onInit('OWN'); onTick('OWN', 100.0, 0.05)"),
+        "driving one tick with no readable velocity and no commander");
+
+    const auto resumed = lua.eval("return tostring(called('navigation.resumeWaypointFollowing'))");
+    AIC_LUA_OK(resumed, "checking the unmeasurable case");
+    AIC_EXPECT_EQ(unquote(resumed.returnValue), std::string("true"),
+                  "with no readable velocity the script must fall back to the behaviour that "
+                  "shipped before clause 8 existed. An unmeasurable aircraft is not a stalled one, "
+                  "and a safety net that fires on absence of evidence is not a safety net");
     return true;
 }
