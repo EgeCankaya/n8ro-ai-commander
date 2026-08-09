@@ -10,8 +10,9 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 > **One-liner:** A `n8ro-sim` plugin that lets a language model issue tactical *intent* — posture, target, waypoint, rules of engagement — to entities in a running scenario, while every kinematic decision and every state mutation stays in the deterministic C++ and Lua tiers that already exist.
 
 **Date:** 2026-07-31 (revised 2026-08-09)
-**Status:** Draft v1.8.41
+**Status:** Draft v1.8.42
 **Revision history:**
+- v1.8.42 — **§Corrections item 58: the outcome question is REOPENED by owner decision, and its protocol is written down before the first run rather than after it.** Owner decision 2026-08-09. **No run, no network, no cost, no grant, no code change and no measured figure moves** — this revision is a pre-registration and nothing else. **(a) §Rollout's maintenance close said reopening "needs only an owner who wants it". The owner wants it.** Maintenance is **not rescinded**: no phase opens, no gate is created, the register stays empty, and no bar moves. What changes is that one question the close deliberately foreclosed now has a written, powered protocol attached. **(b) THE PLANNING ANALYSIS FOUND THAT THE INSTRUMENT CANNOT ANSWER THE QUESTION IT WAS BUILT FOR.** `tools/analyse-outcomes.py` reports four columns — launches, detonations, kills, losses. Re-derived over the five archived three-arm runs as paired ON − SCRIPT-ONLY differences, **all four need an infeasible n**: launches 17 runs, detonations 42, kills 140 — and **`losses` is degenerate, identically 0 in all three arms of all five runs since the reference-script fix**, so the column that separated 26 losses from 0 before v1.8.30 now carries no information whatever. **(c) The endpoint that CAN answer it is one the instrument discards.** The engine's `Warhead damage applied` line carries a graded `pk` and the four columns binarise it away. **Damage absorbed by the commanded pair** gives a paired difference of **−0.683, sd 0.203, d = 3.37, n = 3 for 80 % power** — against damage *dealt* at d = 0.23, n = 156. **This is the shape of §Corrections item 45 and worse: there the instrument existed and nobody had run it; here the run logs have carried the quantity since Phase 1b and no instrument ever computed it.** **(d) The design is CONFIRMATORY and says so, because the endpoint was chosen by looking at the archive.** The five planning runs are **not** pooled into the test; a fresh campaign of **n = 4** post-fix runs is specified with its decision rule, its minimum detectable effect (**0.284**) and its null wording all fixed in advance. **(e) At n = 4 the distribution-free backstop cannot reach α = 0.05 — 4 of 4 consistent signs is p = 0.125 — and that is recorded here rather than discovered afterwards.** The paired *t* interval is the test; sign consistency is corroboration and is not a second test. **(f) A confound is pre-registered rather than left to a later reader: because damage *dealt* is underpowered at this n, the campaign CANNOT separate "the commander makes the aircraft safer" from "the commander makes it fight less".** Whichever way the primary endpoint falls, that separation is unavailable and SHALL NOT be claimed. **(g) The corroborating mechanism is not a rate.** Blue fires exactly **two** air-to-air munitions at the commanded pair in **15 of 15** archived arm-runs; in the control arms both land, **20 of 20 munitions across 10 arm-runs**; in the commanded arm one is defeated in **4 of 5**, and the engine names how — `[seeker] BlueF16_02_wpn_1250_4 lost`, a line absent from all ten control arm-runs. **Under §Scope authority rule 4 that is the category a single run may close**, and it is reported separately from the rate. Running total unchanged at **≈$2.57 of $5**.
 - v1.8.41 — **§Corrections item 57: the phased work is declared finished, the register empties, and the thing that made a two-row backlog feel endless was a missing close condition.** Owner decision 2026-08-09. No run, no network, no cost, no grant; **no code changes and no measured figure moves.** **(a) MAINTENANCE IS DECLARED.** Phase 3 closed at v1.8.17 and twenty-four productive but **unphased** revisions followed — no gate, no close condition, and therefore **no state the project could be in other than "here is what is still open".** A defect register is never empty by construction, so *"are we done?"* had no answerable form. §Rollout now says the product is feature-complete against this document's FR set and no further phase is planned. **(b) C17 CLOSES as a stated position, on C8's precedent.** Its remaining item — the normative rejection taxonomy — landed in v1.8.40, and its question was answered by the owner on 2026-08-06. **What kept it open was that the decision does not make the two instruments agree, and that is a permanent condition rather than a task**; the standing caveat now lives in §Success metrics where a reader meets the number. **(c) C23 CLOSES on the mechanism, demonstrated under a commander, with its residual named:** clauses 7 and 8 implemented, six tests of which three fail against the pre-fix script, the onset gone across two three-arm runs with the model's behaviour proven constant at 52 of 52 holds still ordered at 0.00 m. **What does not close is recorded rather than carried: clause 8 has never fired in a commanded scenario**, because clause 7 keeps preventing the onset. **(d) The register is EMPTY for the first time** — and one governance item is deliberately not a row: the standing hosted-egress authorization stays in §Review checklist, where it has a home and an owner. **(e) Every row now carries a KIND, `product` or `instrument`.** Queuing them together hid a falling severity curve: the last five revisions found an aircraft that stops flying, a threshold inside a settling band, a harness that had not compiled in eleven revisions, and a stale fixture corpus — **two product defects and two with zero user impact, indistinguishable in one list.** **(f) The entry rule tightens, because this register is now the only tracker:** a row needs **a named mechanism or a named decider**, and everything else goes to §Out of scope as a DEFERRED row with a revisit condition. **(g) AIC-ORD-2's clause 8 criterion said "recovers" while naming an instrument that cannot observe an aircraft accelerating.** Split rather than softened: the offline suite asserts the **command**, `tools/run-c23-probe.ps1` asserts the **recovery** at 3.1 s. **(h) What this deliberately gives up is stated in §Rollout rather than buried: it forecloses the outcome question.** What the commander is *worth* stands permanently at **unmeasured**, at n = 2 with overlapping intervals. Reopening needs only an owner who wants it and ~35 minutes a run. Running total unchanged at **≈$2.57 of $5**.
 - v1.8.40 — **§Corrections item 56: the harness behind a green metric has not compiled for eleven revisions, H3's missing arm ran, and C17's taxonomy is specified.** No network, no cost, no grant; two 200-order local soaks. **(a) `tests/live/` HAS NOT BUILT SINCE v1.8.28.** C18 deleted `OrderSnapshot::headingDeg` and this harness kept assigning it. **It is in no solution file and no CI step, so nothing ever said so** — and it is the sole instrument behind **fixture acceptance, which §Success metrics has read MET at 100 % since 2026-08-04.** **A metric whose instrument does not compile is a metric nobody can re-measure.** **(b) The corpus had also diverged three times over:** `speedMps` (v1.8.25) and `courseDeg` (v1.8.28) were never set, and `TrackReport`'s `kind`/`team` (v1.8.30) defaulted to Other/Unknown through three-field aggregate initialisers **that still compiled** — the exact ambiguity those fields were added to remove, alive in the measurement corpus alone. Repaired, with both derived fields computed by the plugin's own free functions so a fixture cannot carry a speed and a velocity that disagree. **(c) A hypothesis raised during the repair is REFUTED by the repair's own measurement, and is recorded rather than dropped:** that the stale corpus explained C17's instrument gap. **Re-measured on the corrected corpus, fixture acceptance is still 200/200 = 100 %.** The divergence was real and it was **not** the explanation. **C17's gap is what it always said it was — synthetic fixtures against real scenario state.** **(d) H3's comparison arm ran for the first time and H3 is fully validated.** Constrained **200/200, `reject.schema` 0.00 %**; unconstrained **0/200, 100.00 %** — against a predicted "double-digit", so the prediction was conservative. **Every one of the 200 failures is the same thing: `unknown top-level property 'rulesOfEngagement'`.** The model spells the ROE field in English on every attempt, which is a name rather than a value and is therefore something no retry budget could ever have rescued. **(e) C17's remaining item is SPECIFIED** — a normative rejection taxonomy with one test (*could a better order have been accepted from the same prompt?*), three rules that stop it becoming a bin for inconvenient rejections, and the requirement that a frozen class must converge with the unexcluded figure or the fix did not work. **(f) The root cause is fixed for good: `tests/live/` now builds in CI**, compile-only, because running it needs a server and, on the hosted path, a grant. Running total unchanged at **≈$2.57 of $5**.
 - v1.8.39 — **§Corrections item 55: C23's fix ran in a commanded scenario for the first time, twice, and the stall is gone while the model's behaviour is unchanged.** Two three-arm 600 s `local` runs at the shipped default `qwen2.5:7b-instruct-q8_0`, **22 checks / 0 failed** each, archived `20260809T143428Z-local` and `20260809T150635Z-local`. No network, no cost, no grant. **(a) The comparison this project has been chasing for eleven revisions is finally available, because the model did not change and the archive proves it: 52 of 52 measurable `hold` orders are still issued at 0.00 m from the aircraft's own position** — 19 before the fix, **33 more after it, every one still at 0.00 m.** **The echo is untouched; only Tier 1 changed.** **(b) And the stall is gone.** `RedSu35_02` — which collapsed to 1.5000 m/s in 3 of 3 archived runs — held **320.0000 m/s for the whole of run 1 under twenty accepted `hold` orders**, and never went below 220 in run 2. **Zero samples below `safety.minSpeedMps` in either run, against 21 / 18 / 18 before.** **The below-floor total is still 58 and every one of them predates the fix.** **(c) `navigation.requestHoldPosition` was called ZERO times in both runs** — clause 7 took the geometry on all 33 holds — **and clause 8 never fired at all**, which is the designed relationship rather than a gap: the onset was prevented, so the net had nothing to catch. **(d) Rejections: 0 of 38 in run 1 and 1 of 37 in run 2**, that one a `track` and not the floor. Pooled in-engine acceptance moves **64.8 % [59.3, 70.0] → 71.1 % [66.4, 75.5]** over 398 resolved orders, and **85.8 % [81.5, 89.3]** excluding the two non-model classes. **No rate is claimed from two runs**; what is claimed is the mechanism — *"does the commanded aircraft still stop flying?"* — which is readable off recorded values. **(e) The commanded arm scored the archive's first ON-arm kill, and the qualification travels with it:** `RedSu35_02_wpn_1050_3` destroyed `BlueF16_02` at 0.025 m — but a SAM had already taken that target to `wrecked` at `cumPk` 0.859, exactly as both earlier archived kills did. **A kill by the engine's definition; not an unaided one.** **The unaided result in the same run is better and is not a kill:** `RedSu35_01` took `BlueF16_01` from untouched to `wrecked` with **two of its own missiles and no SAM contribution at all**. **(f) One earlier reading weakens.** The script-only arm returned **3 / 2 / 0 / 0 in both runs**, matching `095026` rather than the 2 / 2 / 1 / 0 of `135722` and `185750` — so that arm has now produced each result twice, and **item 51(g)'s *"near-deterministic, so two matching runs are nearer one observation"* no longer holds as stated.** Running total unchanged at **≈$2.57 of $5**.
@@ -1155,6 +1156,24 @@ predicted; one of those predictions did not survive contact. Each is load-bearin
     **(h) What this revision gives up, and it is a real cost rather than a rhetorical one.** **Maintenance forecloses the outcome question.** What the commander is *worth* now stands permanently at **unmeasured**: the first unconfounded comparison was a null at n = 1 (item 47(b)), the repeat refuted the identity without replacing it (item 50(a)), and the two post-fix runs give intervals that overlap almost entirely. **Anyone later asking "is this worth deploying?" gets no answer from this document, and that is now a property of it rather than a gap someone is closing.** The runs cost ~35 minutes and no grant; **reopening the question needs only an owner who wants it.** The alternative — Phase 4 — was declined because its three substantive deliverables need a reviewer, repeats nobody has committed to, and a documentation split, **and a gate whose pass condition depends on appetite that may not exist is the failure item 49(a) already names.**
 
     **(i) What maintenance does not mean.** The code is not frozen — defects get fixed. No bar moves: the gates that pass today are the gates that must pass tomorrow. Nothing here re-verdicts a metric, and the hosted latency row still reads MISSED. And **the standing hosted-egress authorization is still outstanding and is deliberately not made a register row**: it lives in §Review checklist, where it has a home and an owner, and duplicating it here would be double-tracking a decision that is already tracked. Running total unchanged at **≈$2.57 of $5**.
+
+58. **The outcome question is reopened by the owner, and the planning analysis finds that the instrument built to answer it cannot.** *(v1.8.42, owner decision 2026-08-09.)* **No run, no network, no cost, no grant, no code change and no measured figure moves.** This item is a pre-registration; everything in it is written **before** the campaign it specifies.
+
+    **(a) The close named its own reopening condition and the condition was met.** §Rollout's maintenance close said what the commander is *worth* stands at **unmeasured**, and that reopening the question *"needs only an owner who wants it and ~35 minutes a run"*. **The owner wants it.** **Maintenance is not rescinded** — no phase opens, no gate is created, the register stays empty and its entry rule is untouched, and no bar moves. **A close that can be reopened by a named decider is the kind this document was trying to write.** The alternative, a close nobody could reopen, is the failure mode item 49(a) already records under a different name.
+
+    **(b) THE CENTRAL FINDING, AND IT ARRIVED BEFORE ANY RUN DID: THE FOUR COLUMNS THIS PROJECT MEASURES OUTCOMES WITH CANNOT ANSWER THIS QUESTION AT ANY n ANYONE WILL RUN.** `tools/analyse-outcomes.py` reports launches, detonations, kills and losses. Re-derived over the five archived three-arm runs as **paired ON − SCRIPT-ONLY** differences — the arm pair that moves only the commander — the runs needed for 80 % power are **launches 17, detonations 42, kills 140**, against a campaign anyone would actually run. **The instrument was built in v1.8.30 to close the gap item 45 opened, and it closed a different one:** it made outcomes *visible*, which was the point and was worth it, and it never had the resolution to make them *comparable*.
+
+    **(c) And `losses` — this document's starkest figure — has been degenerate since the reference-script fix.** It read **26 commanded aircraft destroyed against 0** across the pre-fix pairs, which is the number §Summary still leads with and the number that justified C21. **In all three arms of all five three-arm runs since the fix it is identically 0.** A column with no variance discriminates nothing; a reader who checks it sees nothing and concludes, wrongly, that there is nothing there. **The defect it detected was fixed so thoroughly that the detector went blind**, which is a good outcome for the product and a silent one for the instrument, and nothing in this document would have said so.
+
+    **(d) The signal did not disappear — it went into a field the instrument thresholds away.** Every `Warhead damage applied` line the engine writes carries a graded `pk`, and the kills column asks only whether `state=destroyed`. **Damage absorbed by the commanded pair gives a paired difference of −0.683 with sd 0.203 — d = 3.37, n = 3 for 80 % power.** Damage *dealt* gives d = 0.23 and n = 156, so the two halves of "combat outcome" are not equally reachable and only one of them is reachable at all. **The run logs have carried `pk` on every damage line since Phase 1b and no instrument this project owns has ever read it.** That is item 45's shape — *"the instrument already existed; nobody had run it"* — one turn worse, because here the instrument did not exist and the data sat under it for the whole of the project.
+
+    **(e) The design is CONFIRMATORY and the document says so, because the endpoint was chosen by looking.** `damageAbsorbed` was found by inspecting the archive, not specified in advance of it. **So the five planning runs are excluded from the test**, and the decision rule, the n, the minimum detectable effect and the null wording are all fixed in §Validation's pre-registration rather than settled once the numbers are visible. **This project has four recorded results that did not survive their own repeat — items 40, 42, 47(b) and 50(a) — and in every one the analysis was chosen after the data.**
+
+    **(f) Two limits are pre-registered rather than discovered in the write-up.** At the owner's chosen **n = 4**, a sign test **cannot reach α = 0.05 at all** — 4 of 4 consistent signs is p = 0.125 — so the paired *t* interval is the test and sign consistency is corroboration and not a second test. And because damage *dealt* is underpowered, **the campaign cannot separate "the commander makes the aircraft safer" from "the commander makes it fight less"**, whichever way the primary endpoint falls. **Both limits are properties of the design and are true before the campaign runs**, which is the only time it is honest to write them down.
+
+    **(g) The corroborating mechanism is not a rate, and is reported beside the endpoint rather than merged into it.** Blue fires exactly **two** air-to-air munitions at the commanded pair in **15 of 15** archived arm-runs, so the denominator is a property of the scenario rather than a sample. **In the control arms both land: 20 of 20 munitions over 10 arm-runs.** In the commanded arm one is defeated in **4 of 5 runs**, and the engine names the mechanism instead of leaving it to be inferred — `[seeker] BlueF16_02_wpn_1250_4 lost`, **a line that appears in 0 of 10 control arm-runs**. Under §Scope authority rule 4 that is the one category a single run may close. **Conflating it with the rate is what item 40 records**, so it is quoted separately and never pooled.
+
+    **(h) What this item does NOT do.** It reports **no outcome result**, because none has been measured under this protocol. It moves **no** §Success metrics verdict, quotes no new acceptance or latency figure, and leaves the sentinel untouched. It opens **no register row**: under §Maintenance's entry rule a measurement someone intends to take is not a defect and not a decision, and *"we should measure this someday"* is the invisible debt that rule exists to refuse. **The protocol is a specification in §Validation, where a reader looking for how a number was produced will find it.** Running total unchanged at **≈$2.57 of $5**.
 
 ## Problem statement
 
@@ -2643,6 +2662,131 @@ Out-of-Scope row, not closed.
 
 **CI requirement:** the unit, stubbed-integration, and replay-determinism suites SHALL run on every build and SHALL NOT require an inference server or network access. The live smoke is a manual gate at Phase 1b and Phase 2.
 
+### The outcome campaign — a pre-registration *(v1.8.42, owner decision 2026-08-09, §Corrections item 58)*
+
+> **EVERYTHING IN THIS SUBSECTION IS WRITTEN BEFORE THE FIRST RUN OF THE CAMPAIGN IT SPECIFIES.**
+> That is the whole point of it. This project has four recorded instances of a result that did not
+> survive its own repeat — §Corrections items 40, 42, 47(b) and 50(a) — and in every one the
+> analysis was chosen after the numbers were visible. **The endpoint, the test, the n, the decision
+> rule, the null wording and the confound below are all fixed here, and a later revision that
+> reports this campaign SHALL quote them rather than restate them.**
+
+**The question, in the only form this scenario can answer it.** *Does commanding the reference
+Tier-1 script with the AI commander change the combat outcome for the commanded aircraft, relative
+to the same script un-commanded?*
+
+**The comparison is ON vs SCRIPT-ONLY, and NOT ON vs OFF.** `commander-on` and `commander-off`
+differ in **two** variables — the commander *and* the mission script, because the harness restores
+the shipped script before the control arm — and §Corrections item 45(b) records that the first
+version of that comparison was published before anyone noticed. The `script-only` arm holds the
+script fixed and moves only the commander. **Both arms come from the same invocation of
+`tests/smoke/run-live-scenario.ps1`, so each run yields one PAIRED observation** from identical
+initial conditions on one build.
+
+#### The primary endpoint, and why it is not one of the four the harness reports
+
+**Primary endpoint: `damageAbsorbed` — the sum of `pk` over every `Warhead damage applied` record
+whose target is a commanded aircraft, per arm, per run.** Lower is better.
+
+**Why not launches, detonations, kills or losses.** Those four are what `tools/analyse-outcomes.py`
+computes, and **not one of them can answer this question at a feasible n.** Re-derived over the five
+archived three-arm runs as paired ON − SCRIPT-ONLY differences:
+
+| Endpoint | Paired difference | sd | Effect *d* | Runs for 80 % power | Verdict |
+|---|---|---|---|---|---|
+| **`damageAbsorbed`** | **−0.683** | **0.203** | **3.37** | **3** | **primary** |
+| `damageDealt` | +0.188 | 0.830 | 0.23 | 156 | secondary, underpowered |
+| `kills` | −0.200 | 0.837 | 0.24 | 140 | secondary, underpowered |
+| `launches` | +0.400 | 0.548 | 0.73 | 17 | secondary, underpowered |
+| `detonations` | +0.200 | 0.447 | 0.45 | 42 | secondary, underpowered |
+| `losses` | 0.000 | 0.000 | — | undefined | **degenerate — carries no information** |
+
+**`losses` deserves its own sentence, because it used to be the column that mattered.** Before the
+reference-script fix it read 26 commanded aircraft destroyed against 0 — the single starkest figure
+in this document. **Since the fix it is identically 0 in all three arms of all five three-arm runs.**
+A column with no variance cannot discriminate anything, and a reader who checks it will correctly
+see nothing and incorrectly conclude nothing is there. **The graded `pk` the engine already records
+is the same quantity before it is thresholded**, and it is where the signal went.
+
+**This is §Corrections item 45's shape and it is worse.** There, the instrument existed and nobody
+had run it. **Here the run logs have carried `pk` on every damage line since Phase 1b, and no
+instrument this project owns has ever computed it.**
+
+#### The design, the n, and what n = 4 does and does not buy
+
+- **Design:** paired, within-run, ON vs SCRIPT-ONLY.
+- **Population:** runs on the post-C23-fix build only. **The five planning runs are excluded from
+  the test**, for the reason in the next subsection.
+- **n = 4 fresh runs**, at ~35 minutes each — the owner's decision on 2026-08-09, taken against
+  n = 6 and n = 8 alternatives with their intervals shown.
+- **Primary test:** paired two-sided *t*-test, α = 0.05, reported as a **95 % confidence interval on
+  the mean paired difference**.
+- **Minimum detectable effect at n = 4, 80 % power: 0.284.** The planning effect is −0.683, so the
+  margin is 2.4×; the interval still excludes zero if the true sd is twice the planning estimate,
+  and does not if it is three times.
+
+**What n = 4 explicitly does NOT buy, recorded here so it is not discovered in the write-up.** **The
+distribution-free backstop cannot reach significance at this n.** A sign test with 4 of 4 consistent
+signs is p = 0.125 two-sided — **it cannot produce a significant result no matter how the data
+fall.** So the paired *t* interval is **the** test, and sign consistency is reported as
+**corroboration and not as a second test**. A campaign that quoted "4 of 4 runs agreed" as though it
+were a p-value would be doing the thing this subsection exists to prevent.
+
+#### The decision rule, fixed before the data
+
+**CLAIM** that the commander reduces damage absorbed **only if all three hold:**
+
+1. the 95 % CI on the mean paired difference **excludes zero**; and
+2. the point estimate is **negative**; and
+3. the sign is negative in **4 of 4** runs.
+
+**Otherwise NULL — and a null SHALL be written as *"any effect is smaller than 0.284 in absolute
+value"*, never as *"the commander has no effect"*.** The two statements are different and only the
+first is supported by a bounded-power design.
+
+**In either direction the result SHALL be quoted as an interval and never as a point**, per
+§Success metrics and the standing rule the linter enforces on the acceptance sentinel.
+
+#### Two things this campaign is not allowed to claim
+
+**① The secondary endpoints are declared underpowered IN ADVANCE, with their numbers, and SHALL NOT
+be claimed in either direction.** `damageDealt` needs ~156 runs, `kills` ~140, `detonations` ~42,
+`launches` ~17. **Reporting any of them as a finding — including as a reassuring null — would be
+reading a result off an instrument this table already says cannot see it.** They are recorded for
+the archive and for whoever later has the run budget.
+
+**② The confound, pre-registered because it survives whichever way the primary endpoint falls.**
+Damage absorbed can fall because the commander flies the aircraft **better** or because it flies the
+aircraft **less aggressively**. Separating those needs `damageDealt`, which is underpowered at
+n = 4. **So this campaign cannot distinguish "safer" from "less committed", and SHALL say so
+wherever it reports the primary result.** The honest form of a positive finding is *"the commanded
+aircraft absorb less damage, and this design cannot say whether they also fight less"*.
+
+#### The corroborating mechanism, which is not a rate and is reported separately
+
+Under §Scope authority rule 4 a single run may close a question that is **a mechanism readable
+directly off recorded values**. This one is:
+
+- **Blue fires exactly two air-to-air munitions at the commanded pair in 15 of 15 archived
+  arm-runs** — the scenario is fixed in that respect, so the denominator is not a sampling quantity.
+- **In the control arms both land: 20 of 20 munitions across 10 arm-runs.**
+- **In the commanded arm one of the two is defeated in 4 of 5 runs**, and the engine names the
+  mechanism rather than leaving it to be inferred: `[seeker] BlueF16_02_wpn_1250_4 lost`. **That
+  line appears in 0 of 10 control arm-runs.**
+
+**This is reported beside the primary endpoint and never merged into it.** It is per-munition
+evidence about *how* a difference arises; the primary endpoint is per-run evidence about *whether*
+one does, and conflating a mechanism with a rate is what §Corrections item 40 records.
+
+#### Provenance, stated because it changes how the result should be read
+
+**`damageAbsorbed` was selected by inspecting the existing archive.** It was not specified in
+advance of the five planning runs and it was not the endpoint anyone set out to measure. **That
+makes this campaign confirmatory of a retrospectively generated hypothesis, which is a weaker thing
+than a pre-planned experiment and a stronger thing than the archive alone.** The two consequences
+are enforced above: the planning runs are excluded from the test, and the decision rule is fixed
+here rather than after the campaign returns.
+
 ## Rollout and milestones
 
 ### Phase 0 — Scaffold
@@ -2998,6 +3142,27 @@ is now a permanent property of it rather than a gap someone is closing.** The ru
 and nothing else; **reopening the question needs only an owner who wants it, and this paragraph is
 where they should start.**
 
+> ***(v1.8.42 — THE OWNER WANTED IT, AND THIS PARAGRAPH IS WHERE THEY STARTED. §Corrections item
+> 58.)*** **The outcome question is reopened by owner decision on 2026-08-09.** The protocol is
+> §Validation's *"The outcome campaign — a pre-registration"*, written in full **before** its first
+> run: primary endpoint, paired design, n = 4, decision rule, minimum detectable effect, null
+> wording, two forbidden claims and the provenance disclosure.
+>
+> **Maintenance is NOT rescinded and nothing above is withdrawn.** No phase opens. No gate is
+> created. The register stays empty and its entry rule is untouched. No bar moves, and the paragraph
+> above remains the correct description of what this document said until today. **What "permanent"
+> turned out to mean is "until somebody decides otherwise", which is what the sentence about an
+> owner who wants it was for** — the close named its own reopening condition and the condition was
+> met. **A close that can be reopened by a named decider is the kind this document was trying to
+> write; a close that could not would have been the failure mode item 49(a) records.**
+>
+> **One thing the planning analysis found is worth reading even by someone who never runs the
+> campaign:** the four columns `tools/analyse-outcomes.py` reports **cannot answer this question at
+> any n anyone will run**, and `losses` — the column carrying this project's starkest figure, 26
+> against 0 — **has been degenerate since the reference-script fix.** The signal moved into the
+> graded `pk` the engine has recorded on every damage line since Phase 1b and that no instrument
+> here has ever computed.
+
 **What maintenance does NOT mean.** It does not mean the code is frozen — defects get fixed. It does
 not lower any bar: the gates that pass today are the gates that must pass tomorrow. And it does not
 retire §Corrections, which **grows monotonically by design and is a history rather than a backlog** —
@@ -3350,6 +3515,24 @@ Advisory. Gaps found while composing this PRD, not blockers.
 - **v1.2 note — the snapshot was specified from the Lua surface, not the C++ one.** Every field in the original §Exactly what is transmitted named a Lua verb, and two of them turned out to have no C++ equivalent. The lesson generalizes: for a C++ plugin, "which verb returns this?" is the wrong traceability question — "which header or schema record exposes this to *the plugin*?" is the right one. Appendix A now carries the Lua/C++ split explicitly so the next field added is checked against both columns.
 
 ## Changelog
+
+### v1.8.42 — 2026-08-09
+
+**§Corrections item 58: the outcome question is reopened by owner decision, and its protocol is written down before the first run rather than after it.** No run, no network, no cost, no grant, **no code change and no measured figure moves.** This revision is a pre-registration and nothing else.
+
+**§Rollout's maintenance close said reopening "needs only an owner who wants it". The owner wants it.** Maintenance is **not rescinded**: no phase opens, no gate is created, the register stays empty, no bar moves. The close named its own reopening condition and the condition was met.
+
+**The planning analysis found that the outcome instrument cannot answer the question it was built for.** `tools/analyse-outcomes.py` reports launches, detonations, kills and losses. As paired ON − SCRIPT-ONLY differences over the five archived three-arm runs, **all four need an infeasible n** — 17, 42, 140 runs — and **`losses` is degenerate, identically 0 in all three arms of all five runs since the reference-script fix.** The column that carried this project's starkest figure, 26 against 0, now carries no information at all.
+
+**The endpoint that can answer it is one the instrument discards.** The engine's `Warhead damage applied` line carries a graded `pk`; the four columns threshold it away. **Damage absorbed by the commanded pair: paired difference −0.683, sd 0.203, d = 3.37, n = 3 for 80 % power** — against damage *dealt* at d = 0.23 and n = 156. **The run logs have carried this quantity since Phase 1b and no instrument this project owns has ever computed it.**
+
+**The design is confirmatory and says so.** The endpoint was chosen by inspecting the archive, so the five planning runs are **excluded** from the test and a fresh **n = 4** campaign is specified with its decision rule, its minimum detectable effect (**0.284**) and its null wording fixed in advance.
+
+**Two limits are pre-registered rather than discovered later.** At n = 4 the sign test cannot reach α = 0.05 — 4 of 4 is p = 0.125 — so the paired *t* interval is the test and sign consistency is corroboration only. And because damage *dealt* is underpowered, **the campaign cannot separate "the commander makes the aircraft safer" from "the commander makes it fight less"**, whichever way the primary endpoint falls.
+
+**The corroborating mechanism is not a rate.** Blue fires exactly two air-to-air munitions at the commanded pair in **15 of 15** archived arm-runs; in the control arms both land, **20 of 20 across 10 arm-runs**; in the commanded arm one is defeated in **4 of 5**, with the engine naming how — `[seeker] BlueF16_02_wpn_1250_4 lost`, absent from all ten control arm-runs.
+
+Running total unchanged at **≈$2.57 of $5**.
 
 ### v1.8.41 — 2026-08-09
 

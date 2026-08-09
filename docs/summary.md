@@ -7,7 +7,7 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # N8RO AI Entity Commander — summary
 
-**PRD version:** v1.8.41
+**PRD version:** v1.8.42
 **Date:** 2026-08-09
 **Audience:** the platform owner, and whoever picks up the next block of work.
 
@@ -36,6 +36,13 @@ and never produces raw kinematics.
 had been on disk since Phase 1b.** Deploying the commander made the commanded aircraft **shoot 87.5 %
 less, hit nothing, and die** — over twelve paired runs, **4 launches against the shipped script's 32,
 0 kills against 0, and 22 of 24 commanded aircraft destroyed against 0 of 24.**
+
+> ***(v1.8.42 — READ THE LOSS FIGURE AS HISTORY, NOT AS CURRENT STATE.)*** **That 22-of-24 is a
+> PRE-FIX number and the column it comes from has been degenerate since the fix.** Across all three
+> arms of all five three-arm runs after v1.8.30, commanded losses are **identically 0** — so the
+> column that carried this project's starkest finding now carries no information at all, and a
+> reader checking it today correctly sees nothing. **The defect it detected was fixed thoroughly
+> enough to blind the detector.** *Source: §Corrections item 58(b)–(d).*
 
 **The cause is this project's own deterministic tier, not the language model.** Four mechanisms, all
 readable off the source, and an isolating arm with no model in the loop at all reproduces the result:
