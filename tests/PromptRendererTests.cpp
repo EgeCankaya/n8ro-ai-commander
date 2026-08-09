@@ -90,8 +90,33 @@ namespace {
 //
 // The direction is the safe one again: the prefix GREW, so the cached block moves further above the
 // 4,096 minimum rather than toward it.
-constexpr std::size_t kMeasuredPrefixBytes = 11600;
-constexpr std::size_t kShippedDoctrineBytes = 9782;
+//
+// v1.8.38, §Corrections item 54(e). The pin moves again, 9,782 -> 10,612 doctrine bytes and
+// 11,600 -> 12,430 prefix bytes, and the scaffold is untouched for the third time. THIS ONE IS A
+// CORRECTION OF A FALSE STATEMENT rather than an addition, and it is owed since v1.8.36 recorded it
+// (item 52(f)). Two sentences in the CRUISE SPEED block described a system that has not existed
+// since v1.8.27:
+//
+//   * "A value at or below zero ... is rejected outright" - the bound has been
+//     `safety.minSpeedMps = 50.0` since v1.8.27, so EVERY C23 rejection hit a floor the model was
+//     never told existed. The replacement names the shape and NOT the number: the exact bound is a
+//     deployment setting, and writing 50 into a cacheable block that no mechanism keeps in step with
+//     the config would re-create this defect the next time an operator lowers it for rotary-wing
+//     platforms - which `CommanderConfig.h` explicitly instructs them to do.
+//   * "Re-issuing the current speed is ALWAYS a defensible answer" - false in exactly the case C23
+//     is about, and this project measured 61 of 61 accepted orders taking that advice. It is now
+//     qualified rather than deleted: the C15 anchor it carries ("read own.speedMps, not a velocity
+//     component") is the fix for a different defect and must survive.
+//
+// NEITHER IS A REMEDY FOR C23 AND NEITHER IS RECORDED AS ONE (PRD AIC-ORD-2, under clause 8). C23 is
+// held by clauses 7 and 8, in Tier 1, where it does not depend on the model reading anything. This
+// is a correction of a false statement about the shipped system, owed on its own account.
+//
+// The direction is safe a third time: +830 bytes, so the cached block moves further above the
+// minimum. The token figures below are DERIVED from the byte delta and the measured 3.955 B/token,
+// not measured - no hosted request was made for them, and no grant was spent.
+constexpr std::size_t kMeasuredPrefixBytes = 12430;
+constexpr std::size_t kShippedDoctrineBytes = 10612;
 
 // Everything PromptRenderer::build contributes that is not the doctrine text: the system prompt, the
 // posture/ROE vocabulary, the DOCTRINE: label, the cadence paragraph, and the newlines between them.
@@ -104,10 +129,10 @@ constexpr std::size_t kPrefixScaffoldBytes = kMeasuredPrefixBytes - kShippedDoct
 // (the byte count), and someone reading a red test at speed will otherwise reach for the wrong one.
 const char* kCacheMinimumArithmetic =
     "\n    The prefix is cached on the hosted path and Haiku 4.5 will not cache a block under"
-    "\n    4,096 tokens. What caches is ~5,839 tokens - the prefix text (11,600 B / 3.955 B per"
-    "\n    token = ~2,933) PLUS the structural schema copy the adapter sends in"
+    "\n    4,096 tokens. What caches is ~6,049 tokens - the prefix text (12,430 B / 3.955 B per"
+    "\n    token = ~3,143) PLUS the structural schema copy the adapter sends in"
     "\n    output_config.format.schema (PRD Corrections item 22). The margin over the minimum is"
-    "\n    ~1,743 tokens (42.6 percent), i.e. about 6,893 bytes of prefix. Below it the cache"
+    "\n    ~1,953 tokens (47.7 percent), i.e. about 7,724 bytes of prefix. Below it the cache"
     "\n    silently stops forming and the cost per order goes from $0.001220 to ~$0.005829 - no"
     "\n    error, no counter, nothing red. If you MEANT to change the prefix, update the constants"
     "\n    in this file and say so in the PRD; the cost rows in Cost model are computed from them.";

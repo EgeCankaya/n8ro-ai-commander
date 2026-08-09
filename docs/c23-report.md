@@ -7,12 +7,14 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # C23 — the aircraft that stops flying, and the fix that closes it
 
-**Status:** the fix specified as AIC-ORD-2 clauses 7 and 8 (PRD v1.8.36) is **implemented and tested**.
-**PRD version this report is written against:** v1.8.36.
+**Status:** the fix specified as AIC-ORD-2 clauses 7 and 8 (PRD v1.8.36) is **implemented, tested,
+and confirmed in the engine**.
+**PRD version this report is written against:** v1.8.38.
 **Date:** 2026-08-09.
-**Cost:** none. No engine run, no inference server, no network, no egress grant, no new archive
-directory. Everything below is re-derivation of logs already on disk, plus a Lua change and six
-offline tests.
+**Cost:** none in money and none in authorization. **No inference server, no network, no egress
+grant** — §§1–9 are re-derivation of logs already on disk plus a Lua change and six offline tests,
+and §10.2's two confirming runs are ~4 minutes of local engine time with the commander asserted OFF
+and no model in the loop at all.
 
 > **Why this document exists.** C23's evidence was spread across §Corrections items 47(d), 50(c)–(f),
 > 51 and 52(e)–(f) and AIC-ORD-2 clauses 7–8 — four revisions of argument in which two claims were
@@ -413,7 +415,7 @@ inside that licence, listed so the owner can disagree with any of them:
 
 | # | Decision | Argument | If the owner disagrees |
 |---|---|---|---|
-| 1 | **Hysteresis** — recovery clears at 150 m/s, not at the 50 m/s floor | With one threshold the aircraft crosses 50, navigation returns to the posture that stalled it, it decays, and it crosses again. That satisfies the letter of clause 8 and none of its intent. This is *how you implement* the clause without oscillation, not a new obligation | It is the one item here a reader might call an FR behaviour. A revision would state the second threshold in clause 8 |
+| 1 | **Hysteresis** — recovery clears at **100 m/s**, not at the 50 m/s floor. *(v1.8.38 — was 150, and a run said no; see §10.2)* | With one threshold the aircraft crosses 50, navigation returns to the posture that stalled it, it decays, and it crosses again. That satisfies the letter of clause 8 and none of its intent. This is *how you implement* the clause without oscillation, not a new obligation. **The threshold now has a measurement on both sides of it**: 2× the floor below, and ~24 % clear of the 132.2–146.5 m/s band a recovering aircraft was measured settling in above | It is the one item here a reader might call an FR behaviour. A revision would state the second threshold in clause 8 |
 | 2 | **`math.max(ordered, 300)` rather than substituting 300** | Clause 8 says re-accelerate to Tier 1's own value. Plain substitution would pull the defensive pump's 320 *down* to 300. `max` honours the clause's purpose — the floor is Tier 1's — and can never cause a stall | Substitute unconditionally and let the reflex re-issue |
 | 3 | **The floor is a script constant (50.0), not read from `safety.minSpeedMps`** | The `aiCommander` namespace does not publish it, and it should not have to: a recovery that only fired where the *validator* would reject an order would not fire at all with the commander absent — which is where 12 of the 58 below-floor samples sit. The script's floor is a statement about flight; the validator's is a statement about orders | Add a getter to AIC-API-1 — **which needs a PRD revision, so it was not done here.** The duplication is a real divergence risk and is logged in §8 |
 | 4 | **Orbit lead angle 30°, same direction for the section** | Clause 7 says *"from the arithmetic the script already carries"*; this is `pointAtBearing`, unchanged | — |
@@ -429,7 +431,9 @@ inside that licence, listed so the owner can disagree with any of them:
    against.
 2. **A distant hold flown in is covered by clause 7's per-tick test, not by clause 8** — the takeover
    happens at radius entry, before the speed can fall. Clause 8 remains the backstop if that is
-   wrong.
+   wrong. ***(v1.8.38 — measured. §10.2 Q1: a hold ordered 20 km away and flown in decelerates at
+   −20 m/s² from the first sample after the aircraft is inside the radius. The per-tick test takes
+   the geometry on that same sample, so the collapse never begins.)***
 3. **`resumeWaypointFollowing` with an exhausted route still ends the leg.** Once recovered, the
    script hands navigation back and the aircraft may decay again, recovering again. That is a
    sawtooth above 50 m/s rather than a latch at 1.5, which is what clause 8 asks for — but it is not
@@ -453,10 +457,17 @@ argument is about **adding a prohibition**. But `data/doctrine.txt` currently **
 
 **Deleting an instruction is not the same intervention as adding one**, and it does not depend on
 obedience to work — it merely stops actively causing the behaviour. It is also **not a fix**: the
-model may echo anyway, so it replaces nothing and clauses 7 and 8 stand regardless. **Recommendation:
-raise it as a separate change with its own revision, bundled with the correction already owed
-below.** It was not done here because it is outside clauses 7–8 and because it is coupled — see §8,
-item 2.
+model may echo anyway, so it replaces nothing and clauses 7 and 8 stand regardless.
+
+***(v1.8.38 — done, and QUALIFIED rather than deleted, which is the part worth arguing about.)***
+The sentence is not merely an encouragement; the paragraph it sits in is **C15's fix**. *"Read
+`own.speedMps`, not a velocity component"* is what stopped the model copying `velE` and emitting
+−220.0, and deleting the paragraph would reopen a closed defect to close an open one. So the anchor
+stays and only the false universal goes: *"always a defensible answer"* becomes *"a defensible answer
+whenever the aircraft is flying normally, which is almost always"*, followed by the one case where it
+is not. **`always` was measurably false** — 61 of 61 accepted orders took that advice, and 58 of them
+were rejected for it — **so this is a correction of a false statement in the same block as the other
+one, not a new prohibition.** It is still not a remedy for C23 and is not recorded as one.
 
 ---
 
@@ -465,7 +476,7 @@ item 2.
 | # | Claim in the record | Verdict |
 |---|---|---|
 | 1 | *19 of 19 archived `hold` orders issued at 0.0 m* (item 51(a)) | **Reproduced**, with the denominator corrected: 19 of the 19 that are **measurable**, out of **114** archived holds. `docs/summary.md`'s *"All 19 archived `hold` orders"* reads as the total and is not |
-| 2 | *`data/doctrine.txt` states the speed rejection threshold as "a value at or below zero"* while it is `safety.minSpeedMps = 50.0` (item 52(f)) | **Verified, still false, still owed.** Deliberately **not** fixed here: it is not part of clauses 7–8, and it is coupled — `kShippedDoctrineBytes` in `tests/PromptRendererTests.cpp` pins the file's byte size and `CacheGuardTests.cpp` pins the prefix's cache eligibility. A doctrine edit is a three-file change to the transmitted prompt and belongs in its own commit |
+| 2 | *`data/doctrine.txt` states the speed rejection threshold as "a value at or below zero"* while it is `safety.minSpeedMps = 50.0` (item 52(f)) | **Verified false, and CORRECTED in v1.8.38** — see §7.5. **The replacement names the shape and not the number**, because writing `50` into a cacheable block with no mechanism keeping it in step with the config would re-create this exact defect the next time an operator lowers the bound, which `CommanderConfig.h` explicitly instructs them to do. The coupled pins moved with it: doctrine 9,782 → 10,612 bytes, prefix 11,600 → 12,430. **Growth, so the cached block moves further above Haiku's 4,096-token minimum rather than toward it.** Recorded as a correction of a false statement and **not** as a remedy for C23 |
 | 3 | *39 of 39 samples below `safety.minSpeedMps`, across three runs and two aircraft, had `hold` in force* (item 50(c)) | **Not reproduced as stated.** There are now **58** below-floor samples across **four** runs: **46 under `hold`, 12 under no order at all.** The "39" was the two runs available at v1.8.34 (21 + 18). *"Three runs"* was two; ***"two aircraft" was one*** — every below-floor sample in the entire archive is on `RedSu35_02` |
 | 4 | *45 under `hold`, 12 under none* (item 51(d)) | **Reproduced** for the three 2026-08-08 runs. The fourth run (`133621`) adds one more `hold` sample, giving 46/12 over the whole archive |
 | 5 | *The collapse profile is 320 → ~128 → 1.5000* | **The endpoint replicates exactly** (52 samples at 1.5000). The intermediate value is run-specific: 128.0, 125.0, 6.555, 4.274. Quoting "~128" as the profile generalises one run |
@@ -549,6 +560,14 @@ is a gap between the criterion's words and its stated instrument, and it is reco
 papered over. **Confirming that the aircraft actually accelerates requires a run**, and that run is
 §10.2.
 
+***(v1.8.38 — the run was made and the gap is closed by measurement rather than by argument.)*** From
+exactly 1.5000 m/s a commanded 300 m/s put both aircraft above the floor in **3.1 s** against the
+criterion's 20 s, at **+20 m/s²**. **The criterion's wording and its instrument still disagree**, and
+that is not fixed by one run — the offline suite will still only ever assert the command. The honest
+statement is that the criterion is now **satisfied in fact on two aircraft in one run**, and that a
+suite assertion cannot carry it. Whether the criterion should name the run as its instrument is a PRD
+question, not this document's.
+
 ---
 
 ## 10. Reproducing this, and the one run that would close what remains
@@ -575,22 +594,103 @@ The §3–§6 tables come from `orders.jsonl` joined on `(entityId, serial)` bet
 `fallback.released`**, and from the `[mission script] <id> -> <mode>` lines in `commander-on-*.log`
 bracketed by the engine's `simulationTime=` markers.
 
-### 10.2 The run that would close the rest — specified, not run
+### 10.2 The run that closes the rest — **run, and it answers both questions**
 
-**Not run here**, per §Scope authority rule 4 and because nothing in the fix is blocked on it.
+*(v1.8.38. Two runs, `tools/run-c23-probe.ps1` driving `tools/c23-hold-probe.lua`, archived at
+`20260809T102936Z-c23-probe` and `20260809T104112Z-c23-probe`. **Commander OFF and asserted off** —
+the harness refuses to start if `data/config/plugins/ai-commander.cfg` exists — so `aiCommander` is
+nil throughout and no result here can be an artifact of a published order. **No model, no network,
+no grant, no cost.** The release tree is restored byte-for-byte in a `finally` block.)*
 
-- **Question:** does a `hold` ordered far from the aircraft also stop it once it flies in, and does an
-  aircraft commanded 300 m/s from 1.5 m/s actually reach it?
-- **Instrument:** one mission script, commander **disabled**, no model, no network, no grant. Issue
-  `navigation.requestHoldPosition` at a point 50 km away with a 5,000 m radius at 320 m/s, and log
-  `entityControl.getVelocityNed` and `getPositionGeodetic` every second for 300 s. Then repeat with
-  the fixed reference script deployed.
-- **What it closes:** both are *mechanisms readable directly off recorded values* — "does this speed
-  stay above the floor while the aircraft is inside the orbit" — which is the one category
-  §Scope authority rule 4 permits a single run to answer.
-- **Cost:** ~5 minutes of engine time, no inference server, free.
-- **Traps:** never kill a live run mid-flight — its `finally` restores the mission script, the
-  doctrine and the deployed config; and do not build while it runs, the DLL is locked.
+The probe is an **instrument, not a Tier-1 script**: it implements no requirement, reads no order and
+never fires. It drives `navigation` directly from simulation time and logs `getVelocityNed` and
+`getPositionGeodetic` at **1 Hz**, which is what turns the archive's 20 s sampling bracket into a
+number.
+
+#### Q1 — does a `hold` ordered *far away* also stop the aircraft? **Yes, and the trigger is the orbit boundary.**
+
+Run 1. `requestHoldPosition` at a point **20 km away**, `orbitRadiusM` 5,000, `cruiseSpeedMps` 320.
+Both aircraft, identically:
+
+| t (s) | distance to hold point | inside? | ground speed |
+|---|---|---|---|
+| 10.2 → 61.2 | 21,123 → 5,260 m | **no** | **320.0000 throughout — fifty seconds, no decay** |
+| **62.1** | **4,972 m** | **yes** | 320.0000 |
+| **63.0** | 4,693 m | yes | **302.0000** |
+| 65.2 … 76.0 | 4,079 → 2,466 m | yes | 258 · 240 · 222 · 198 · 180 · 162 · 138 · 120 · 102 · 78 · 60 · 42 |
+| 79.0 | 2,414 m | yes | **4.2744** |
+| 83.2 → 84.1 | 2,405 m | yes | **1.5416 → 1.5169** |
+
+**The deceleration begins in the first sample after the aircraft crosses inside the ordered radius**,
+and it is a clean **−20 m/s²** until the last few m/s, where it becomes an exponential approach to
+1.5000. The archive's 16.5–17.1 s "onset delay" was **entirely an artifact of its 20 s sampling**;
+the real delay is under one second.
+
+**So the 0 m echo is not the necessary condition.** It determines *when* the collapse starts —
+immediately, because the aircraft begins inside the orbit — not *whether*. A hold ordered 20 km away
+and flown in stops the aircraft exactly the same way.
+
+**This is the case §5.3 said the archive could not settle, and it settles it in the direction that
+matters for the fix: clause 7's per-tick test is not a nicety, it is the only reading that covers
+this.** An order-issue-time test would have handed run 1's order straight to the engine.
+
+**A detail worth its own line, because it is a replication rather than a coincidence.** The probe
+reads **4.2744 m/s** at t = 79.0. The archived `095026` run reads `own.speedMps` = **4.274373306340072**
+at t = 180.4. **Same curve, same point on it, four decimal places, two years of scenario time apart
+and with a language model in one and not the other.**
+
+**The damage confound is ruled out off the record, not assumed away.** The only detonations against
+either Su-35 in run 1 occur at t ≈ 85 and t ≈ 149 — **after** the collapse — and the first is the one
+that destroyed `RedSu35_01`. Nothing hit either aircraft while it was slowing.
+
+#### Q2 — is a commanded 300 m/s *achieved*, or only issued? **Achieved, in 3.1 seconds.**
+
+Run 2. Phase A holds at the aircraft's **own position** from t = 0 — the archived order, and
+AIC-VAL-2 rung 2's published geometry — and phase B then issues exactly what the fixed script issues
+while recovering: `requestGoTo` 25 km ahead at **300 m/s**, re-issued every tick.
+
+**Phase A reproduces C23's onset with no model and no commander in the loop at all:** 220.0000 at
+t = 0.1, **1.5000 by t = 23.1**, latched. That is §3.3's claim demonstrated rather than argued —
+**the fallback ladder's own standing order stalls the aircraft by itself.**
+
+**Phase B, from exactly 1.5000 m/s, both aircraft identical to four decimals:**
+
+| t (s) | ground speed |
+|---|---|
+| 30.0 | **1.5000** — recovery commanded |
+| 31.2 | 23.5000 |
+| 32.2 | 42.5000 |
+| **33.1** | **60.5000 — above `safety.minSpeedMps` 3.1 s after the command** |
+| 47.1 | 299.1215 |
+| 50.1 | **299.9563 / 299.9822** |
+
+**Clause 8's acceptance criterion — "recovers above it within one cadence window" — is met with 3.1 s
+against 20 s.** The acceleration is **+20 m/s²**, the exact mirror of the deceleration. §9.2's
+caveat is discharged: the recovery is achieved, not merely commanded.
+
+#### And the run found a defect in the fix, which is the best argument for having run it
+
+After peaking at 299.98, **both aircraft settle at 132.2–146.5 m/s** under a *continuing* 300 m/s
+command. The archive says the same thing from the other side: `RedSu35_01` flew `defend (ordered)`
+for 490 s under a commanded 320 and held about 150.
+
+**`kResumeFlyingSpeedMps` was 150.0 — inside that band.** The recovery latch clears at that
+threshold, so in normal flight it **might never have cleared**: Tier 1 would have kept navigation for
+the rest of the run, `hold` would never have orbited and `resumeWaypointFollowing` would never have
+run. The value had nothing behind it but "half of Tier 1's cruise".
+
+**It is now 100.0** — 2× the floor, so the entry/exit pair cannot chatter, and ~24 % below the lowest
+settling speed observed. A new assertion at **132.2 m/s** pins the ceiling, so a future raise back
+into the band fails a test instead of silently latching. **Neither the offline suite nor the archive
+could have found this**, and it is the one thing in this report that a run bought outright.
+
+#### Traps, for whoever runs it next
+
+Never kill a live run mid-flight — the harness's `finally` restores the mission script, and a tree
+left carrying the probe would drive every later scenario, interactive ones included. Do not build
+while it runs; the DLL is locked. And **the probe has no defensive reflex and never fires**, so its
+subjects are on a clock: run 1's first attempt put the fragile measurement last and lost it when both
+aircraft were destroyed at t ≈ 85 and t ≈ 149. The phase order in the committed probe is that lesson.
 
 ---
 
@@ -600,16 +700,30 @@ bracketed by the engine's `simulationTime=` markers.
 parts of that are measured and which are argued.**
 
 - **Measured:** the echo (61/61 speed, 19/19 measurable position), the collapse's dependence on being
-  inside the ordered radius (4/4, twice with the aircraft stationary), the latch at 1.5000 (52
-  samples), the survival of all three ladder rungs (12 samples with no order in force), and the cost
-  (58 of 114 rejections).
+  inside the ordered radius (4/4 in the archive, twice with the aircraft stationary; and **directly,
+  at 1 Hz, on both aircraft in §10.2 Q1**), the latch at 1.5000 (52 archived samples, reproduced
+  exactly by the probe), the survival of all three ladder rungs (12 samples with no order in force),
+  the cost (58 of 114 rejections), and — **new in v1.8.38** — that a commanded 300 m/s is **achieved
+  in 3.1 s from a dead stop**, and that a recovering aircraft **settles at 132.2–146.5 m/s**.
 - **Read off the interface or the source, not inferred:** `resumeWaypointFollowing` carries no speed;
-  rung 2 synthesizes the degenerate geometry by specification; `defend` already discarded the ordered
-  speed.
-- **Argued, not established:** why the engine stops at 1.5 m/s; that a Tier-1-chosen speed is what
-  rescued the two survivors (n = 2, confounded); that a distant hold flown in would also stall.
-- **Not asserted by any test in this repository:** that a commanded 300 m/s is achieved. §10.2.
+  rung 2 synthesizes the degenerate geometry by specification — **and §10.2's phase A then stalled an
+  aircraft with that geometry alone, no model and no commander**; `defend` already discarded the
+  ordered speed.
+- **Argued, not established:** why the engine stops at 1.5 m/s, and why a recovering aircraft settles
+  near 140 rather than the commanded 300 — both are inside a closed-source engine and this report
+  does not guess; and that a Tier-1-chosen speed is what rescued the two archived survivors (n = 2,
+  confounded).
+- **No longer outstanding:** the distant-hold question (§10.2 Q1) and whether the recovery is
+  achieved (§10.2 Q2).
 
-**The register row should not close on this commit.** What closes is the specified fix, implemented
-and pinned by tests that demonstrably fail without it. What remains is one 5-minute run, one owed
-doctrine correction, and the owner's view on the five judgement calls in §7.3.
+**What the run changed in the fix itself, and it is the argument for having run it.** `kResumeFlyingSpeedMps`
+was 150.0, chosen from nothing. The probe measured the settling band at **132.2–146.5 m/s**, so the
+threshold sat *inside* it and the recovery latch might never have cleared — Tier 1 holding navigation
+for the rest of the run, `hold` never orbiting. It is now **100.0**, with a test pinning the ceiling.
+**Neither the offline suite nor the archive could have found that.**
+
+**The register row can now close on everything except its governance tail.** The fix is implemented,
+pinned by tests that demonstrably fail without it, and confirmed in the engine on both of the
+questions the offline suite could not reach. What remains is **not engineering**: the owner's view on
+the five judgement calls in §7.3, and whether AIC-ORD-2 clause 8's acceptance criterion should name
+the run rather than the suite as its instrument (§9.2).

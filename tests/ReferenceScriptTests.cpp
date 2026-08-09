@@ -769,7 +769,14 @@ AIC_TEST(ReferenceScriptStillFiresWhileRecoveringFromAStall) {
 // Recovery entered at safety.minSpeedMps and left at safety.minSpeedMps would hand navigation back
 // to the posture that stalled the aircraft the moment it crossed 50 m/s, and the aircraft would
 // oscillate about the floor forever - satisfying the letter of clause 8 and none of its intent.
-// So it clears at kResumeFlyingSpeedMps (150), not at the floor.
+// So it clears at kResumeFlyingSpeedMps (100), not at the floor.
+//
+// THE UPPER THRESHOLD HAS A CEILING AS WELL AS A FLOOR, which a run had to find. It was 150 until
+// v1.8.38, when the confirming probe measured a recovering aircraft settling at 132.2-146.5 m/s
+// under a commanded 300 - so 150 sat inside the band and the latch might never have cleared,
+// leaving Tier 1 holding navigation for the rest of the run. The 60 m/s case below is what pins
+// the lower end of the band; nothing pins the upper end except that measurement, which is why the
+// constant carries it in a comment rather than a number alone.
 AIC_TEST(ReferenceScriptHoldsTheRecoveryUntilTheAircraftIsProperlyFlyingAgain) {
     std::string error;
     const std::string source = readReferenceScript(error);
@@ -783,16 +790,21 @@ AIC_TEST(ReferenceScriptHoldsTheRecoveryUntilTheAircraftIsProperlyFlyingAgain) {
     const std::string commander =
         commanderPublishing("hold", "weaponsTight", "", "13.50", "144.80", "8000.0", "1.4999");
 
-    // Tick 1: stalled. Tick 2: above the floor but not yet flying. Tick 3: properly flying.
+    // Tick 1: stalled. Tick 2: above the floor but not yet flying. Tick 3: at the LOWEST speed the
+    // probe measured a recovering aircraft settle at - the latch must have cleared by here, or it
+    // may never clear at all. Tick 4: properly flying.
     AIC_LUA_OK(lua.eval(std::string(kArchivedStallVelocity) + commander
                         + "onInit('OWN'); onTick('OWN', 100.0, 0.05)\n"
                           "world.velocity.OWN = {0.0, 60.0, 0.0}\n"
                           "onTick('OWN', 100.05, 0.05)\n"
                           "midSpd = lastGoTo.spd\n"
+                          "world.velocity.OWN = {0.0, 132.2, 0.0}\n"
+                          "onTick('OWN', 100.10, 0.05)\n"
+                          "settleSpd = lastGoTo.spd\n"
                           "world.velocity.OWN = {0.0, 200.0, 0.0}\n"
                           "calls = {}; lastGoTo = nil\n"
-                          "onTick('OWN', 100.10, 0.05)"),
-               "driving three ticks across the recovery band");
+                          "onTick('OWN', 100.15, 0.05)"),
+               "driving four ticks across the recovery band");
 
     const auto mid = lua.eval("return string.format('%.0f', midSpd)");
     AIC_LUA_OK(mid, "checking the speed commanded at 60 m/s");
@@ -800,6 +812,18 @@ AIC_TEST(ReferenceScriptHoldsTheRecoveryUntilTheAircraftIsProperlyFlyingAgain) {
                   "at 60 m/s the aircraft is above safety.minSpeedMps and still not flying. "
                   "Releasing the recovery here hands navigation straight back to the hold that "
                   "stalled it, and the aircraft oscillates about the floor instead of recovering");
+
+    // THE CEILING ON THE THRESHOLD, and it is the half a run had to supply. 132.2 m/s is the lowest
+    // speed the confirming probe observed a recovering aircraft settle at under a commanded 300. If
+    // kResumeFlyingSpeedMps is ever raised above that, the latch stops clearing in normal flight and
+    // Tier 1 keeps navigation for the rest of the run - `hold` never orbits and
+    // `resumeWaypointFollowing` never runs. That is what the 150 this replaced would have done.
+    const auto settled = lua.eval("return string.format('%.0f', settleSpd)");
+    AIC_LUA_OK(settled, "checking the speed commanded at the measured settling floor");
+    AIC_EXPECT_EQ(unquote(settled.returnValue), std::string("1"),
+                  "at 132.2 m/s - the lowest speed a recovering aircraft was measured settling at - "
+                  "the recovery MUST have cleared and the ordered speed must be back in force. A "
+                  "resume threshold above the settling band is a latch that never opens");
 
     const auto released = lua.eval("return string.format('%.0f', lastGoTo.spd)");
     AIC_LUA_OK(released, "checking the speed commanded at 200 m/s");

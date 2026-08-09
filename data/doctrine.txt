@@ -119,7 +119,13 @@ Give a speed the posture can use. Closing and defending are fast; orbiting and t
 
 Start from the speed the aircraft is already making. The situation block reports it as own.speedMps,
 in metres per second over the ground, and it is the number to adjust up or down rather than to
-replace with a guess. Re-issuing the current speed is always a defensible answer.
+replace with a guess. Re-issuing the current speed is a defensible answer whenever the aircraft is
+flying normally, which is almost always.
+
+The exception is the one case where own.speedMps is not a speed to reuse: an aircraft that has
+slowed to a crawl. If own.speedMps is a handful of metres per second, that is not a cruise setting
+it is holding, it is an aircraft that has stopped flying, and handing the number back commands it to
+stay stopped and loses the order to the floor below. Order the speed the posture needs instead.
 
 Cruise speed is a magnitude and is therefore always positive. own.velN, own.velE and own.velD are
 not speeds - they are the signed north, east and down components of the velocity vector, and any one
@@ -127,10 +133,15 @@ of them can be negative or zero while the aircraft is flying perfectly normally.
 due west reports own.velE as a large negative number and is not travelling backwards. Do not copy a
 velocity component into cruiseSpeedMps; read own.speedMps.
 
-Nothing clamps an out-of-envelope speed. A value at or below zero, or one beyond the airframe's
-configured limit, is rejected outright and the whole order is discarded with it - the posture, the
+Nothing clamps an out-of-envelope speed. A value below the configured minimum, or one beyond the
+configured maximum, is rejected outright and the whole order is discarded with it - the posture, the
 target and the waypoint included - and the previous order stays in force. An implausible number is
 not a faster aircraft; it is a lost window.
+
+The minimum is not zero. It is a real floor set well above zero, because a speed at which an
+aircraft is not flying is as useless an order as a negative one, so a value of a few metres per
+second is rejected exactly as a negative value is. The exact bound is a deployment setting and is
+not stated here; what matters is that "greater than zero" is not the test being applied.
 
 ON THE DIVISION OF LABOUR
 Issue intent, not control inputs. Heading, pitch, bank, throttle setting, turn geometry, launch

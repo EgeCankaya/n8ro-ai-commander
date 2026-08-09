@@ -108,7 +108,21 @@ local kMinFlyingSpeedMps    = 50.0
 -- aircraft is properly flying again, not merely one metre per second above the floor. With a single
 -- threshold the aircraft crosses it, hands navigation straight back to the posture that stalled it,
 -- decays, and crosses again -- satisfying the letter of clause 8 and none of its intent.
-local kResumeFlyingSpeedMps = 150.0
+--
+-- THE VALUE WAS 150.0 AND A RUN SAID NO (PRD v1.8.38, Corrections item 54(d)). It was chosen as
+-- "half of Tier 1's cruise" with nothing behind it. The confirming probe then measured what an
+-- aircraft under a commanded 300 m/s actually does: it reaches 299.98 in about twenty seconds and
+-- then SETTLES AT 132.2-146.5 m/s, on both aircraft, and the archive says the same thing from the
+-- other direction -- `RedSu35_01` flew `defend (ordered)` under a commanded 320 for 490 s and held
+-- about 150. So 150.0 sat INSIDE the band the aircraft settles in, and the latch it guards might
+-- never have cleared: Tier 1 would have kept navigation for the rest of the run, `hold` would never
+-- have orbited and `resumeWaypointFollowing` would never have run.
+--
+-- 100.0 is 2x the floor -- far enough above it that the entry/exit pair cannot chatter -- and ~24 %
+-- below the lowest speed the probe observed a recovering aircraft settle at. Like
+-- `safety.minSpeedMps`, it is a policy choice rather than a derivation; unlike the 150 it replaces,
+-- it has a measurement on both sides of it.
+local kResumeFlyingSpeedMps = 100.0
 
 -- Hardpoint engagement priority, longest reach first, matching the shipped script's table. The
 -- disciplined launch range is engageRangeM * kLaunchRangeFrac -- a shot at the very edge of the
