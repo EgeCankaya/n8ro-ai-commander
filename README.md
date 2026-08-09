@@ -60,10 +60,11 @@ Everything else in the register is closed. **Two live rows.**
 **Measured against the PRD's success metrics:** cost **$1.05** per four-ship
 scenario-hour against a ≤ $1.10 target (**met**); `reject.schema` **0.00 %** over 776
 orders across two backends and three models (**met**); order acceptance **100 %** on the
-synthetic-fixture soaks and **71.1 % [66.4, 75.5]** in-engine against real scenario
-state — **85.8 % [81.5, 89.3]** once the two non-model-failure classes are removed
-*(v1.8.39 — was 64.8 % and 82.0 %; **C23's fix landed and the stall-floor class stopped
-growing**, so the two post-fix runs added 74 resolved orders and one rejection)*
+synthetic-fixture soaks and **80.8 % [77.4, 83.8]** in-engine against real scenario
+state — **90.9 % [88.2, 93.2]** once the two non-model-failure classes are removed
+*(v1.8.46 — was 71.1 % and 85.8 %; **the outcome campaign's four three-arm runs plus the
+clause 8 probe added 211 resolved orders, and the C23 stall-floor class did not grow by a
+single sample — still 58, every one of them predating the fix**)*
 (**two instruments, two named rows — see C17**); local 7B round-trip p95 **7,975 ms** against a
 ≤ 20 s target (**met**), hosted Haiku p95 **4,615 ms** over the 240-order soak against
 ≤ 2.5 s (**missed**, and not control-loop-binding — the 20 s cadence absorbs a p99 of
@@ -169,7 +170,7 @@ Stated here rather than discovered during a demo.
   so `tools/acceptance-report.py` now owns the number and `tools/lint-prd.ps1` fails the
   build if this file, the PRD and the summary disagree.)*
 
-<!-- in-engine-acceptance: 71.1 [66.4, 75.5] n=398 runs=25 -->
+<!-- in-engine-acceptance: 80.8 [77.4, 83.8] n=609 runs=30 -->
 - **Three kills have ever been scored**, and in **all three** the target was already `wrecked`
   by SAM hits when the Su-35's missile finished it. Two were 2026-08-08 in the script-only arm;
   the third is 2026-08-09 and is **the first in a commanded arm**. **A kill by the engine's

@@ -7,7 +7,7 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # N8RO AI Entity Commander — summary
 
-**PRD version:** v1.8.45
+**PRD version:** v1.8.46
 **Date:** 2026-08-09
 **Audience:** the platform owner, and whoever picks up the next block of work.
 
@@ -43,6 +43,22 @@ less, hit nothing, and die** — over twelve paired runs, **4 launches against t
 > column that carried this project's starkest finding now carries no information at all, and a
 > reader checking it today correctly sees nothing. **The defect it detected was fixed thoroughly
 > enough to blind the detector.** *Source: §Corrections item 58(b)–(d).*
+
+***(v1.8.46 — AND THE QUESTION THIS DOCUMENT COULD NEVER ANSWER NOW HAS AN ANSWER, ON ONE
+ENDPOINT.)*** The outcome question was reopened by owner decision, a protocol was written **before**
+the first run, and four three-arm runs were made against it. **Paired commander-on minus
+script-only, on damage absorbed by the commanded pair: −0.7741, 95 % CI [−1.0210, −0.5272],
+negative in 4 of 4 runs — and it replicates against the five earlier runs as an independent set,
+which is the first result in this project's history to survive its own repeat.** **The commanded
+aircraft absorb roughly half the damage the same script absorbs un-commanded**, and the engine
+names the mechanism: **5 of 9 Blue missiles defeated in the commanded arm, every one with a logged
+seeker loss, against 0 of 8 and 0 of 8 in the two controls.**
+
+> **Read the two limits with the number, because they are not small.** **This design cannot separate
+> *"the commander makes the aircraft safer"* from *"the commander makes it fight less"*** — the
+> endpoint that would separate them needs ~156 runs. And it is **one endpoint, one scenario, one
+> model**: damage dealt, kills, launches and losses stay unmeasured and are **not** claimed in
+> either direction. *Source: §Corrections item 62; §Validation, "The outcome campaign".*
 
 **The cause is this project's own deterministic tier, not the language model.** Four mechanisms, all
 readable off the source, and an isolating arm with no model in the loop at all reproduces the result:
@@ -173,7 +189,7 @@ headroom. Only the hosted entry of that row had ever been measured, and only the
 |---|---|
 | Cost per four-ship scenario-hour | **MET** — $1.05 against ≤ $1.10 |
 | **Fixture** acceptance rate | **MET** — 100 % on the synthetic soaks. *(v1.8.36 — the row is named for its instrument now, so it cannot be read as the engine's)* |
-| **In-engine** acceptance rate | **Not gated, by owner decision.** **71.1 % [66.4, 75.5]** over 398 resolved orders — and **85.8 % [81.5, 89.3]** once the two non-model-failure classes are removed. *(v1.8.39 — was 64.8 % / 82.0 %. **C23's fix landed and the stall-floor class stopped growing:** the two post-fix runs added 74 resolved orders and **one** rejection)* |
+| **In-engine** acceptance rate | **Not gated, by owner decision.** **80.8 % [77.4, 83.8]** over 609 resolved orders — and **90.9 % [88.2, 93.2]** once the two non-model-failure classes are removed. *(v1.8.46 — was 71.1 % / 85.8 %. **The outcome campaign's four three-arm runs plus the clause 8 probe added 211 resolved orders, and the C23 stall-floor class did not grow by a single sample — still 58, every one predating the fix.**)* |
 | Parse/schema rejection rate | **MET** — 0.00 % over 776 orders, two backends, three models |
 | Plugin cost per frame | **MET** |
 | Replay reproducibility | **MET** |
@@ -182,7 +198,7 @@ headroom. Only the hosted entry of that row had ever been measured, and only the
 
 *Source: §Success metrics.*
 
-<!-- in-engine-acceptance: 71.1 [66.4, 75.5] n=398 runs=25 -->
+<!-- in-engine-acceptance: 80.8 [77.4, 83.8] n=609 runs=30 -->
 
 ***(v1.8.36 — the in-engine figure now has an owner and a pin.)*** It had gone stale **four times**,
 always the same way: a run was archived, nobody recomputed, and the old number was requoted until a
