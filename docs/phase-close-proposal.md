@@ -7,9 +7,24 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # Proposal: close the unphased period — and the decisions that close with it
 
-**Status: A PROPOSAL. Nothing here has been applied to `docs/prd.md`.**
-**Written against:** PRD v1.8.40, 2026-08-09.
-**Audience:** the platform owner. Every decision below is yours; none of them is mine.
+> # RESOLVED 2026-08-09 — **Option B, maintenance**, chosen by the owner.
+>
+> **Applied in PRD v1.8.41** (§Rollout's maintenance close, §Corrections item 57). **C17 and C23 both
+> close; the register is empty.** Of §3's four decisions: **3.3 is fixed** (clause 8's criterion now
+> names two instruments, each asserting what it can see) and **3.4 is taken** (C17 closes on C8's
+> precedent). **3.1 — the standing hosted-egress authorization — remains outstanding and is the
+> owner's**, tracked where it has always been tracked, in §Review checklist. **3.2 stands as
+> implementation**, pinned by a test since v1.8.40.
+>
+> **This file said it would be deleted on decision. It is kept instead, and the reversal is
+> deliberate:** §Corrections' standing convention is that superseded reasoning is kept rather than
+> rewritten, and the argument for the option that was *not* taken is the part a later reader needs
+> most — particularly §4's statement of what maintenance gives up. Deleting it would leave the
+> decision recorded and its alternative unrecoverable.
+
+**Status: RESOLVED — retained as the record of a decision, not as a live proposal.**
+**Written against:** PRD v1.8.40, 2026-08-09. **Resolved into** PRD v1.8.41.
+**Audience:** the platform owner. Every decision below was theirs; none of them was mine.
 
 > **Why this is a separate file rather than a PRD edit.** §Scope authority says the PRD changes when
 > a decision is made, not when one is suggested. Writing either option into §Rollout would *be* the

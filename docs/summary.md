@@ -7,7 +7,7 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # N8RO AI Entity Commander — summary
 
-**PRD version:** v1.8.40
+**PRD version:** v1.8.41
 **Date:** 2026-08-09
 **Audience:** the platform owner, and whoever picks up the next block of work.
 
@@ -199,6 +199,33 @@ controlled requests to a local inference server carrying no scenario state. *Sou
 | 2 | ***(v1.8.39 — two done, on the fixed build. The stall is gone and acceptance moved 64.8 % [59.3, 70.0] → 71.1 % [66.4, 75.5].)*** **What is still n = 1 is the commander's own value** — the ON/SCRIPT-ONLY comparison — and **clause 8 has never fired in a commanded scenario** because clause 7 keeps preventing the onset | ~35 min each | No grant, no model, no network |
 | 3 | Re-run the domain review of posture appropriateness against a Tier 1 that fights (H1's marks were taken against one that did not) | ~2 h | A domain reviewer |
 | 4 | Decide the standing hosted-egress authorization. `docs/egress.md` is accurate again as of v1.8.31, having been stale on three counts | minutes | The owner |
+
+## The phased work is finished *(v1.8.41 — owner decision, 2026-08-09)*
+
+**No further phase is planned. The product is feature-complete against the PRD's FR set, and what
+remains is response to what breaks.** Phase 3 closed at v1.8.17 and twenty-four productive but
+**unphased** revisions followed — with no gate, and therefore **no state the project could be in
+other than "here is what is still open"**. That is what made a two-row backlog read as an unending
+one. *Source: §Rollout, §Corrections item 57.*
+
+**Both remaining rows close in the same revision.** **C17** closes as a stated position — its
+taxonomy landed, its question was answered by the owner on 2026-08-06, and what kept it open was that
+two instruments disagree by design, which is a permanent condition rather than a task. **C23** closes
+on the mechanism, demonstrated under a commander, **with its residual named rather than absorbed:
+clause 8 has never fired in a commanded scenario, because clause 7 keeps preventing the onset.**
+
+**The register is empty for the first time.** One governance item is deliberately outside it — the
+standing hosted-egress authorization, which lives in the Review checklist where it has an owner.
+
+**What this gives up, and it is a real cost.** **It forecloses the outcome question.** What the
+commander is *worth* stands permanently at **unmeasured** — a null at n = 1, an identity refuted at
+n = 2, and two post-fix runs whose intervals overlap almost entirely. **Anyone later asking "is this
+worth deploying?" gets no answer from this document.** The runs cost ~35 minutes and no grant;
+reopening the question needs only an owner who wants it.
+
+**And one thing worth keeping straight, because confusing it is what made the work feel endless:**
+**§Corrections grows monotonically and is a history, not a backlog.** It is at 57 items and will only
+get longer. The register is the backlog, and it is now at zero.
 
 ## What is still open — and what is dormant, which is not the same thing
 
