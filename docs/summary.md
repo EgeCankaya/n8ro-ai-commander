@@ -7,7 +7,7 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # N8RO AI Entity Commander — summary
 
-**PRD version:** v1.8.39
+**PRD version:** v1.8.40
 **Date:** 2026-08-09
 **Audience:** the platform owner, and whoever picks up the next block of work.
 
@@ -129,6 +129,18 @@ before.** `navigation.requestHoldPosition` was called **zero times** — clause 
 **and clause 8 never fired at all**, which is the designed relationship and also means **clause 8
 is still unexercised in a commanded scenario.** Acceptance moves **64.8 % → 71.1 % [66.4, 75.5]**;
 **no outcome rate is claimed from two runs.** *Source: §Corrections item 55.*
+
+***(v1.8.40 — the instrument behind a green metric had not compiled for eleven revisions.)***
+`tests/live/` stopped building at v1.8.28, when C18 deleted the field it was still assigning. **It is
+in no solution file and no CI step, so nothing said so** — and it is the sole instrument behind the
+**fixture acceptance** metric this document reports as MET at 100 %. Its corpus had also drifted
+three times over, including one divergence that still compiled. **Repaired, and re-measured: fixture
+acceptance is still 200/200 = 100 %**, so the verdict is restored on a current instrument rather than
+overturned — and the hypothesis raised while repairing it, that the stale corpus explained C17, is
+**refuted by its own measurement.** With the harness building, **H3's comparison arm ran for the
+first time**: constrained 200/200 with `reject.schema` 0.00 %, unconstrained **0/200 at 100.00 %**,
+every failure the same one — the model spelling the ROE field in English prose. **`tests/live/` now
+builds in CI.** *Source: §Corrections item 56.*
 
 **A second finding, independent of the first.** The largest rejection class in the archive
 (`reject.shape`, **16 of 55, 29.1 %**) was diagnosed by a controlled probe of the local decoder:

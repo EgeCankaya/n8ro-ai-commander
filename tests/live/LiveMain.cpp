@@ -83,6 +83,28 @@ struct Situation {
     OrderSnapshot snapshot;
 };
 
+// THIS CORPUS HAD DIVERGED FROM THE SHIPPED SNAPSHOT ON THREE SEPARATE REVISIONS AND NOTHING SAID
+// SO (PRD v1.8.40, §Corrections item 56). Repaired here, and the repair is the finding rather than
+// housekeeping: this is the instrument behind the FIXTURE acceptance metric, which §Success metrics
+// has read MET at 100 % since 2026-08-04.
+//
+//   * `headingDeg` was DELETED from OrderSnapshot at v1.8.28, when C18 replaced it with a derived
+//     `courseDeg`. This file kept assigning it, so it has not COMPILED since - eleven revisions.
+//   * `speedMps` arrived at v1.8.25 (C15) and `courseDeg` at v1.8.28. Neither was ever set here, so
+//     even before the compile broke, the fixture prompt was missing the two own-ship fields the
+//     doctrine tells the model to read for cruise speed and for direction.
+//   * `TrackReport` gained `kind` and `team` at v1.8.30. The three-field aggregate initialisers
+//     below still compiled and silently defaulted both to Other/Unknown - the exact ambiguity those
+//     fields were added to remove, reintroduced in the measurement corpus alone.
+//
+// DERIVED, NOT TYPED. `speedMps` and `courseDeg` are computed by the same free functions the plugin
+// uses (Snapshot.h), so a fixture cannot carry a speed and a velocity that disagree - which is the
+// defect C15 was, arriving in the instrument instead of in the product.
+void deriveOwnMotion(OrderSnapshot& s) {
+    s.speedMps = groundSpeedMps(s.velNMps, s.velEMps, s.velDMps);
+    s.courseDeg = courseOverGroundDeg(s.velNMps, s.velEMps);
+}
+
 OrderSnapshot baseSnapshot() {
     OrderSnapshot snapshot;
     snapshot.entityId = "RedSu35_01";
@@ -90,11 +112,11 @@ OrderSnapshot baseSnapshot() {
     snapshot.latitudeDeg = 13.49;
     snapshot.longitudeDeg = 145.00;
     snapshot.altitudeHaeM = 10000.0;
-    snapshot.headingDeg = 270.0;
     snapshot.velNMps = 0.0;
     snapshot.velEMps = -220.0;
     snapshot.velDMps = 0.0;
     snapshot.loadout.push_back(LoadoutReport{"STA1", "R77_BVR", 4, 4});
+    deriveOwnMotion(snapshot);
     return snapshot;
 }
 
@@ -104,8 +126,10 @@ std::vector<Situation> buildSituations() {
     {
         OrderSnapshot s = baseSnapshot();
         s.simTimeS = 120.0;
-        s.tracks.push_back(TrackReport{"BlueF16_01", 62000.0, 14.0});
-        s.tracks.push_back(TrackReport{"BlueF16_02", 71000.0, 11.0});
+        s.tracks.push_back(
+            TrackReport{"BlueF16_01", 62000.0, 14.0, TrackKind::Air, TrackTeam::Hostile});
+        s.tracks.push_back(
+            TrackReport{"BlueF16_02", 71000.0, 11.0, TrackKind::Air, TrackTeam::Hostile});
         canonicalizeSnapshot(s);
         situations.push_back({"two tracks, full rail", s});
     }
@@ -121,11 +145,12 @@ std::vector<Situation> buildSituations() {
         s.simTimeS = 480.0;
         s.longitudeDeg = 144.85;
         s.altitudeHaeM = 7000.0;
-        s.headingDeg = 90.0;
         s.velEMps = 240.0;
+        deriveOwnMotion(s);
         s.loadout.clear();
         s.loadout.push_back(LoadoutReport{"STA1", "R77_BVR", 0, 4});
-        s.tracks.push_back(TrackReport{"BlueF16_02", 18000.0, 22.0});
+        s.tracks.push_back(
+            TrackReport{"BlueF16_02", 18000.0, 22.0, TrackKind::Air, TrackTeam::Hostile});
         canonicalizeSnapshot(s);
         situations.push_back({"winchester, one track close", s});
     }
@@ -134,12 +159,17 @@ std::vector<Situation> buildSituations() {
         s.simTimeS = 300.0;
         s.longitudeDeg = 144.90;
         s.altitudeHaeM = 9000.0;
-        s.headingDeg = 260.0;
         s.velEMps = -300.0;
+        deriveOwnMotion(s);
         s.loadout.clear();
         s.loadout.push_back(LoadoutReport{"STA1", "R77_BVR", 2, 4});
-        s.tracks.push_back(TrackReport{"BlueAim120_07", 9000.0, 28.0});
-        s.tracks.push_back(TrackReport{"BlueF16_01", 24000.0, 19.0});
+        // The munition row is the whole point of this situation and it was indistinguishable from
+        // an aircraft until v1.8.30 added `kind`. Four archived `targetClass` rejections were the
+        // model engaging exactly this contact without being told what it was.
+        s.tracks.push_back(
+            TrackReport{"BlueAim120_07", 9000.0, 28.0, TrackKind::Munition, TrackTeam::Hostile});
+        s.tracks.push_back(
+            TrackReport{"BlueF16_01", 24000.0, 19.0, TrackKind::Air, TrackTeam::Hostile});
         s.situationNote = "Inbound munition closing fast inside its likely envelope.";
         canonicalizeSnapshot(s);
         situations.push_back({"munition inbound", s});
@@ -157,9 +187,11 @@ std::vector<Situation> buildSituations() {
         s.simTimeS = 200.0;
         s.longitudeDeg = 144.95;
         s.velEMps = -280.0;
+        deriveOwnMotion(s);
         s.loadout.clear();
         s.loadout.push_back(LoadoutReport{"STA1", "R77_BVR", 3, 4});
-        s.tracks.push_back(TrackReport{"BlueF16_01", 31000.0, 20.0});
+        s.tracks.push_back(
+            TrackReport{"BlueF16_01", 31000.0, 20.0, TrackKind::Air, TrackTeam::Hostile});
         s.situationNote = "Missile away at BlueF16_01 twelve seconds ago; assessment window open.";
         canonicalizeSnapshot(s);
         situations.push_back({"shot away, supporting", s});

@@ -1,7 +1,11 @@
 #include "TestSupport.h"
 
+#include "CommanderConfig.h"
+
 #include <core/scripting/ILuaEvalRuntime.h>
 #include <core/scripting/LuaScriptRuntimeFactory.h>
+
+#include <regex>
 
 #include <fstream>
 #include <memory>
@@ -843,6 +847,67 @@ AIC_TEST(ReferenceScriptHoldsTheRecoveryUntilTheAircraftIsProperlyFlyingAgain) {
 // did before v1.8.36 rather than concluding that an aircraft it cannot measure has stopped: a
 // recovery that fires on every entity whose velocity is unreadable would seize navigation from a
 // fully serviceable aircraft, which is a worse defect than the one it is here to fix.
+// THE ONE PLACE A TEXT CHECK IS THE RIGHT INSTRUMENT, AND IT IS WORTH SAYING WHY.
+//
+// Every other test in this file asserts on WHAT THE SCRIPT DID, because a grep passes on a script
+// refactored into a shape that no longer works. Here the literal value IS the subject: the script
+// carries its own speed floor as a constant, and `safety.minSpeedMps` carries the same quantity in
+// C++, and NOTHING LINKS THEM. The `aiCommander` namespace does not publish the bound, and adding a
+// getter is new API surface that needs a PRD revision (docs/c23-report.md section 7.3, item 3).
+//
+// So the two numbers are pinned to each other instead. The failure this catches is the one
+// `CommanderConfig.h` explicitly invites: "A DEPLOYMENT COMMANDING ROTARY-WING OR LOITERING
+// PLATFORMS MUST LOWER IT" - an operator does exactly that, and the reference script goes on
+// recovering at 50 m/s because nobody remembered it had its own copy. That is §Corrections item
+// 50(e)'s failure mode - a value that agrees by convention until it quietly does not - and the
+// remedy this project has used successfully three times is a pin that fails the build.
+AIC_TEST(ReferenceScriptSpeedFloorAgreesWithTheShippedSafetyBound) {
+    std::string error;
+    const std::string source = readReferenceScript(error);
+    AIC_EXPECT_TRUE(error.empty(), error);
+
+    const auto readConstant = [&source](const char* name, double& out) {
+        const std::regex pattern(std::string("local\\s+") + name + "\\s*=\\s*([0-9]+\\.?[0-9]*)");
+        std::smatch match;
+        if (!std::regex_search(source, match, pattern)) {
+            return false;
+        }
+        out = std::stod(match[1].str());
+        return true;
+    };
+
+    double scriptFloor = -1.0;
+    AIC_EXPECT_TRUE(readConstant("kMinFlyingSpeedMps", scriptFloor),
+                    "the reference script must declare kMinFlyingSpeedMps as a literal - if it has "
+                    "been renamed or computed, this pin is silently measuring nothing and the "
+                    "rename is the change that needs reviewing");
+
+    const arkheon::aicommander::CommanderConfig shipped;
+    AIC_EXPECT_EQ(scriptFloor, shipped.minSpeedMps,
+                  "lua/ai_commander_interceptor.lua's kMinFlyingSpeedMps ("
+                      << scriptFloor << ") must equal the shipped safety.minSpeedMps default ("
+                      << shipped.minSpeedMps
+                      << "). They are the same physical quantity held in two places with no "
+                         "mechanical link between them, and CommanderConfig.h instructs rotary-wing "
+                         "deployments to lower the C++ one. If you changed the bound on purpose, "
+                         "change BOTH and say so in the PRD");
+
+    // The recovery threshold has no C++ counterpart, so what is pinned is the RELATIONSHIP: it must
+    // sit above the floor (or the latch chatters) and below 132.2 m/s, the lowest speed the v1.8.38
+    // probe measured a recovering aircraft settle at (or the latch never clears at all).
+    double resumeAt = -1.0;
+    AIC_EXPECT_TRUE(readConstant("kResumeFlyingSpeedMps", resumeAt),
+                    "the reference script must declare kResumeFlyingSpeedMps as a literal");
+    AIC_EXPECT_TRUE(resumeAt > scriptFloor && resumeAt < 132.2,
+                    "kResumeFlyingSpeedMps ("
+                        << resumeAt << ") must sit strictly between the floor (" << scriptFloor
+                        << ") and 132.2 m/s. Below the floor the latch is meaningless; at or above "
+                           "132.2 it is inside the band a recovering aircraft was measured settling "
+                           "in, and Tier 1 would hold navigation for the rest of the run. The "
+                           "value shipped at 150.0 until a run caught exactly that");
+    return true;
+}
+
 AIC_TEST(ReferenceScriptDoesNotInventAStallWhenTheVelocityIsUnreadable) {
     std::string error;
     const std::string source = readReferenceScript(error);
