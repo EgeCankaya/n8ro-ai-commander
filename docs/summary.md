@@ -7,7 +7,7 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # N8RO AI Entity Commander — summary
 
-**PRD version:** v1.8.38
+**PRD version:** v1.8.39
 **Date:** 2026-08-09
 **Audience:** the platform owner, and whoever picks up the next block of work.
 
@@ -118,6 +118,18 @@ band a recovering aircraft settles in, so it might never have cleared; corrected
 pinning the ceiling. **C23 closes on everything except its governance tail.** *Source: §Corrections
 item 54; `docs/c23-report.md` §10.2.*
 
+***(v1.8.39 — the fix ran under a commander for the first time, twice, and this is the cleanest
+comparison the project has ever had.)*** Two three-arm 600 s runs at the shipped default,
+**22 checks / 0 failed** each. **The model's behaviour is unchanged and the archive proves it:
+52 of 52 measurable `hold` orders are still issued at 0.00 m from own position — 19 before the fix
+and 33 after it — so the only variable that moved is Tier 1.** `RedSu35_02`, which collapsed to
+1.5000 m/s in 3 of 3 archived runs, **held 320.0000 m/s through the whole of run 1 under twenty
+accepted `hold` orders**, and **zero samples fell below the floor in either run against 21 / 18 / 18
+before.** `navigation.requestHoldPosition` was called **zero times** — clause 7 took all 33 holds —
+**and clause 8 never fired at all**, which is the designed relationship and also means **clause 8
+is still unexercised in a commanded scenario.** Acceptance moves **64.8 % → 71.1 % [66.4, 75.5]**;
+**no outcome rate is claimed from two runs.** *Source: §Corrections item 55.*
+
 **A second finding, independent of the first.** The largest rejection class in the archive
 (`reject.shape`, **16 of 55, 29.1 %**) was diagnosed by a controlled probe of the local decoder:
 **numeric bounds are not enforced by the constrained decoder at all**, confirmed on four models across
@@ -142,7 +154,7 @@ headroom. Only the hosted entry of that row had ever been measured, and only the
 |---|---|
 | Cost per four-ship scenario-hour | **MET** — $1.05 against ≤ $1.10 |
 | **Fixture** acceptance rate | **MET** — 100 % on the synthetic soaks. *(v1.8.36 — the row is named for its instrument now, so it cannot be read as the engine's)* |
-| **In-engine** acceptance rate | **Not gated, by owner decision.** **64.8 % [59.3, 70.0]** over 324 resolved orders — and **82.0 % [76.8, 86.5]** once the two non-model-failure classes are removed. **More than half the shortfall is C23** |
+| **In-engine** acceptance rate | **Not gated, by owner decision.** **71.1 % [66.4, 75.5]** over 398 resolved orders — and **85.8 % [81.5, 89.3]** once the two non-model-failure classes are removed. *(v1.8.39 — was 64.8 % / 82.0 %. **C23's fix landed and the stall-floor class stopped growing:** the two post-fix runs added 74 resolved orders and **one** rejection)* |
 | Parse/schema rejection rate | **MET** — 0.00 % over 776 orders, two backends, three models |
 | Plugin cost per frame | **MET** |
 | Replay reproducibility | **MET** |
@@ -151,7 +163,7 @@ headroom. Only the hosted entry of that row had ever been measured, and only the
 
 *Source: §Success metrics.*
 
-<!-- in-engine-acceptance: 64.8 [59.3, 70.0] n=324 runs=23 -->
+<!-- in-engine-acceptance: 71.1 [66.4, 75.5] n=398 runs=25 -->
 
 ***(v1.8.36 — the in-engine figure now has an owner and a pin.)*** It had gone stale **four times**,
 always the same way: a run was archived, nobody recomputed, and the old number was requoted until a
@@ -172,7 +184,7 @@ controlled requests to a local inference server carrying no scenario state. *Sou
 | # | Action | Cost | Needs |
 |---|---|---|---|
 | 1 | ***(v1.8.38 — done, and confirmed. C23's layer was decided and built (clauses 7 and 8, 162/162), and the confirming run was made: the recovery is achieved in 3.1 s, a distant hold stalls the aircraft too, and the run found and fixed a bad threshold in the fix itself.)*** **What is left is not engineering** — five judgement calls in `docs/c23-report.md` §7.3, and whether clause 8's criterion names the run or the suite | minutes | The owner |
-| 2 | **Repeat the three-arm run** — everything from 2026-08-08 is n = 1, including the neutral commander result | ~35 min each | No grant, no model, no network |
+| 2 | ***(v1.8.39 — two done, on the fixed build. The stall is gone and acceptance moved 64.8 % [59.3, 70.0] → 71.1 % [66.4, 75.5].)*** **What is still n = 1 is the commander's own value** — the ON/SCRIPT-ONLY comparison — and **clause 8 has never fired in a commanded scenario** because clause 7 keeps preventing the onset | ~35 min each | No grant, no model, no network |
 | 3 | Re-run the domain review of posture appropriateness against a Tier 1 that fights (H1's marks were taken against one that did not) | ~2 h | A domain reviewer |
 | 4 | Decide the standing hosted-egress authorization. `docs/egress.md` is accurate again as of v1.8.31, having been stale on three counts | minutes | The owner |
 

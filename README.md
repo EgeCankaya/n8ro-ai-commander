@@ -48,22 +48,23 @@ revisit condition you can test without running anything.
 
 Everything else in the register is closed. **Two live rows.**
 
-**Gates, all green as of 2026-08-08:**
+**Gates, all green as of 2026-08-09:**
 
 | Suite | Result |
 |---|---|
-| Unit | **156 / 156** |
+| Unit | **162 / 162** |
 | Deployed-artifact smoke | **30 / 30** |
-| Live three-arm scenario smoke | **22 checks, 0 failed** |
-| `tools/lint-prd.ps1` · `tools/check-artifacts.ps1` | 10 checks, 0 errors, 0 warnings · 101 files, PASS |
+| Live three-arm scenario smoke | **22 checks, 0 failed** (twice, 2026-08-09) |
+| `tools/lint-prd.ps1` · `tools/check-artifacts.ps1` | 11 checks, 0 errors, 0 warnings · 105 files, PASS |
 
 **Measured against the PRD's success metrics:** cost **$1.05** per four-ship
 scenario-hour against a ≤ $1.10 target (**met**); `reject.schema` **0.00 %** over 776
 orders across two backends and three models (**met**); order acceptance **100 %** on the
-synthetic-fixture soaks and **64.8 % [59.3, 70.0]** in-engine against real scenario
-state — **82.0 % [76.8, 86.5]** once the two non-model-failure classes are removed, and
-**more than half the shortfall is C23** (**two instruments, now two named rows — see
-C17**); local 7B round-trip p95 **7,975 ms** against a
+synthetic-fixture soaks and **71.1 % [66.4, 75.5]** in-engine against real scenario
+state — **85.8 % [81.5, 89.3]** once the two non-model-failure classes are removed
+*(v1.8.39 — was 64.8 % and 82.0 %; **C23's fix landed and the stall-floor class stopped
+growing**, so the two post-fix runs added 74 resolved orders and one rejection)*
+(**two instruments, two named rows — see C17**); local 7B round-trip p95 **7,975 ms** against a
 ≤ 20 s target (**met**), hosted Haiku p95 **4,615 ms** over the 240-order soak against
 ≤ 2.5 s (**missed**, and not control-loop-binding — the 20 s cadence absorbs a p99 of
 7,099 ms). Plugin frame cost p95 **0.0059 ms**, max **0.5334 ms** over 12,001 frames
@@ -168,10 +169,14 @@ Stated here rather than discovered during a demo.
   so `tools/acceptance-report.py` now owns the number and `tools/lint-prd.ps1` fails the
   build if this file, the PRD and the summary disagree.)*
 
-<!-- in-engine-acceptance: 64.8 [59.3, 70.0] n=324 runs=23 -->
-- **Two kills have ever been scored** — both 2026-08-08, both in the script-only arm, and in
-  each the target was already `wrecked` by two SAM hits when the Su-35's missile finished it.
-  Eighteen runs, two kills, **none by a commanded arm** — and no rate follows from that.
+<!-- in-engine-acceptance: 71.1 [66.4, 75.5] n=398 runs=25 -->
+- **Three kills have ever been scored**, and in **all three** the target was already `wrecked`
+  by SAM hits when the Su-35's missile finished it. Two were 2026-08-08 in the script-only arm;
+  the third is 2026-08-09 and is **the first in a commanded arm**. **A kill by the engine's
+  definition; not an unaided one**, and no rate follows from three. *(The better result in that
+  run is not a kill at all: `RedSu35_01` took `BlueF16_01` to `wrecked` with two of its own
+  missiles and no SAM contribution — the first material damage a commanded aircraft has done
+  on its own.)*
 - **The commanded/script-only identity of the first three-arm run did not replicate.** It is
   refuted; nothing about the commander's value is established in either direction, and the
   script-only arm is near-deterministic so the repeat counts for less than it looks.

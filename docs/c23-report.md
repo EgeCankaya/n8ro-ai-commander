@@ -202,16 +202,22 @@ subsequent order is rejected and rung 1 retains the last accepted `hold`.
 
 Recomputed with `tools/acceptance-report.py` over 23 runs and 324 resolved orders:
 
-| | |
-|---|---|
-| in-engine acceptance | **64.8 % [59.3, 70.0]**, n = 324 |
-| rejections | 114 |
-| **of which the C23 stall floor** | **58 (50.9 %)** |
-| of which `roster` (an order resolved after its aircraft was destroyed) | 10 (8.8 %) |
-| acceptance excluding both non-model classes | **82.0 % [76.8, 86.5]**, n = 256 |
+| | before the fix (23 runs) | after (25 runs, v1.8.39) |
+|---|---|---|
+| in-engine acceptance | **64.8 % [59.3, 70.0]**, n = 324 | **71.1 % [66.4, 75.5]**, n = 398 |
+| rejections | 114 | 115 |
+| **of which the C23 stall floor** | **58 (50.9 %)** | **58 (50.4 %) — unchanged, and now frozen** |
+| of which `roster` | 10 (8.8 %) | 10 (8.7 %) |
+| acceptance excluding both non-model classes | **82.0 % [76.8, 86.5]**, n = 256 | **85.8 % [81.5, 89.3]**, n = 330 |
 
-**More than half of C17's acceptance shortfall is this one defect**, and every one of those 58
-rejections is the validator correctly refusing an accurate report of a broken state.
+**Half of C17's acceptance shortfall was this one defect**, and every one of those 58 rejections is
+the validator correctly refusing an accurate report of a broken state.
+
+***(v1.8.39 — the two confirming three-arm runs contributed 74 resolved orders and ONE rejection, a
+`track`.)*** **The stall-floor count did not move.** All 58 predate the fix, so the figure is now a
+historical total rather than a live proportion, and its share will fall with every further run. A
+reader should take 50.4 % as *"half of every rejection this project ever recorded came from one
+defect that no longer occurs"*.
 
 All 58 are on **one aircraft**: `RedSu35_02`, in four runs. So is every below-floor *sample*. This is
 worth stating plainly because the record says otherwise — see §8.
@@ -684,6 +690,53 @@ settling speed observed. A new assertion at **132.2 m/s** pins the ceiling, so a
 into the band fails a test instead of silently latching. **Neither the offline suite nor the archive
 could have found this**, and it is the one thing in this report that a run bought outright.
 
+### 10.3 The fix under a commander — two three-arm runs, and the comparison this project never had
+
+*(v1.8.39. `20260809T143428Z-local` and `20260809T150635Z-local`, three arms × 600 s each at the
+shipped default `qwen2.5:7b-instruct-q8_0`. **22 checks / 0 failed** both times. No network, no cost,
+no grant. Everything in §§1–10.2 confirmed clauses 7 and 8 by offline test and by a **commander-off**
+probe; **neither clause had ever executed under a model issuing real orders.**)*
+
+**The model did not change, and that is what makes this a comparison rather than an anecdote.**
+Across the whole archive, **52 of 52 measurable `hold` orders are still issued at 0.00 m from the
+aircraft's own reported position** — the 19 from §3.2, plus **33 more in these two runs, every one
+still at 0.00 m**. The speed echo is likewise untouched. **So the independent variable is Tier 1 and
+nothing else.** Every previous attempt at this comparison either moved two variables (§Corrections
+item 45(b)) or had to switch the model off entirely (item 47(a)).
+
+| | archive, 3 runs | run 1 | run 2 |
+|---|---|---|---|
+| `RedSu35_02` minimum ground speed | **1.5000 m/s**, latched 320–360 s | **320.0000** — held for the full 600 s | **220.0000** |
+| accepted `hold` orders on it | 19 measurable, all at 0 m | **20**, all at 0 m | **13**, all at 0 m |
+| samples below `safety.minSpeedMps` | 21 / 18 / 18 | **0** | **0** |
+| rejections | 21 / 18 / 18, all the floor | **0 of 38** | **1 of 37** (a `track`) |
+| `navigation.requestHoldPosition` calls | every hold | **0** | **0** |
+| clause 8 recoveries | — | **0** | **0** |
+
+**Clause 8 never fired, and that is the designed relationship rather than a gap in the evidence:**
+clause 7 prevented the onset on all 33 holds, so the safety net had nothing to catch. **The honest
+consequence is that clause 8 remains unexercised in a commanded scenario** — its evidence is the
+offline suite plus §10.2's probe, where it recovered an aircraft from 1.5000 m/s in 3.1 s.
+
+**What these runs do not establish.** They do not price the fix in outcome terms: ON was 3/2/0/0 and
+3/3/1/0 against an archive of 3/2/0/0, well inside what two runs of a stochastic scenario produce,
+and **C21's close already recorded that an outcome rate needs repeats nobody has run.** Acceptance is
+quoted as an interval over the pooled archive (§4), never as this run's rate.
+
+**One result belongs here with its qualification attached rather than after it.** Run 2's commanded
+arm scored **the archive's first ON-arm kill** — `RedSu35_02_wpn_1050_3` destroyed `BlueF16_02` at
+0.025 m — **but a SAM had already taken that target to `wrecked` at `cumPk` 0.859**, exactly as in
+both earlier archived kills. **A kill by the engine's definition; not an unaided one.** The better
+result in the same run is not a kill at all: **`RedSu35_01` took `BlueF16_01` from untouched to
+`wrecked` with two of its own missiles and no SAM contribution** — the first material damage a
+commanded aircraft has done on its own.
+
+**And one earlier reading of this project's own weakens.** The script-only arm returned **3/2/0/0 in
+both runs**, matching `095026` rather than the 2/2/1/0 of `135722` and `185750`. That arm has now
+produced each result twice, so §Corrections item 51(g)'s *"near-deterministic … two matching runs are
+nearer one observation than two"* **does not hold as stated**, and `095026` is no longer the outlier.
+The variance is real and unexplained.
+
 #### Traps, for whoever runs it next
 
 Never kill a live run mid-flight — the harness's `finally` restores the mission script, and a tree
@@ -723,7 +776,19 @@ for the rest of the run, `hold` never orbiting. It is now **100.0**, with a test
 **Neither the offline suite nor the archive could have found that.**
 
 **The register row can now close on everything except its governance tail.** The fix is implemented,
-pinned by tests that demonstrably fail without it, and confirmed in the engine on both of the
-questions the offline suite could not reach. What remains is **not engineering**: the owner's view on
-the five judgement calls in §7.3, and whether AIC-ORD-2 clause 8's acceptance criterion should name
-the run rather than the suite as its instrument (§9.2).
+pinned by tests that demonstrably fail without it, confirmed in the engine on both of the questions
+the offline suite could not reach, and — since v1.8.39 — **demonstrated under a commander issuing
+real orders, twice, with the model's behaviour held constant and proven constant** (52 of 52
+measurable holds still at 0.00 m). `RedSu35_02` held 320.0000 m/s through twenty accepted `hold`
+orders where it had collapsed to 1.5000 in three runs out of three.
+
+What remains is **not engineering**: the owner's view on the five judgement calls in §7.3, and
+whether AIC-ORD-2 clause 8's acceptance criterion should name the run rather than the suite as its
+instrument (§9.2).
+
+**One thing worth carrying forward rather than filing as closed.** **Clause 8 has never fired in a
+commanded scenario**, because clause 7 keeps preventing the onset. That is the design working, and it
+also means the safety net's only evidence is the offline suite and one injected probe. **A net that
+has never caught anything in production is not thereby proven** — it is untested where it matters,
+and the right time to notice that is now rather than after some future posture finds a new way to
+park an aircraft.
