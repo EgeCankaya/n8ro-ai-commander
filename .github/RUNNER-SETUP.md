@@ -9,6 +9,34 @@ That is the current state, and it is deliberately visible rather than hidden: th
 `pull_request` and `push` triggers are commented out, so it does not queue a job that can never
 start. A perpetually-pending check looks like a slow build at a glance and blocks branch protection.
 
+> ### ⚠ A consequence of the above that the PRD stated wrongly for eleven revisions
+>
+> **§Corrections item 56 repaired `tests/live/`, a harness that had not compiled since v1.8.28, and
+> closed with *"the root cause is fixed for good: `tests/live/` now builds in CI."*** That build step
+> is in **this** workflow — **so it has never run.** The compile guard for the instrument behind a
+> green metric **has never fired once**, while the PRD described it as closed.
+>
+> **That is the same shape as the defect it was written to fix** — *a guard that reads as a guard and
+> is not one.* Corrected at **PRD v1.8.51, §Corrections item 67**, which corrects the **claim**
+> rather than buying the runner.
+>
+> **Registering a runner was considered and declined**, and the reasoning belongs here rather than
+> only in the PRD:
+>
+> - At maintenance, with one developer on one machine, a runner on **this** box executes against
+>   **the same Visual Studio 2026, the same `C:\N8RO` tree and the same toolchain that already builds
+>   locally.** It automates *the running*, not *the environment* — which is most of what a runner
+>   buys a team and very little of what it buys a single developer.
+> - Against that it carries the standing exposure this document already names below: **an agent
+>   executing pull-request code on a machine that holds a licensed install.**
+>
+> **The build evidence is real; it is simply local.** As of 2026-08-10: unit suite **169/169**, the
+> DLL builds and auto-deploys, `dumpbin` shows all three required exports.
+>
+> **Register a runner when a second contributor appears, or when you come back to this after a gap** —
+> the workflow is written and the steps below are current. **Until then, do not read a green
+> `CI (hosted)` badge as evidence that anything compiles.**
+
 ## What the runner machine needs
 
 | Requirement | Why |
