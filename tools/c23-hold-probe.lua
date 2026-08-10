@@ -25,8 +25,11 @@
 --       "recovers above it within one cadence window"; only a run can show a recovery.
 --
 -- Both are mechanisms readable directly off recorded values - "does this speed stay above the floor
--- while the aircraft is inside the orbit" - which is the one category §Scope authority rule 4 lets a
--- single run close. Neither is a rate and neither is claimed as one.
+-- while the aircraft is inside the orbit" - which this project's precedent (C5, C21, C22, C23)
+-- treats as the one category a single run may close. Neither is a rate and neither is claimed as
+-- one. NOTE: this comment used to cite "§Scope authority rule 4". THAT RULE DOES NOT EXIST AND
+-- NEVER HAS - the practice is real precedent, the citation was not. §Corrections item 68(a),
+-- open as C25 for the owner to decide whether it gets written down as an actual rule.
 --
 -- NO COMMANDER, NO MODEL, NO NETWORK. The harness asserts that `data/config/plugins/ai-commander.cfg`
 -- is absent before it starts, so `aiCommander` is nil throughout and nothing here can be an artifact

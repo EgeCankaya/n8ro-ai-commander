@@ -122,7 +122,39 @@ model** and is near-deterministic — its two kills are byte-identical, same mun
 **`095026`'s script-only row is the outlier that wants explaining**, on the same build and
 script. The commanded arm was 3 / 2 / 0 / 0 in all three runs: **the variance in this
 comparison sits in the arm without the model.** **Nothing about what the commander is worth
-is established in either direction.**
+is established in either direction** *— on these four columns, which is all this section had
+when it was written. See below.*
+
+### And then it was measured, on one endpoint *(v1.8.46; this section corrected v1.8.52)*
+
+**This README carried the paragraph above for six revisions after the answer existed** —
+`docs/summary.md` and the PRD were updated and this file was not, which is
+§Corrections item 68(e).
+
+The four columns above **cannot answer the question at any n anyone will run** (17 to 156 runs
+each; `losses` has been degenerate since the reference-script fix). The signal was in the graded
+`pk` the engine records on every damage line. Under a protocol written **before** the first run,
+four three-arm 600 s `local` runs at the shipped default give a paired commander-on minus
+script-only difference in **damage absorbed** of:
+
+> **95 % CI [−1.0210, −0.5272]** — mean −0.7741, sd 0.1552, t = −9.976 on 3 df, negative in
+> 4 of 4 runs. **Quoted as an interval, never as a point.**
+
+**Three limits travel with that number and are not optional.**
+
+1. **The confound is not discharged.** This design **cannot separate** *"the commander makes the
+   aircraft safer"* from *"the commander makes it fight less"* — the endpoint that would separate
+   them needs ~156 runs. Damage dealt, kills, launches and losses stay **unmeasured and unclaimed
+   in either direction**.
+2. **One endpoint, one scenario, one model** — the shipped 7B default, in "Mariana Shield", with
+   two commanded aircraft, on top of the reference Tier-1 script's own competence.
+3. **The control arm is near-deterministic** — the same property this section already names above.
+   Its damage-absorbed value takes **two values across all nine archived runs**, so the
+   replication against the five earlier runs is of the commanded arm alone. The interval excludes
+   zero under either control value (§Corrections item 68(b)).
+
+*Source: PRD §Corrections items 62 and 68; §Validation, "The outcome campaign — a
+pre-registration".*
 
 **Those are the only two kills in eighteen archived runs**, both in the arm with no model in
 the loop. **The qualification belongs with the number:** two SAM hits had already left

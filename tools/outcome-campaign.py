@@ -225,7 +225,11 @@ def ci(diffs, alpha=0.05):
     mean = st.mean(diffs)
     sd = st.stdev(diffs)
     if sd == 0.0:
-        return mean, 0.0, mean, mean, float("inf") if mean else 0.0, 0.0
+        # A zero-width "interval" is not an interval, and the decision rule below would read it
+        # as "excludes zero" and print CLAIM SUPPORTED off a degenerate sample. Refuse instead.
+        # Not reachable on the campaign data (sd 0.1552) and not as remote as it looks: the
+        # control arm takes only two values across nine runs. §Corrections item 68(h).
+        return None
     se = sd / math.sqrt(n)
     crit = t_ppf(1 - alpha / 2, n - 1)
     t_stat = mean / se
@@ -266,6 +270,17 @@ def main():
               % (" and ".join(PRIMARY_PAIR), args.archive, args.since))
         return 1
 
+    # THE POPULATION IS AN ARGUMENT, NOT A PROPERTY OF THIS TOOL, so it is printed with the
+    # verdict. The pre-registration fixes n = 4 and excludes the five planning runs in PROSE;
+    # nothing here enforces either, and a pasted verdict used to carry no trace of which runs
+    # produced it. §Corrections item 68(h). NOTE that folder labels are NOT all in one time base
+    # -- run-live-scenario.ps1 stamps LOCAL time with a literal 'Z' while the probes stamp real
+    # UTC, so `--since` is a lexical comparison over mixed bases (C26, item 68(g)).
+    print("\n=== population (an argument to this tool, printed so a verdict carries it) ===")
+    print("  archive : %s" % args.archive)
+    print("  --since : %s" % (args.since or "(none - EVERY run in the archive)"))
+    print("  runs    : %d  ->  %s" % (len(runs), ", ".join(r["run"][:15] for r in runs)))
+
     print("\n=== campaign runs (both primary arms present) ===")
     print("  comparison: %s vs %s -- NOT on vs off, which moves the script as well" % PRIMARY_PAIR)
     hdr = "%-18s %-28s %-28s %-28s" % ("run", "ON absorbed/dealt", "SCRIPT-ONLY", "OFF")
@@ -290,7 +305,12 @@ def main():
     print("  per-run differences: [%s]" % ", ".join("%+.4f" % d for d in diffs))
     res = ci(diffs)
     if res is None:
-        print("  n = %d - a paired interval needs at least 2 runs" % n)
+        if n < 2:
+            print("  n = %d - a paired interval needs at least 2 runs" % n)
+        else:
+            print("  n = %d, and every paired difference is identical (sd = 0)." % n)
+            print("  REFUSING TO QUOTE. A zero-width interval is not an interval, and the")
+            print("  decision rule would read it as 'excludes zero'. §Corrections item 68(h).")
         return 1
     mean, sd, lo, hi, t_stat, p = res
     print("  n = %d   mean %+.4f   sd %.4f" % (n, mean, sd))
@@ -366,9 +386,13 @@ def main():
             print("  %-12s POOLED %d of %d Blue munitions defeated, %d with a logged seeker loss"
                   % (arm, tot[arm][0], tot[arm][1], tot[arm][2]))
     print("\n  A defeated munition is one fired at a commanded aircraft that produced no damage")
-    print("  event. Under §Scope authority rule 4 this is a mechanism readable off recorded")
-    print("  values, which is the one category a single run may close. It is NOT pooled into")
-    print("  the primary endpoint - conflating a mechanism with a rate is §Corrections item 40.")
+    print("  event. This is a mechanism readable off recorded values, which this project's")
+    print("  precedent (C5, C21, C22, C23) treats as the one category a small sample may close.")
+    print("  THAT PRECEDENT IS NOT A WRITTEN RULE. Earlier versions of this line cited")
+    print("  '§Scope authority rule 4', which does not exist and never has - §Corrections item")
+    print("  68(a), open as C25. And the premise it was granted on is refuted: the denominator")
+    print("  IS a sampling quantity (item 62(c)). It is NOT pooled into the primary endpoint -")
+    print("  conflating a mechanism with a rate is §Corrections item 40.")
     return 0
 
 
