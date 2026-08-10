@@ -202,6 +202,15 @@ void AiCommanderPlugin::rebuildBackend() {
             claude.effort = config.claudeEffort;
             claude.timeoutS = config.requestTimeoutS;
 
+            // The spend ceiling (AIC-BE-2, v1.8.47, C24). Carried across explicitly rather than
+            // left on the adapter's own defaults, so the ceiling a run enforces is the one the
+            // deployed config says and an operator cannot be surprised by a compiled-in value.
+            claude.maxSpendUsd = config.claudeMaxSpendUsd;
+            claude.priceInPerMTok = config.claudePriceInPerMTok;
+            claude.priceOutPerMTok = config.claudePriceOutPerMTok;
+            claude.priceCacheReadPerMTok = config.claudePriceCacheReadPerMTok;
+            claude.priceCacheWritePerMTok = config.claudePriceCacheWritePerMTok;
+
             // MANDATORY EGRESS WARNING (§Threat model). Every byte of the prompt's volatile suffix
             // — positions, ORBAT, team assignments, reported stores — leaves this machine and
             // reaches a third party from here on. That is an authorized act, and an authorized act

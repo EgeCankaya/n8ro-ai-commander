@@ -89,6 +89,23 @@ struct CommanderConfig {
     std::string claudeApiKeyEnvVar = "ANTHROPIC_API_KEY";
     std::string claudeEffort;             // Empty for Haiku 4.5, which does not accept `effort`.
 
+    // The spend ceiling and its prices (AIC-BE-2, v1.8.47, C24). ClaudeClientConfig carries the
+    // full argument; the short version is that until v1.8.47 nothing in this plugin bounded hosted
+    // spend, and what made that safe was a human checkpoint in front of every run — which a
+    // STANDING egress authorization removes by design.
+    //
+    // FAIL CLOSED: at or below zero DISABLES the hosted backend rather than meaning "unlimited",
+    // so an unset, zeroed or mis-parsed field sends nothing instead of sending without limit.
+    double claudeMaxSpendUsd = 1.00;
+
+    // Configuration rather than constants, because `claude.model` is operator-settable and a price
+    // compiled into the adapter is a number nothing keeps in step with the model it prices — the
+    // shape of the doctrine defect §Corrections item 54(e) records.
+    double claudePriceInPerMTok = 1.00;
+    double claudePriceOutPerMTok = 5.00;
+    double claudePriceCacheReadPerMTok = 0.10;
+    double claudePriceCacheWritePerMTok = 1.25;
+
     // -- safety.* : the Stage-B clamp bounds -----------------------------------------------------
     double maxSpeedMps = 400.0;
 

@@ -158,6 +158,13 @@ std::vector<PluginConfigField> toConfigFields(const CommanderConfig& config) {
     // redact here — the redaction is structural (ADR-5).
     pushText(fields, "claude.apiKeyEnvVar", config.claudeApiKeyEnvVar);
     pushText(fields, "claude.effort", config.claudeEffort);
+    // The spend ceiling and its prices (AIC-BE-2, v1.8.47, C24). Published like every other field
+    // so an operator can see the ceiling a session is running under without reading the source.
+    pushReal(fields, "claude.maxSpendUsd", config.claudeMaxSpendUsd);
+    pushReal(fields, "claude.priceInPerMTok", config.claudePriceInPerMTok);
+    pushReal(fields, "claude.priceOutPerMTok", config.claudePriceOutPerMTok);
+    pushReal(fields, "claude.priceCacheReadPerMTok", config.claudePriceCacheReadPerMTok);
+    pushReal(fields, "claude.priceCacheWritePerMTok", config.claudePriceCacheWritePerMTok);
 
     pushReal(fields, "safety.maxSpeedMps", config.maxSpeedMps);
     pushReal(fields, "safety.minSpeedMps", config.minSpeedMps);
@@ -248,6 +255,31 @@ bool tryParseConfigFields(
             }
         } else if (name == "claude.apiKeyEnvVar") {
             draft.claudeApiKeyEnvVar = field.value;
+        } else if (name == "claude.maxSpendUsd") {
+            // NOT range-checked against zero here, and that is deliberate: at or below zero is a
+            // MEANINGFUL value - it disables the hosted backend - rather than an error to reject.
+            // Rejecting it would turn "operator switched egress off" into a config-load failure.
+            if (!parseReal(field.value, draft.claudeMaxSpendUsd)) {
+                return fail(name, "expected a finite number");
+            }
+        } else if (name == "claude.priceInPerMTok") {
+            if (!parseReal(field.value, draft.claudePriceInPerMTok) || draft.claudePriceInPerMTok < 0.0) {
+                return fail(name, "expected a finite number at or above zero");
+            }
+        } else if (name == "claude.priceOutPerMTok") {
+            if (!parseReal(field.value, draft.claudePriceOutPerMTok) || draft.claudePriceOutPerMTok < 0.0) {
+                return fail(name, "expected a finite number at or above zero");
+            }
+        } else if (name == "claude.priceCacheReadPerMTok") {
+            if (!parseReal(field.value, draft.claudePriceCacheReadPerMTok)
+                || draft.claudePriceCacheReadPerMTok < 0.0) {
+                return fail(name, "expected a finite number at or above zero");
+            }
+        } else if (name == "claude.priceCacheWritePerMTok") {
+            if (!parseReal(field.value, draft.claudePriceCacheWritePerMTok)
+                || draft.claudePriceCacheWritePerMTok < 0.0) {
+                return fail(name, "expected a finite number at or above zero");
+            }
         } else if (name == "claude.effort") {
             const std::string_view value = trim(field.value);
             if (!value.empty() && value != "low" && value != "medium" && value != "high") {
