@@ -7,7 +7,7 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # N8RO AI Entity Commander — summary
 
-**PRD version:** v1.8.47
+**PRD version:** v1.8.49
 **Date:** 2026-08-09
 **Audience:** the platform owner, and whoever picks up the next block of work.
 
