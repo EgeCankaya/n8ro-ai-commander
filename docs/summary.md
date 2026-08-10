@@ -7,7 +7,7 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # N8RO AI Entity Commander — summary
 
-**PRD version:** v1.8.51
+**PRD version:** v1.8.53
 **Date:** 2026-08-09
 **Audience:** the platform owner, and whoever picks up the next block of work.
 
@@ -47,18 +47,22 @@ less, hit nothing, and die** — over twelve paired runs, **4 launches against t
 ***(v1.8.46 — AND THE QUESTION THIS DOCUMENT COULD NEVER ANSWER NOW HAS AN ANSWER, ON ONE
 ENDPOINT.)*** The outcome question was reopened by owner decision, a protocol was written **before**
 the first run, and four three-arm runs were made against it. **Paired commander-on minus
-script-only, on damage absorbed by the commanded pair: −0.7741, 95 % CI [−1.0210, −0.5272],
-negative in 4 of 4 runs — and it replicates against the five earlier runs as an independent set,
-which is the first result in this project's history to survive its own repeat.** **The commanded
+script-only, on damage absorbed by the commanded pair: 95 % CI [−1.0210, −0.5272]** (mean −0.7741,
+negative in 4 of 4 runs) — and it repeats against the five earlier runs, which is the first result
+in this project's history to survive its own repeat. **The commanded
 aircraft absorb roughly half the damage the same script absorbs un-commanded**, and the engine
 names the mechanism: **5 of 9 Blue missiles defeated in the commanded arm, every one with a logged
 seeker loss, against 0 of 8 and 0 of 8 in the two controls.**
 
-> **Read the two limits with the number, because they are not small.** **This design cannot separate
+> **Read the three limits with the number, because they are not small.** **This design cannot separate
 > *"the commander makes the aircraft safer"* from *"the commander makes it fight less"*** — the
-> endpoint that would separate them needs ~156 runs. And it is **one endpoint, one scenario, one
+> endpoint that would separate them needs ~156 runs. It is **one endpoint, one scenario, one
 > model**: damage dealt, kills, launches and losses stay unmeasured and are **not** claimed in
-> either direction. *Source: §Corrections item 62; §Validation, "The outcome campaign".*
+> either direction. And ***(added v1.8.52)*** **the control arm is near-deterministic** — its
+> damage-absorbed value takes **two values across all nine archived runs** — so the repeat is of
+> the commanded arm alone and *"independent set"*, as this paragraph originally read, claimed more
+> than the data carry. **The interval excludes zero under either control value.**
+> *Source: §Corrections items 62 and 68(b); §Validation, "The outcome campaign".*
 
 **The cause is this project's own deterministic tier, not the language model.** Four mechanisms, all
 readable off the source, and an isolating arm with no model in the loop at all reproduces the result:
@@ -199,6 +203,8 @@ headroom. Only the hosted entry of that row had ever been measured, and only the
 *Source: §Success metrics.*
 
 <!-- in-engine-acceptance: 80.8 [77.4, 83.8] n=609 runs=30 -->
+
+<!-- outcome-damage-absorbed: -0.7741 [-1.0210, -0.5272] n=4 signs=4/4 SUPPORTED -->
 
 ***(v1.8.36 — the in-engine figure now has an owner and a pin.)*** It had gone stale **four times**,
 always the same way: a run was archived, nobody recomputed, and the old number was requoted until a

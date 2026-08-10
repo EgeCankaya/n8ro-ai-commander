@@ -48,14 +48,24 @@ revisit condition you can test without running anything.
 
 Everything else in the register is closed. **Two live rows.**
 
-**Gates, all green as of 2026-08-09:**
+**Gates, all green as of 2026-08-10:**
 
 | Suite | Result |
 |---|---|
-| Unit | **162 / 162** |
+| Unit | **169 / 169** |
 | Deployed-artifact smoke | **30 / 30** |
 | Live three-arm scenario smoke | **22 checks, 0 failed** (twice, 2026-08-09) |
-| `tools/lint-prd.ps1` · `tools/check-artifacts.ps1` | 11 checks, 0 errors, 0 warnings · 105 files, PASS |
+| `tools/lint-prd.ps1` · `tools/check-artifacts.ps1` | 14 checks, 0 errors, 0 warnings · 111 files, PASS |
+
+<!-- gate-figures: unit=169/169 artifact-smoke=30/30 live-smoke=22/0 tracked-files=111 -->
+
+*(v1.8.53 — **this table was wrong and had been for some time.** It said `162 / 162` and
+`105 files` under a heading asserting the figures were current; the real numbers were `169 / 169`
+and `110`, and the file count was already false on the date the table stamped itself with. It is
+the acceptance figure's staleness failure — four events, PRD §Corrections items 46(f), 48, 50, 51 —
+recurring in the one document a reader meets first. **So it is now pinned rather than retyped:**
+`tools/lint-prd.ps1` check 11 requires the sentinel above to match the PRD's copy, and it
+**computes** `tracked-files` from `git ls-files` instead of trusting either. §Corrections item 69(f).)*
 
 **Measured against the PRD's success metrics:** cost **$1.05** per four-ship
 scenario-hour against a ≤ $1.10 target (**met**); `reject.schema` **0.00 %** over 776
@@ -122,7 +132,39 @@ model** and is near-deterministic — its two kills are byte-identical, same mun
 **`095026`'s script-only row is the outlier that wants explaining**, on the same build and
 script. The commanded arm was 3 / 2 / 0 / 0 in all three runs: **the variance in this
 comparison sits in the arm without the model.** **Nothing about what the commander is worth
-is established in either direction.**
+is established in either direction** *— on these four columns, which is all this section had
+when it was written. See below.*
+
+### And then it was measured, on one endpoint *(v1.8.46; this section corrected v1.8.52)*
+
+**This README carried the paragraph above for six revisions after the answer existed** —
+`docs/summary.md` and the PRD were updated and this file was not, which is
+§Corrections item 68(e).
+
+The four columns above **cannot answer the question at any n anyone will run** (17 to 156 runs
+each; `losses` has been degenerate since the reference-script fix). The signal was in the graded
+`pk` the engine records on every damage line. Under a protocol written **before** the first run,
+four three-arm 600 s `local` runs at the shipped default give a paired commander-on minus
+script-only difference in **damage absorbed** of:
+
+> **95 % CI [−1.0210, −0.5272]** — mean −0.7741, sd 0.1552, t = −9.976 on 3 df, negative in
+> 4 of 4 runs. **Quoted as an interval, never as a point.**
+
+**Three limits travel with that number and are not optional.**
+
+1. **The confound is not discharged.** This design **cannot separate** *"the commander makes the
+   aircraft safer"* from *"the commander makes it fight less"* — the endpoint that would separate
+   them needs ~156 runs. Damage dealt, kills, launches and losses stay **unmeasured and unclaimed
+   in either direction**.
+2. **One endpoint, one scenario, one model** — the shipped 7B default, in "Mariana Shield", with
+   two commanded aircraft, on top of the reference Tier-1 script's own competence.
+3. **The control arm is near-deterministic** — the same property this section already names above.
+   Its damage-absorbed value takes **two values across all nine archived runs**, so the
+   replication against the five earlier runs is of the commanded arm alone. The interval excludes
+   zero under either control value (§Corrections item 68(b)).
+
+*Source: PRD §Corrections items 62 and 68; §Validation, "The outcome campaign — a
+pre-registration".*
 
 **Those are the only two kills in eighteen archived runs**, both in the arm with no model in
 the loop. **The qualification belongs with the number:** two SAM hits had already left
@@ -171,6 +213,8 @@ Stated here rather than discovered during a demo.
   build if this file, the PRD and the summary disagree.)*
 
 <!-- in-engine-acceptance: 80.8 [77.4, 83.8] n=609 runs=30 -->
+
+<!-- outcome-damage-absorbed: -0.7741 [-1.0210, -0.5272] n=4 signs=4/4 SUPPORTED -->
 - **Three kills have ever been scored**, and in **all three** the target was already `wrecked`
   by SAM hits when the Su-35's missile finished it. Two were 2026-08-08 in the script-only arm;
   the third is 2026-08-09 and is **the first in a commanded arm**. **A kill by the engine's

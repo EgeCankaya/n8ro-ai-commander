@@ -55,6 +55,13 @@ ARMS = {
 # anyone noticed.
 PRIMARY_PAIR = ("on", "script-only")
 
+# The first instant at which a scenario folder name is known to be real UTC. Before this,
+# tests/smoke/run-live-scenario.ps1 formatted LOCAL time and appended a literal 'Z' (C26). The
+# constant is a stamp, not a guess: it is the commit that fixed it, and folders at or after it
+# are unambiguous. Probe folders were never affected - tools/run-c*-probe.ps1 have always called
+# .ToUniversalTime() - which is why they are exempted where this is used.
+C26_FIXED_UTC = "20260810T000000"
+
 RE_SPAWN = re.compile(r"Weapon spawned: (\S+) profile \S+ owner (\S+) target (\S+)")
 RE_DET = re.compile(r"Detonation: (\S+) outcome=detonation target=(\S+)")
 RE_DMG = re.compile(
@@ -225,7 +232,11 @@ def ci(diffs, alpha=0.05):
     mean = st.mean(diffs)
     sd = st.stdev(diffs)
     if sd == 0.0:
-        return mean, 0.0, mean, mean, float("inf") if mean else 0.0, 0.0
+        # A zero-width "interval" is not an interval, and the decision rule below would read it
+        # as "excludes zero" and print CLAIM SUPPORTED off a degenerate sample. Refuse instead.
+        # Not reachable on the campaign data (sd 0.1552) and not as remote as it looks: the
+        # control arm takes only two values across nine runs. §Corrections item 68(h).
+        return None
     se = sd / math.sqrt(n)
     crit = t_ppf(1 - alpha / 2, n - 1)
     t_stat = mean / se
@@ -266,6 +277,31 @@ def main():
               % (" and ".join(PRIMARY_PAIR), args.archive, args.since))
         return 1
 
+    # THE POPULATION IS AN ARGUMENT, NOT A PROPERTY OF THIS TOOL, so it is printed with the
+    # verdict. The pre-registration fixes n = 4 and excludes the five planning runs in PROSE;
+    # nothing here enforces either, and a pasted verdict used to carry no trace of which runs
+    # produced it. §Corrections item 68(h).
+    print("\n=== population (an argument to this tool, printed so a verdict carries it) ===")
+    print("  archive : %s" % args.archive)
+    print("  --since : %s" % (args.since or "(none - EVERY run in the archive)"))
+    print("  runs    : %d  ->  %s" % (len(runs), ", ".join(r["run"][:15] for r in runs)))
+
+    # C26 IS FIXED FORWARD BUT NOT BACKWARD (PRD v1.8.53, §Corrections item 69(d)).
+    # run-live-scenario.ps1 stamped LOCAL time with a literal 'Z' until 2026-08-10 while every
+    # probe stamped real UTC, and `--since` is a LEXICAL comparison over the folder name. Names
+    # already on disk cannot be repaired: the offset they were written at is recorded nowhere.
+    # So the tool refuses to be quiet about it -- a boundary landing inside the ambiguity window
+    # of a pre-fix scenario folder is a selection nobody can check by reading the output.
+    if args.since:
+        murky = [r["run"] for r in runs
+                 if r["run"][:15] < C26_FIXED_UTC and not r["run"].endswith("-probe")]
+        if murky:
+            print("  ::warning:: %d selected run(s) predate the C26 stamp fix, so their folder"
+                  % len(murky))
+            print("              names may be LOCAL time wearing a 'Z'. A --since boundary within")
+            print("              the local-UTC offset of one of these is not decidable from the")
+            print("              name alone: %s" % ", ".join(murky))
+
     print("\n=== campaign runs (both primary arms present) ===")
     print("  comparison: %s vs %s -- NOT on vs off, which moves the script as well" % PRIMARY_PAIR)
     hdr = "%-18s %-28s %-28s %-28s" % ("run", "ON absorbed/dealt", "SCRIPT-ONLY", "OFF")
@@ -290,7 +326,12 @@ def main():
     print("  per-run differences: [%s]" % ", ".join("%+.4f" % d for d in diffs))
     res = ci(diffs)
     if res is None:
-        print("  n = %d - a paired interval needs at least 2 runs" % n)
+        if n < 2:
+            print("  n = %d - a paired interval needs at least 2 runs" % n)
+        else:
+            print("  n = %d, and every paired difference is identical (sd = 0)." % n)
+            print("  REFUSING TO QUOTE. A zero-width interval is not an interval, and the")
+            print("  decision rule would read it as 'excludes zero'. §Corrections item 68(h).")
         return 1
     mean, sd, lo, hi, t_stat, p = res
     print("  n = %d   mean %+.4f   sd %.4f" % (n, mean, sd))
@@ -366,9 +407,36 @@ def main():
             print("  %-12s POOLED %d of %d Blue munitions defeated, %d with a logged seeker loss"
                   % (arm, tot[arm][0], tot[arm][1], tot[arm][2]))
     print("\n  A defeated munition is one fired at a commanded aircraft that produced no damage")
-    print("  event. Under §Scope authority rule 4 this is a mechanism readable off recorded")
-    print("  values, which is the one category a single run may close. It is NOT pooled into")
-    print("  the primary endpoint - conflating a mechanism with a rate is §Corrections item 40.")
+    print("  event. THIS IS REPORTED, NOT CLOSED, and the rule that says so is now written:")
+    print("  §Closing a row rule 3 (PRD v1.8.53) - a count whose denominator the scenario samples")
+    print("  is a rate wearing a mechanism's clothes, and rule 1 forbids closing a rate on a small")
+    print("  sample. Blue fired three munitions in run 213423, so the denominator IS sampled")
+    print("  (§Corrections item 62(c)). Earlier versions of this line cited '§Scope authority")
+    print("  rule 4' as licence to close it; that rule does not exist and never has (item 68(a),")
+    print("  C25, closed v1.8.53). It is NOT pooled into the primary endpoint - conflating a")
+    print("  mechanism with a rate is §Corrections item 40.")
+
+    # ---------------------------------------------------------------------------------------------
+    # THE SENTINEL (PRD v1.8.53, §Corrections item 69(e)).
+    # ---------------------------------------------------------------------------------------------
+    # The in-engine acceptance figure has a sentinel because it went stale FOUR times. This figure
+    # has never gone stale - it has only existed since v1.8.46 - and pinning it now rather than
+    # after the fourth time is the whole point. It is quoted in three documents, it is the most
+    # quotable number this project has produced, and until now nothing checked that the three
+    # copies said the same thing. The interval is the payload: the point estimate alone is the
+    # form in which a bounded-power result gets read as a precise one.
+    if c1 and c2 and c3:
+        verdict = "SUPPORTED"
+    else:
+        verdict = "NULL"
+    sentinel = ("<!-- outcome-damage-absorbed: %+.4f [%+.4f, %+.4f] n=%d signs=%d/%d %s -->"
+                % (mean, lo, hi, n, negatives, n, verdict))
+    print("\n=== paste this line into docs/prd.md, docs/summary.md and README.md ===")
+    print(sentinel)
+    print("\ntools/lint-prd.ps1 fails when the three copies disagree, and warns when the point")
+    print("estimate is quoted without its interval. This endpoint is a paired difference on")
+    print("n = 4 against a control arm that takes two distinct values in the whole archive;")
+    print("a bare -0.77 is a claim the design cannot carry.")
     return 0
 
 
