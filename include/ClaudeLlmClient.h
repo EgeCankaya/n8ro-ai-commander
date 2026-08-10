@@ -29,6 +29,41 @@ struct ClaudeClientConfig {
     std::string effort;
 
     int timeoutS = 90;
+
+    // -- The spend ceiling (AIC-BE-2, v1.8.47, C24) -----------------------------------------------
+    //
+    // WHY THIS EXISTS. Until v1.8.47 there was no per-run, per-day or cumulative cost bound anywhere
+    // in this plugin, and no counter that could enforce one. That was safe for six grants for a
+    // reason that has now gone away: every hosted run was individually authorized, costed and
+    // recorded, so a HUMAN CHECKPOINT sat in front of every request this project ever made. The
+    // owner's standing authorization removes exactly that checkpoint - which is its purpose - so
+    // something has to take its place. Derived exposure without one: ~$0.44/hour of two-entity
+    // commanding, so a scenario left running overnight exceeds this project's whole budget about
+    // twice over, with nothing in the code noticing.
+    //
+    // FAIL CLOSED, and this is the design decision worth arguing. `maxSpendUsd <= 0` DISABLES the
+    // hosted backend; it does NOT mean "unlimited". The opposite convention is the more natural one
+    // to write and is what most configuration does, and it is the wrong one here: the failure mode
+    // of an unset, zeroed or mis-parsed field must be "sends nothing", never "sends without limit".
+    // A typo must not become unbounded egress.
+    //
+    // PER-PROCESS, and that is deliberate rather than a gap. It bounds any single engine session -
+    // the exposure above - and not running the engine a hundred times. Starting a run is a human
+    // act and that checkpoint covers repetition; a cross-process ceiling would need durable state
+    // this plugin has no home for, and a spend counter in a file an operator can delete is worse
+    // than none because it reads as a control.
+    double maxSpendUsd = 1.00;
+
+    // THE PRICES ARE CONFIGURATION AND NOT CONSTANTS, and §Corrections item 54(e) is why.
+    // `claude.model` is operator-settable, so a price compiled in here is a number nothing keeps in
+    // step with the model it prices - the identical shape to the doctrine block that stated a
+    // rejection threshold as "at or below zero" while the shipped bound had been 50.0 for nine
+    // revisions. Defaults are claude-haiku-4-5's rates as used throughout §Cost model: $1/MTok in,
+    // $5/MTok out, cache read at 0.1x input, cache write at 1.25x input.
+    double priceInPerMTok = 1.00;
+    double priceOutPerMTok = 5.00;
+    double priceCacheReadPerMTok = 0.10;
+    double priceCacheWritePerMTok = 1.25;
 };
 
 // The `claude` adapter (AIC-BE-2): POST {baseUrl}/v1/messages over HTTPS.
@@ -92,6 +127,15 @@ public:
     // an unobservable one without this number.
     [[nodiscard]] int lastCacheReadTokens() const { return lastCacheReadTokens_; }
 
+    // The spend ceiling's observable state (AIC-BE-2, v1.8.47, C24). Both exist so the unit suite
+    // can assert the ceiling without a network, and so an operator can see how close a session is.
+    [[nodiscard]] double spentUsd() const { return spentUsd_; }
+    [[nodiscard]] bool budgetExhausted() const { return budgetExhausted_; }
+
+    // What one response cost, from the four token counts AIC-BE-2 has recorded since v1.8.18.
+    // Static and pure so the arithmetic is testable on its own rather than only through a request.
+    [[nodiscard]] static double costOf(const ClaudeClientConfig& config, const LlmResult& result);
+
 private:
     // Builds the request body. Separated so a test can assert what would be sent without sending.
     [[nodiscard]] std::string buildRequestBody(const LlmRequest& request) const;
@@ -109,6 +153,21 @@ private:
     HttpClientFactory factory_;
     std::unique_ptr<n8ro::core::IHttpClient> http_;
     int lastCacheReadTokens_ = 0;
+
+    // Cumulative cost for the life of this adapter, and the latch it trips (C24).
+    //
+    // Plain members rather than atomics, on the same thread-affinity argument that already governs
+    // `lastCacheReadTokens_` and `http_`: request() runs on the worker, one adapter instance is
+    // owned by one worker, and IHttpClient is documented single-thread-only, so this class is
+    // already confined to one thread by construction.
+    //
+    // THE LATCH IS THE POINT, not the counter. A ceiling that is re-checked but never latched
+    // spends one more request every cadence after it reports being exhausted - 180 an hour at the
+    // 20 s default - so once this is set no later request touches the network for the life of the
+    // process.
+    double spentUsd_ = 0.0;
+    bool budgetExhausted_ = false;
+    bool budgetLogged_ = false;
 };
 
 } // namespace arkheon::aicommander

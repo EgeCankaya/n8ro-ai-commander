@@ -100,7 +100,19 @@ if not exist "$(N8RO_RELEASE)\data\doctrine.txt" (
     echo [Deploy] doctrine.txt seeded into $(N8RO_RELEASE)\data
   )
 ) else (
-  echo [Deploy] doctrine.txt already present in $(N8RO_RELEASE)\data - left untouched
+  REM Left untouched, and SAID SO when it differs. "Already present" alone is what let C15's
+  REM rewritten doctrine sit in the repository while the release tree kept the old block, with the
+  REM unit suite pinning one artifact and any interactive run sending the other. The build still
+  REM refuses to clobber a tuned doctrine - it simply stops being quiet about the divergence.
+  for %%A in ("$(ProjectDir)data\doctrine.txt") do set _AIC_DOCTRINE_SRC=%%~zA
+  for %%B in ("$(N8RO_RELEASE)\data\doctrine.txt") do set _AIC_DOCTRINE_DST=%%~zB
+  setlocal enabledelayedexpansion
+  if "!_AIC_DOCTRINE_SRC!"=="!_AIC_DOCTRINE_DST!" (
+    echo [Deploy] doctrine.txt already present in $(N8RO_RELEASE)\data - left untouched
+  ) else (
+    echo [Warning] doctrine.txt in $(N8RO_RELEASE)\data differs from this repository's ^(!_AIC_DOCTRINE_DST! vs !_AIC_DOCTRINE_SRC! bytes^) - left untouched. The engine will send the deployed copy, NOT the one the unit suite pins.
+  )
+  endlocal
 )</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>

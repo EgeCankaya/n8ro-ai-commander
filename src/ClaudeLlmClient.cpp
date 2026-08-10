@@ -8,6 +8,7 @@
 #include <core/net/IHttpClient.h>
 
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <optional>
 #include <string>
@@ -50,6 +51,14 @@ constexpr int kRetryBackoffMs = 500;
     result.transportDetail = std::move(detail);
     result.latencyMs = latencyMs;
     return result;
+}
+
+// Six decimals, because a single order costs about $0.0012 and a detail string that rounded to
+// cents would report every refusal as "$0.00 of $1.00" (v1.8.47, C24). std::to_string on a double
+// gives six by default, which is exactly what is wanted here and is why it is not iostreams.
+[[nodiscard]] std::string formatUsd(double usd) {
+    std::string text = std::to_string(usd);
+    return text;
 }
 
 [[nodiscard]] bool isRetryable(int statusCode) {
@@ -167,9 +176,59 @@ bool ClaudeLlmClient::tlsLikelyUnavailable() {
     return http_->send(control).has_value();
 }
 
+// AIC-BE-2's spend ceiling (v1.8.47, C24). Static and pure so the arithmetic can be asserted on its
+// own rather than only through a request, and so the four prices are visibly its only inputs.
+//
+// The four counts are DISJOINT on this API - `input_tokens` excludes both cache figures - so
+// summing all four is the whole cost of the response and not a double count.
+double ClaudeLlmClient::costOf(const ClaudeClientConfig& config, const LlmResult& result) {
+    constexpr double kPerMillion = 1000000.0;
+    return (static_cast<double>(result.tokensIn) * config.priceInPerMTok
+            + static_cast<double>(result.tokensOut) * config.priceOutPerMTok
+            + static_cast<double>(result.cacheReadTokens) * config.priceCacheReadPerMTok
+            + static_cast<double>(result.cacheCreationTokens) * config.priceCacheWritePerMTok)
+        / kPerMillion;
+}
+
 LlmResult ClaudeLlmClient::request(const LlmRequest& request) {
     const auto start = std::chrono::steady_clock::now();
     lastCacheReadTokens_ = 0;
+
+    // -- THE SPEND CEILING, CHECKED BEFORE ANYTHING ELSE (AIC-BE-2, v1.8.47, C24) -----------------
+    //
+    // Before the HTTP client is created and before the key is read out of the environment, because
+    // a request that must not be sent must not open a socket or touch a credential. request() is
+    // the only egress point in this plugin, so a guard here cannot be bypassed by another call site.
+    //
+    // FAIL CLOSED: `maxSpendUsd <= 0` disables the hosted backend and does NOT mean "unlimited".
+    if (config_.maxSpendUsd <= 0.0) {
+        return transportFailure(
+            "hosted backend refused: claude.maxSpendUsd is at or below zero, which disables it "
+            "rather than meaning unlimited (fail-closed by design, AIC-BE-2). Set a positive "
+            "ceiling to enable the hosted path.",
+            elapsedMs(start));
+    }
+    if (budgetExhausted_ || spentUsd_ >= config_.maxSpendUsd) {
+        // THE LATCH. Once set, no later request touches the network for the life of the process. A
+        // ceiling that is re-checked but never latched spends one more request every cadence after
+        // it reports being exhausted - 180 an hour at the 20 s default.
+        budgetExhausted_ = true;
+        if (!budgetLogged_) {
+            budgetLogged_ = true;
+            // Logged exactly ONCE. Every refusal below still names the budget in its own detail, so
+            // nothing is silent; what is suppressed is one identical line per cadence forever.
+            std::fprintf(stderr,
+                         "ai-commander: hosted spend ceiling reached - %.6f of %.6f USD. The claude "
+                         "backend will not send again for the life of this process.\n",
+                         spentUsd_, config_.maxSpendUsd);
+        }
+        return transportFailure(
+            "hosted spend ceiling reached: " + formatUsd(spentUsd_) + " of "
+                + formatUsd(config_.maxSpendUsd)
+                + " USD (claude.maxSpendUsd). The backend is latched off for the life of this "
+                  "process.",
+            elapsedMs(start));
+    }
 
     if (http_ == nullptr) {
         http_ = factory_ ? factory_() : nullptr;
@@ -287,6 +346,18 @@ LlmResult ClaudeLlmClient::request(const LlmRequest& request) {
             lastCacheReadTokens_ = result.cacheReadTokens;
         }
     }
+
+    // -- accumulate against the ceiling (AIC-BE-2, v1.8.47, C24) ----------------------------------
+    //
+    // AFTER the token accounting above, because that is what supplies the four counts, and
+    // unconditionally on any response that produced a body - a 429 or a 5xx still bills for the
+    // tokens the service processed, and a ceiling that only counted successes would undercount
+    // exactly the runs that are going wrong.
+    //
+    // The latch is not tripped here. It is evaluated at the TOP of the next request, so the request
+    // that crosses the ceiling is allowed to complete and be recorded rather than being abandoned
+    // half-spent; what the ceiling promises is that no request is STARTED beyond it.
+    spentUsd_ += costOf(config_, result);
 
     return result;
 }

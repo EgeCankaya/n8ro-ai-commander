@@ -97,6 +97,24 @@ jobs:
           cd /d "%N8RO_RELEASE%"
           "%GITHUB_WORKSPACE%\tests\bin\release\ai-commander-tests.exe"
 
+      # THE MEASUREMENT HARNESS IS COMPILED HERE AND NOWHERE ELSE (PRD v1.8.40, Corrections item 56).
+      #
+      # It is BUILD-ONLY on purpose: `--mode soak` needs a live inference server and, on the hosted
+      # backend, an egress grant. Neither belongs in CI. What belongs in CI is the thing that was
+      # missing - proof that the harness still compiles against the types it measures.
+      #
+      # WHY: `tests/live/` is in no solution file (ai-commander.slnx carries ai-commander.vcxproj
+      # alone) and was in no CI step, so nothing built it. It stopped compiling at v1.8.28, when C18
+      # deleted OrderSnapshot::headingDeg, and that went unnoticed for ELEVEN revisions - while
+      # §Success metrics carried a fixture-acceptance verdict this harness is the sole instrument
+      # for. A metric whose instrument does not build is a metric nobody can re-measure.
+      - name: Build the live measurement harness (compile only - it needs a server to run)
+        run: |
+          call "%N8RO_RELEASE_ROOT%\setup.cmd" >nul || exit /b 1
+          call "%N8RO_RELEASE_ROOT%\dev\setup-dev.cmd" >nul || exit /b 1
+          "%N8RO_RELEASE_MSBUILD_CMD%" tests\live\ai-commander-live-tests.vcxproj ^
+            /p:Configuration=Release /p:Platform=x64 /v:minimal /nologo || exit /b 1
+
       - name: Build and run under AddressSanitizer
         run: |
           REM Substitutes for the unavailable ThreadSanitizer (ADR-7). ASan clears the memory-error

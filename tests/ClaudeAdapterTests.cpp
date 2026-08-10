@@ -654,3 +654,151 @@ AIC_TEST(ClaudeSendsTheProjectionNotTheCanonicalSchema) {
     setKey("");
     return true;
 }
+
+// -------------------------------------------------------------------------------------------------
+// The spend ceiling (AIC-BE-2, v1.8.47, C24).
+//
+// Every one of these runs with NO network, NO key beyond the sentinel, and NO egress - which is the
+// property that lets a control on spending be proven before the spending is authorized. That is the
+// same argument the adapter's failure-path tests have always rested on.
+//
+// The envelope the fake returns reports input_tokens 4500 and output_tokens 78, so at the default
+// prices one response costs (4500*1.00 + 78*5.00) / 1e6 = 0.004890 USD. The caps below are chosen
+// against that figure rather than against a round number.
+// -------------------------------------------------------------------------------------------------
+
+constexpr double kEnvelopeCostUsd = (4500.0 * 1.00 + 78.0 * 5.00) / 1000000.0;   // 0.004890
+
+AIC_TEST(ClaudeSpendCeilingFailsClosedAtZero) {
+    setKey(kSentinelKey);
+    ClaudeClientConfig config = testConfig();
+    config.maxSpendUsd = 0.0;
+    ClaudeLlmClient client(config);
+    auto fake = std::make_unique<FakeHttpClient>();
+    fake->replies = {{true, 200, claudeEnvelope(orderText(Posture::Defend))}};
+    FakeHttpClient* borrowed = attachFake(client, std::move(fake));
+
+    const LlmResult result = client.request(requestFor("RedSu35_01"));
+
+    AIC_EXPECT_TRUE(!result.completed, "a zero ceiling must refuse the request");
+    // THE POINT OF THE TEST. Zero must mean "disabled", not "unlimited" - the failure mode of an
+    // unset or mis-parsed field has to be "sends nothing".
+    AIC_EXPECT_TRUE(borrowed->requests.empty(),
+        "a zero ceiling must not put a single request on the wire");
+    AIC_EXPECT_TRUE(result.transportDetail.find("fail-closed") != std::string::npos,
+        "the refusal must say it is fail-closed rather than looking like an outage");
+    setKey("");
+    return true;
+}
+
+AIC_TEST(ClaudeSpendCeilingLatchesAndStopsSendingForTheLifeOfTheProcess) {
+    setKey(kSentinelKey);
+    ClaudeClientConfig config = testConfig();
+    // Below one response's cost, so the FIRST request is allowed through and the second is not.
+    config.maxSpendUsd = kEnvelopeCostUsd * 0.5;
+    ClaudeLlmClient client(config);
+    auto fake = std::make_unique<FakeHttpClient>();
+    fake->replies = {{true, 200, claudeEnvelope(orderText(Posture::Defend))}};
+    FakeHttpClient* borrowed = attachFake(client, std::move(fake));
+
+    const LlmResult first = client.request(requestFor("RedSu35_01"));
+    AIC_EXPECT_TRUE(first.completed, "the request that CROSSES the ceiling still completes");
+    AIC_EXPECT_TRUE(borrowed->requests.size() == 1, "exactly one request reached the wire");
+    AIC_EXPECT_TRUE(client.spentUsd() > 0.0, "the response must be charged against the ceiling");
+
+    // The latch, which is the whole design: a ceiling that is re-checked but never latched spends
+    // one more request every cadence after reporting exhaustion.
+    const LlmResult second = client.request(requestFor("RedSu35_01"));
+    AIC_EXPECT_TRUE(!second.completed, "the second request must be refused");
+    AIC_EXPECT_TRUE(client.budgetExhausted(), "the ceiling must latch rather than re-arm");
+    AIC_EXPECT_TRUE(second.transportDetail.find("spend ceiling") != std::string::npos,
+        "the refusal must name the budget so it is not mistaken for a backend outage");
+
+    const LlmResult third = client.request(requestFor("RedSu35_01"));
+    AIC_EXPECT_TRUE(!third.completed, "and every request after it");
+    AIC_EXPECT_TRUE(borrowed->requests.size() == 1,
+        "NOTHING may reach the wire after the latch trips - this is the assertion the ceiling exists for");
+    setKey("");
+    return true;
+}
+
+AIC_TEST(ClaudeSpendCeilingPricesAllFourTokenCountsSeparately) {
+    ClaudeClientConfig config = testConfig();
+    LlmResult result;
+    result.tokensIn = 1000000;          // 1 MTok at 1.00
+    result.tokensOut = 1000000;         // 1 MTok at 5.00
+    result.cacheReadTokens = 1000000;   // 1 MTok at 0.10
+    result.cacheCreationTokens = 1000000;  // 1 MTok at 1.25
+
+    const double cost = ClaudeLlmClient::costOf(config, result);
+
+    // The four counts are DISJOINT on this API - input_tokens excludes both cache figures - so the
+    // total is their sum and not a double count. A single blended rate would misprice a cached run
+    // by roughly an order of magnitude, which is the whole reason the cache figures are recorded.
+    AIC_EXPECT_TRUE(cost > 7.349 && cost < 7.351,
+        "1 MTok of each class must price at 1.00 + 5.00 + 0.10 + 1.25 = 7.35 USD");
+    return true;
+}
+
+AIC_TEST(ClaudeSpendCeilingPricesComeFromConfigurationRatherThanConstants) {
+    ClaudeClientConfig config = testConfig();
+    config.priceInPerMTok = 3.00;       // A different model's rate.
+    config.priceOutPerMTok = 15.00;
+    LlmResult result;
+    result.tokensIn = 1000000;
+    result.tokensOut = 1000000;
+
+    const double cost = ClaudeLlmClient::costOf(config, result);
+
+    // §Corrections item 54(e): `claude.model` is operator-settable, so a price compiled into the
+    // adapter is a number nothing keeps in step with the model it prices. This asserts the prices
+    // are actually read from the config rather than defaulted past.
+    AIC_EXPECT_TRUE(cost > 17.999 && cost < 18.001,
+        "changing the configured prices must change the computed cost");
+    return true;
+}
+
+AIC_TEST(ClaudeSpendCeilingChargesForFailedResponsesToo) {
+    setKey(kSentinelKey);
+    ClaudeClientConfig config = testConfig();
+    config.maxSpendUsd = 10.0;          // Ample; this test is about accounting, not refusal.
+    ClaudeLlmClient client(config);
+    auto fake = std::make_unique<FakeHttpClient>();
+    // A 429 twice: the adapter retries once and then resolves to `transport`. The service still
+    // processed the tokens, and a ceiling that only counted successes would undercount exactly the
+    // runs that are going wrong.
+    fake->replies = {{true, 429, claudeEnvelope(orderText(Posture::Defend))},
+                     {true, 429, claudeEnvelope(orderText(Posture::Defend))}};
+    (void)attachFake(client, std::move(fake));
+
+    const LlmResult result = client.request(requestFor("RedSu35_01"));
+
+    // `completed` means "produced an HTTP response at all", NOT "succeeded" — a 429 is a response
+    // (LlmResult's own comment, and PRD §Corrections item 5, which records that a transport failure
+    // is std::nullopt rather than a status code). The failure here lives in the status code.
+    AIC_EXPECT_TRUE(result.completed, "a 429 is a response, not a transport failure");
+    AIC_EXPECT_TRUE(result.statusCode == 429, "the caller sees the retried 429");
+    AIC_EXPECT_TRUE(client.spentUsd() > 0.0,
+        "a billed-but-failed response must still be charged against the ceiling");
+    setKey("");
+    return true;
+}
+
+AIC_TEST(ClaudeSpendCeilingLeavesAnAmpleBudgetAlone) {
+    setKey(kSentinelKey);
+    ClaudeClientConfig config = testConfig();
+    config.maxSpendUsd = 1.00;          // The shipped default.
+    ClaudeLlmClient client(config);
+    auto fake = std::make_unique<FakeHttpClient>();
+    fake->replies = {{true, 200, claudeEnvelope(orderText(Posture::Defend))}};
+    FakeHttpClient* borrowed = attachFake(client, std::move(fake));
+
+    for (int i = 0; i < 5; ++i) {
+        const LlmResult result = client.request(requestFor("RedSu35_01"));
+        AIC_EXPECT_TRUE(result.completed, "a run well inside its ceiling must be untouched by it");
+    }
+    AIC_EXPECT_TRUE(borrowed->requests.size() == 5, "all five requests reached the wire");
+    AIC_EXPECT_TRUE(!client.budgetExhausted(), "the latch must not trip inside the budget");
+    setKey("");
+    return true;
+}

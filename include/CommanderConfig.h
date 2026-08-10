@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Order.h"
+
 #include <plugin/PluginConfigField.h>
 
 #include <optional>
@@ -87,12 +89,58 @@ struct CommanderConfig {
     std::string claudeApiKeyEnvVar = "ANTHROPIC_API_KEY";
     std::string claudeEffort;             // Empty for Haiku 4.5, which does not accept `effort`.
 
+    // The spend ceiling and its prices (AIC-BE-2, v1.8.47, C24). ClaudeClientConfig carries the
+    // full argument; the short version is that until v1.8.47 nothing in this plugin bounded hosted
+    // spend, and what made that safe was a human checkpoint in front of every run — which a
+    // STANDING egress authorization removes by design.
+    //
+    // FAIL CLOSED: at or below zero DISABLES the hosted backend rather than meaning "unlimited",
+    // so an unset, zeroed or mis-parsed field sends nothing instead of sending without limit.
+    double claudeMaxSpendUsd = 1.00;
+
+    // Configuration rather than constants, because `claude.model` is operator-settable and a price
+    // compiled into the adapter is a number nothing keeps in step with the model it prices — the
+    // shape of the doctrine defect §Corrections item 54(e) records.
+    double claudePriceInPerMTok = 1.00;
+    double claudePriceOutPerMTok = 5.00;
+    double claudePriceCacheReadPerMTok = 0.10;
+    double claudePriceCacheWritePerMTok = 1.25;
+
     // -- safety.* : the Stage-B clamp bounds -----------------------------------------------------
     double maxSpeedMps = 400.0;
+
+    // The floor B6 never had (PRD v1.8.27, AIC-VAL-1, closing C19).
+    //
+    // Until this field existed the accepted band was (0, maxSpeedMps]: Stage A's A7 refused <= 0,
+    // B6 refused above the ceiling, and NOTHING refused between. Five orders at ~1.5 m/s were
+    // accepted for a fighter, and every layer behaved as specified. The asymmetry was visible one
+    // line below this one - altitude has carried BOTH bounds since v1.0, because too low is
+    // dangerous, and the identical argument for speed was simply never made.
+    //
+    // `> 0` is not a floor. It is a meaninglessness check - the same role kMaxCruiseSpeedMps plays
+    // at the other end ("a static ceiling, not an airframe limit").
+    //
+    // THE VALUE IS A POLICY CHOICE AND CANNOT BE DERIVED, which is why it is documented rather than
+    // justified. No minimum, stall, or performance envelope exists anywhere in the shipped platform
+    // data: componentPhysics carries mass and dragCoefficient, componentNavigation carries no speed
+    // bound, the Su-35 profile overrides only mass and RCS, and the schema's only Mps leaves are
+    // componentTransform/speedMps (initial) and waypoint/speed (commanded). So this sits on exactly
+    // the same footing as maxSpeedMps = 400, which is also derived from nothing.
+    //
+    // 50 m/s is a factor of >= 4 below both the shipped scenario's 220 m/s spawn and the 400 m/s
+    // ceiling, so it cannot refuse a legitimate cruise order in the platform class the rest of this
+    // block already assumes - while sitting far above the 1.5-27 m/s band actually observed.
+    // A DEPLOYMENT COMMANDING ROTARY-WING OR LOITERING PLATFORMS MUST LOWER IT, exactly as it must
+    // lower minAltitudeHaeM. That is a property of this block, not a new burden from this field.
+    double minSpeedMps = 50.0;
+
     double minAltitudeHaeM = 100.0;
     double maxAltitudeHaeM = 20000.0;
     double geofenceRadiusM = 200000.0;
-    double defaultOrbitRadiusM = 8000.0;
+    // Published by AIC-VAL-2 rung 2, and - since v1.8.30 - substituted by Stage A into a `hold`
+    // order whose orbitRadiusM arrived at or below zero. One value, two users, so the fallback the
+    // ladder flies and the fallback the validator repairs to cannot drift apart.
+    double defaultOrbitRadiusM = kDefaultOrbitRadiusM;
 
     // -- record.* / replay.* : the order log and its replay source (AIC-DET-1/2) ------------------
     bool recordEnabled = true;            // On by default — determinism depends on it.

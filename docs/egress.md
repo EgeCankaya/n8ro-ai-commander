@@ -81,22 +81,60 @@ One block per order, describing **one commanded aircraft**. This list is exhaust
 | `own.entityId` | the aircraft's scenario-local runtime id string |
 | `own.latitudeDeg`, `own.longitudeDeg`, `own.altitudeHaeM` | where it is |
 | `own.velN`, `own.velE`, `own.velD` | how fast and which way, m/s, north-east-down |
-| `own.headingDeg` | which way it is pointing, degrees from true north |
+| `own.speedMps` *(2026-08-06)* | how fast over the ground, m/s — a **magnitude**, computed from the three components above |
+| `own.courseDeg` *(2026-08-07, replaced `own.headingDeg`)* | which way it is **travelling**, degrees from true north — computed from the three components above |
 | `own.team` | whose side it is on |
 | `own.loadout[]` | per hardpoint: name, weapon profile name, rounds remaining, rounds capacity |
-| `tracks[]` | per contact its **own sensors reported**: target id, range in metres, signal-to-noise in dB |
+| `tracks[]` | per contact its **own sensors reported**: target id, range in metres, signal-to-noise in dB, **kind**, **team** *(the last two added 2026-08-07 — see below)* |
 | `situationNote` | ≤ 256 characters of free text set by the mission script, charset-filtered |
+
+**Three rows above were stale and are corrected here** *(2026-08-07)*. This document was last revised
+on 2026-08-05 and the prompt changed three times after it: `own.speedMps` was added on 2026-08-06,
+`own.headingDeg` was **replaced** by `own.courseDeg` on 2026-08-07, and the track row was widened the
+same day. **None of them widened the trust boundary** — the two `own.*` fields are arithmetic on
+velocity components already on this list, and the track attributes are covered below — but a document
+whose only job is to state what leaves the machine was **wrong for three revisions**, and an owner
+authorizing egress against it would have been authorizing against a list that was not the list. That
+is the failure this file exists to prevent, so it is recorded rather than quietly corrected.
 
 **On `tracks[]` and `loadout[]`:** the plugin cannot read either of these from the engine — no public
 C++ read seam exists for sensor tracks or weapon stores. They are **pushed in** by the entity's own
 deterministic mission script. The consequence is that the plugin can only transmit what a script
-explicitly handed it, and the reporting verbs accept **numbers only**, so no free-text field can
-enter a prompt through that path at all.
+explicitly handed it.
+
+**On the two track attributes added 2026-08-07, because they are the only part of this change that
+touches what a reader of this document should care about.** The prompt now states, per contact:
+
+- **`kind`** — exactly one of `air`, `ground`, `surface`, `munition`, `other`. Nothing else can be
+  emitted: the ingress verb parses the mission script's string into a five-valued enum, and an
+  unrecognised value becomes `other` rather than being passed through.
+- **`team`** — exactly one of `hostile`, `friendly`, `unknown`, and **stated relative to the
+  commanded aircraft**. A scenario's team *name* is never rendered for a track. The distinction is
+  the whole of why this is a small change: a team name is scenario content, a three-valued relation
+  is a comparison result the mission script had already computed.
+
+**Why they were added.** A quarter of all validator rejections were the model failing a
+discrimination the prompt structurally denied it — it was shown a contact id, a range and a signal
+strength, told not to infer anything from the id, and then refused for engaging inbound munitions and
+its own side's radar. See PRD §Corrections item 46(c).
+
+**An earlier sentence here said the reporting verbs accept "numbers only", and that was never
+true** — `targetEntityId`, `hardpointName` and `weaponProfileName` are strings and always have been.
+The accurate statement, which is the one the guarantee actually rests on, is that the ingress verbs
+accept **scalars only** and that every string arriving through them is **charset-filtered and
+length-capped on ingress, before it can reach a prompt**. The two new attributes are stronger than
+that: they are not strings by the time they reach the renderer at all.
 
 #### Where those values come from — and what changed on 2026-08-05
 
-**The field list above is exhaustive and has not changed.** What changed is where the values in it
-are drawn from, and that distinction is the one every egress grant in this project has turned on.
+**The field list above is exhaustive.** What changed on 2026-08-05 is where the values in it are
+drawn from, and that distinction is the one every egress grant in this project has turned on.
+
+*(This paragraph used to read "**and has not changed**", which stopped being true on 2026-08-06 and
+stayed on the page for two more revisions. The list has now changed three times; the corrections and
+their dates are recorded above the table rather than the sentence being silently softened. **No
+hosted request has been made under the widened field set** — the last hosted run predates all three
+changes, and any grant covering them must postdate this revision.)*
 
 | | Provenance | Authorized by |
 |---|---|---|

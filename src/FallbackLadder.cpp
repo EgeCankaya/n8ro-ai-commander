@@ -66,7 +66,15 @@ bool advanceFallbackLadder(
             standing.targetEntityId.clear();
             standing.cruiseSpeedMps = state.published.order.cruiseSpeedMps;
             standing.orbitRadiusM = config.defaultOrbitRadiusM;
-            standing.roe = Roe::WeaponsTight;
+            // weaponsFree, not weaponsTight. AIC-VAL-2 specified this in PRD v1.8.30 and the code
+            // did not follow until v1.8.34 (§Corrections item 50(d)). weaponsTight permits fire
+            // ONLY against the ordered targetEntityId, and this order carries no target because
+            // `hold` carries none - so the rung was a state in which the entity could neither
+            // shoot nor be permitted to choose something to shoot at. It is not a widening of
+            // authority: weaponsFree is the script's own target selection, which is exactly what
+            // an entity with no commander installed already does, and rung 3 degrades to that
+            // outright two minutes later.
+            standing.roe = Roe::WeaponsFree;
             standing.reason = "Standing order: last accepted order expired.";
 
             if (position.known) {

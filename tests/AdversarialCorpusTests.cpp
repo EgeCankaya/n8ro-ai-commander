@@ -244,9 +244,17 @@ AIC_TEST(AdversarialCorpusStageA) {
     cases.push_back({"engage carrying a waypoint",
         R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"engage","targetEntityId":"BlueF18_02","waypoint":{"latitudeDeg":13.5,"longitudeDeg":144.8,"altitudeHaeM":9000.0},"cruiseSpeedMps":300.0,"orbitRadiusM":0.0,"roe":"weaponsFree","reason":"Committing."})",
         RejectReason::Shape});
-    cases.push_back({"hold with a zero orbit radius",
-        R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"hold","waypoint":{"latitudeDeg":13.5,"longitudeDeg":144.8,"altitudeHaeM":9000.0},"cruiseSpeedMps":220.0,"orbitRadiusM":0.0,"roe":"weaponsTight","reason":"Holding."})",
-        RejectReason::Shape});
+    // A HOLD WITH A ZERO ORBIT RADIUS is deliberately absent from this corpus (v1.8.30, C14), and
+    // this comment stands in its place so the case reads as MOVED rather than quietly dropped -
+    // exactly as the over-long `reason` case below does. It is no longer a rejection: the radius is
+    // repaired to safety.defaultOrbitRadiusM and the order accepted, because the rule "greater than
+    // zero" is enforced by no decoder on either backend and rejecting on it discards a posture,
+    // waypoint, speed and ROE that are all sound. The acceptance path is asserted in
+    // HoldWithNoOrbitRadiusIsRepairedAndTheOrderSurvives below.
+    //
+    // The MIRROR case stays a rejection, and the two rows sitting next to each other is the point:
+    // the asymmetry IS the requirement, and an implementation that repaired both directions would
+    // silently grant an orbit to a posture that has none.
     cases.push_back({"ingress with a non-zero orbit radius",
         R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"ingress","waypoint":{"latitudeDeg":13.5,"longitudeDeg":144.8,"altitudeHaeM":9000.0},"cruiseSpeedMps":220.0,"orbitRadiusM":5000.0,"roe":"weaponsHold","reason":"Pressing."})",
         RejectReason::Shape});
@@ -273,10 +281,11 @@ AIC_TEST(AdversarialCorpusStageA) {
     cases.push_back({"empty reason",
         R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"engage","targetEntityId":"BlueF18_02","cruiseSpeedMps":300.0,"orbitRadiusM":0.0,"roe":"weaponsFree","reason":""})",
         RejectReason::Range});
-    cases.push_back({"over-long reason",
-        R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"engage","targetEntityId":"BlueF18_02","cruiseSpeedMps":300.0,"orbitRadiusM":0.0,"roe":"weaponsFree","reason":")"
-            + std::string(kMaxReasonChars + 1, 'a') + R"("})",
-        RejectReason::Range});
+    // An OVER-LONG reason is deliberately absent from this corpus (v1.8.25, C16). It is no longer a
+    // rejection: `reason` carries no control authority, so Stage A truncates it and accepts the
+    // order rather than discarding the posture, target and waypoint alongside it. The acceptance
+    // path is asserted in ReasonOverTheCapIsTruncatedAndTheOrderSurvives below, and this comment
+    // stands in the corpus so the case reads as MOVED rather than as quietly dropped.
 
     // -- injection through the free-text field -------------------------------------------------
     cases.push_back({"reason carrying a newline and a forged log prefix",
@@ -354,9 +363,214 @@ AIC_TEST(AdversarialCorpusStageA) {
     return true;
 }
 
+// C16 (PRD v1.8.25, AIC-ORD-1). An over-long `reason` is TRUNCATED and the order ACCEPTED.
+//
+// WHAT THIS ASSERTS AND WHY IT IS NOT A LENGTH TEST. The property C16 is about is that the order
+// SURVIVES - a posture, a target and a cruise speed are not thrown away over a field the system
+// never reads. Asserting only `reason.size() == kMaxReasonChars` would pass on an implementation
+// that truncated the string and then rejected the order anyway, which is the failure mode worth
+// guarding. So every authority-carrying field is checked to have come through intact.
+AIC_TEST(ReasonOverTheCapIsTruncatedAndTheOrderSurvives) {
+    const std::string overLong(kMaxReasonChars + 64, 'a');
+    const std::string body =
+        R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"engage",)"
+        R"("targetEntityId":"BlueF18_02","cruiseSpeedMps":300.0,"orbitRadiusM":0.0,)"
+        R"("roe":"weaponsFree","reason":")" + overLong + R"("})";
+
+    const StageAOutcome outcome = validateStageA(body, "RedSu35_01");
+
+    AIC_EXPECT_TRUE(outcome.accepted,
+                    "an over-long reason must not reject the order; it carries no control authority "
+                    "and rejecting it costs the posture, target and speed with it. Reason code: "
+                        + std::string(toString(outcome.reason)) + " - " + outcome.detail);
+    AIC_EXPECT_TRUE(outcome.reasonTruncated, "the truncation must be reported, not silent");
+    AIC_EXPECT_EQ(outcome.order.reason.size(), kMaxReasonChars,
+                  "the stored reason must sit exactly at the cap, marker included");
+
+    // The marker is INSIDE the cap, not appended past it.
+    const std::string marker = kReasonTruncationMarker;
+    AIC_EXPECT_TRUE(outcome.order.reason.size() >= marker.size()
+                        && outcome.order.reason.compare(
+                               outcome.order.reason.size() - marker.size(), marker.size(), marker) == 0,
+                    "a truncated reason must end in the truncation marker - a shortened record that "
+                    "does not say it was shortened is the defect Corrections item 26 names");
+
+    // The fields that actually command the aircraft came through untouched. This is the assertion
+    // C16 exists for.
+    AIC_EXPECT_TRUE(outcome.order.posture == Posture::Engage, "posture survived the truncation");
+    AIC_EXPECT_EQ(outcome.order.targetEntityId, std::string("BlueF18_02"), "target survived");
+    AIC_EXPECT_TRUE(outcome.order.roe == Roe::WeaponsFree, "roe survived");
+    AIC_EXPECT_TRUE(outcome.order.cruiseSpeedMps == 300.0, "cruise speed survived");
+    return true;
+}
+
+// The other half of C16's asymmetry, asserted separately because it is the half a "just stop
+// rejecting on reason" implementation gets wrong. An EMPTY reason still rejects: it says the model
+// did not answer a required field, and unlike verbosity that does not vary by which model is
+// configured. It is covered by the corpus above as well; it is restated here so the two halves of
+// the rule sit next to each other and neither can be changed without the other being seen.
+AIC_TEST(EmptyReasonStillRejectsWhileAnOverLongOneDoesNot) {
+    const std::string empty =
+        R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"engage","targetEntityId":"BlueF18_02",)"
+        R"("cruiseSpeedMps":300.0,"orbitRadiusM":0.0,"roe":"weaponsFree","reason":""})";
+    const StageAOutcome outcome = validateStageA(empty, "RedSu35_01");
+    AIC_EXPECT_TRUE(!outcome.accepted, "an empty reason must still reject");
+    AIC_EXPECT_TRUE(outcome.reason == RejectReason::Range, "and it rejects as `range`");
+    AIC_EXPECT_TRUE(!outcome.reasonTruncated, "a rejection is not a truncation");
+    return true;
+}
+
+// A reason exactly AT the cap is left alone. The boundary is the off-by-one this fix could
+// plausibly introduce, and it would present as every long-but-legal rationale silently acquiring an
+// ellipsis it did not earn.
+AIC_TEST(ReasonExactlyAtTheCapIsNotTruncated) {
+    const std::string atCap(kMaxReasonChars, 'a');
+    const std::string body =
+        R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"engage",)"
+        R"("targetEntityId":"BlueF18_02","cruiseSpeedMps":300.0,"orbitRadiusM":0.0,)"
+        R"("roe":"weaponsFree","reason":")" + atCap + R"("})";
+
+    const StageAOutcome outcome = validateStageA(body, "RedSu35_01");
+    AIC_EXPECT_TRUE(outcome.accepted, "a reason exactly at the cap is legal");
+    AIC_EXPECT_TRUE(!outcome.reasonTruncated, "and must not be reported as truncated");
+    AIC_EXPECT_EQ(outcome.order.reason, atCap, "and must come through byte-identical");
+    return true;
+}
+
+// C16's regression guard against the check that would have quietly undone it. Stage A's A4b
+// structural backstop validates the order against the posture's schema branch, and that branch
+// bounds `reason` by maxLength - so validating the ORIGINAL body there would fail every over-long
+// order as `schema` and give back the whole-order loss C16 removed, one check later and under a
+// less informative reason code. This asserts the backstop sees the truncated value.
+AIC_TEST(TruncatedReasonSatisfiesTheSchemaBackstop) {
+    const std::string overLong(kMaxReasonChars * 3, 'a');
+    const std::string body =
+        R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"hold",)"
+        R"("waypoint":{"latitudeDeg":13.5,"longitudeDeg":144.8,"altitudeHaeM":9000.0},)"
+        R"("cruiseSpeedMps":220.0,"orbitRadiusM":8000.0,"roe":"weaponsTight","reason":")"
+            + overLong + R"("})";
+
+    const StageAOutcome outcome = validateStageA(body, "RedSu35_01");
+    AIC_EXPECT_TRUE(outcome.accepted,
+                    "the schema backstop must validate the TRUNCATED reason, not the original - "
+                    "otherwise C16's fix is undone by a `schema` rejection. Got: "
+                        + std::string(toString(outcome.reason)) + " - " + outcome.detail);
+    AIC_EXPECT_TRUE(outcome.reasonTruncated, "and the truncation is still reported");
+    return true;
+}
+
+// C14 (PRD v1.8.30, AIC-ORD-1). A `hold` whose orbit radius is at or below zero is REPAIRED, and
+// the order ACCEPTED.
+//
+// WHAT THIS ASSERTS AND WHY IT IS NOT A NUMBER TEST. The property is that the order SURVIVES - the
+// posture, waypoint, speed and ROE are not thrown away over one scalar the runtime never compelled
+// the model to supply. Asserting only `orbitRadiusM == kDefaultOrbitRadiusM` would pass on an
+// implementation that substituted the value and then rejected the order anyway, which is precisely
+// the failure mode worth guarding. So every authority-carrying field is checked to have survived.
+//
+// This was the largest rejection class in the whole archive: 16 of 55, and 15 of the 16 were this
+// rule. It is enforced by NOTHING except this check - the local constrained decoder ignores numeric
+// minimum/maximum in both directions on four models across three families, and the hosted schema
+// projection strips the keywords because pinToConst cannot rescue a range that is not zero-width.
+AIC_TEST(HoldWithNoOrbitRadiusIsRepairedAndTheOrderSurvives) {
+    const std::string body =
+        R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"hold",)"
+        R"("waypoint":{"latitudeDeg":13.5,"longitudeDeg":144.8,"altitudeHaeM":9000.0},)"
+        R"("cruiseSpeedMps":220.0,"orbitRadiusM":0.0,"roe":"weaponsTight",)"
+        R"("reason":"No contacts; holding at the CAP point."})";
+
+    const StageAOutcome outcome = validateStageA(body, "RedSu35_01");
+
+    AIC_EXPECT_TRUE(outcome.accepted,
+                    "a hold with a zero orbit radius must not reject the order; the decoder cannot "
+                    "hold the rule on either backend, and rejecting costs the posture, waypoint, "
+                    "speed and ROE with it. Reason code: "
+                        + std::string(toString(outcome.reason)) + " - " + outcome.detail);
+    AIC_EXPECT_TRUE(outcome.orbitRadiusRepaired, "the repair must be reported, not silent");
+    AIC_EXPECT_EQ(outcome.order.orbitRadiusM, kDefaultOrbitRadiusM,
+                  "the substituted radius must be safety.defaultOrbitRadiusM - the SAME value "
+                  "AIC-VAL-2 rung 2 publishes for this field in this posture");
+
+    // The fields that actually command the aircraft came through untouched. This is the assertion
+    // the requirement exists for.
+    AIC_EXPECT_TRUE(outcome.order.posture == Posture::Hold, "posture survived the repair");
+    AIC_EXPECT_TRUE(outcome.order.roe == Roe::WeaponsTight, "roe survived");
+    AIC_EXPECT_TRUE(outcome.order.cruiseSpeedMps == 220.0, "cruise speed survived");
+    AIC_EXPECT_TRUE(outcome.order.altitudeHaeM == 9000.0, "waypoint survived");
+    return true;
+}
+
+// The repair honours the CONFIGURED value rather than the constant, which is the whole reason the
+// value is a parameter instead of being read from a header at the point of use. A deployment that
+// lowers safety.defaultOrbitRadiusM for a loitering platform must get its own number back.
+AIC_TEST(TheRepairUsesTheConfiguredDefaultOrbitRadius) {
+    const std::string body =
+        R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"hold",)"
+        R"("waypoint":{"latitudeDeg":13.5,"longitudeDeg":144.8,"altitudeHaeM":9000.0},)"
+        R"("cruiseSpeedMps":220.0,"orbitRadiusM":0.0,"roe":"weaponsTight","reason":"Holding."})";
+
+    const StageAOutcome outcome =
+        validateStageA(body, "RedSu35_01", EnvelopeFormat::Raw, 2500.0);
+    AIC_EXPECT_TRUE(outcome.accepted, "still accepted: " + outcome.detail);
+    AIC_EXPECT_EQ(outcome.order.orbitRadiusM, 2500.0,
+                  "the repair must use the configured default, not the compiled-in one");
+    return true;
+}
+
+// The other half of the asymmetry, asserted separately because it is the half a "just stop
+// rejecting on orbitRadiusM" implementation gets wrong. A POSITIVE radius on a posture that forbids
+// one still rejects: that direction IS enforceable end to end - the hosted projection pins it with
+// `const: 0` and the local decoder honours `const` - so a model emitting one is saying something
+// wrong rather than omitting something it was never compelled to supply.
+AIC_TEST(APositiveOrbitRadiusOnANonHoldPostureStillRejects) {
+    const std::string body =
+        R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"defend",)"
+        R"("cruiseSpeedMps":300.0,"orbitRadiusM":5000.0,"roe":"weaponsFree",)"
+        R"("reason":"Missile inbound; going cold."})";
+
+    const StageAOutcome outcome = validateStageA(body, "RedSu35_01");
+    AIC_EXPECT_TRUE(!outcome.accepted, "a positive radius on `defend` must still reject");
+    AIC_EXPECT_TRUE(outcome.reason == RejectReason::Shape, "and it rejects as `shape`");
+    AIC_EXPECT_TRUE(!outcome.orbitRadiusRepaired, "a rejection is not a repair");
+    return true;
+}
+
+// A hold with a legal radius is left alone. The boundary is the mistake this fix could plausibly
+// introduce, and it would present as every deliberate orbit radius being silently replaced by the
+// default - the model's intent overwritten by a fallback it never asked for.
+AIC_TEST(AHoldWithALegalOrbitRadiusIsNotRepaired) {
+    const StageAOutcome outcome = validateStageA(baselineHoldOrder(), kOwnId);
+    AIC_EXPECT_TRUE(outcome.accepted, "the baseline hold is legal: " + outcome.detail);
+    AIC_EXPECT_TRUE(!outcome.orbitRadiusRepaired, "and must not be reported as repaired");
+    AIC_EXPECT_EQ(outcome.order.orbitRadiusM, 8000.0, "and must come through unmodified");
+    return true;
+}
+
+// The regression guard against the check that would have quietly undone this, and it is the exact
+// analogue of TruncatedReasonSatisfiesTheSchemaBackstop above. Stage A's structural backstop
+// validates the order against the posture's schema branch, and the hold branch bounds orbitRadiusM
+// to [1, 50000] - so validating the ORIGINAL body there would fail every repaired order as `schema`
+// and give back the whole-order loss this fix removes, one check later and under a less informative
+// reason code. This asserts the backstop sees the REPAIRED value.
+AIC_TEST(RepairedOrbitRadiusSatisfiesTheSchemaBackstop) {
+    const std::string body =
+        R"({"schemaVersion":1,"entityId":"RedSu35_01","posture":"hold",)"
+        R"("waypoint":{"latitudeDeg":13.5,"longitudeDeg":144.8,"altitudeHaeM":9000.0},)"
+        R"("cruiseSpeedMps":220.0,"orbitRadiusM":-1.0,"roe":"weaponsTight","reason":"Holding."})";
+
+    const StageAOutcome outcome = validateStageA(body, "RedSu35_01");
+    AIC_EXPECT_TRUE(outcome.accepted,
+                    "the schema backstop must validate the REPAIRED radius, not the original - "
+                    "otherwise the fix is undone by a `schema` rejection. Got: "
+                        + std::string(toString(outcome.reason)) + " - " + outcome.detail);
+    AIC_EXPECT_TRUE(outcome.orbitRadiusRepaired, "and the repair is still reported");
+    AIC_EXPECT_EQ(outcome.order.orbitRadiusM, kDefaultOrbitRadiusM, "with the default substituted");
+    return true;
+}
+
 // Stage B's rows need live state, so they run against the fake world rather than as raw bodies.
 AIC_TEST(AdversarialCorpusStageB) {
-    const CommanderConfig config;   // defaults: 400 m/s, 100-20000 m HAE, 200 km geofence
+    const CommanderConfig config;   // defaults: 50-400 m/s, 100-20000 m HAE, 200 km geofence
     const FakeWorld world = makeWorld();
 
     struct Row {
@@ -424,6 +638,13 @@ AIC_TEST(AdversarialCorpusStageB) {
 
     { Row r{"speed over the safety envelope", RejectReason::Clamp,
             ingress(13.51, 144.81, 9000.0, config.maxSpeedMps + 1.0), makeRequest()};
+      rows.push_back(r); }
+
+    // C19 (v1.8.27). The band used to be (0, maxSpeedMps] and this row had no counterpart: nothing
+    // anywhere refused a 1.5 m/s cruise order for a fighter, and five were accepted in three live
+    // runs. Sits next to the ceiling row deliberately - they are one envelope.
+    { Row r{"speed under the safety envelope", RejectReason::Clamp,
+            ingress(13.51, 144.81, 9000.0, config.minSpeedMps - 1.0), makeRequest()};
       rows.push_back(r); }
 
     { Row r{"altitude below the floor", RejectReason::Clamp,

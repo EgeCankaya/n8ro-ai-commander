@@ -314,18 +314,26 @@ bool AiCommanderApiModule::registerWith(
             return rt->setSituationNote(entityId, text);
         });
 
-    // -- reportTrack (v1.2) ----------------------------------------------------------------------
+    // -- reportTrack (v1.2; arity 4 -> 6 in v1.8.30) ----------------------------------------------
     reg("reportTrack",
         meta("Reports one detected track to the commander for this cadence window.\n"
-             "Input: reportTrack(entityId, targetEntityId, rangeM, snrDb)\n"
+             "Input: reportTrack(entityId, targetEntityId, rangeM, snrDb, kind, team)\n"
              "  rangeM: metres (sensor.getTrackById's range_m)\n"
              "  snrDb:  decibels (sensor.getTrackById's snr_DB)\n"
+             "  kind:   \"air\" | \"ground\" | \"surface\" | \"munition\" | \"other\"\n"
+             "  team:   \"hostile\" | \"friendly\" | \"unknown\", RELATIVE to the reporting entity\n"
              "Returns: boolean - false when the entity is not commanded, the arguments are "
              "invalid, or the list already holds commander.maxTracksInPrompt entries.\n"
+             "kind and team are CLAMPED to their vocabularies rather than validated: an omitted or "
+             "unrecognised value becomes \"other\" / \"unknown\" and the call still succeeds, so a "
+             "script that cannot classify a contact still reports it rather than losing it.\n"
+             "Do NOT report own-team contacts (AIC-ORD-2): filter them in Tier 1, where the team "
+             "is already in hand from entityControl.getEntityInfo.\n"
              "Idempotent per targetEntityId. The commander cannot see sensor tracks itself, so an "
              "unreported contact cannot be targeted by an order: Stage-B validation rejects any "
              "order naming a target that was not reported.",
-             {str("entityId"), str("targetEntityId"), num("rangeM"), num("snrDb")},
+             {str("entityId"), str("targetEntityId"), num("rangeM"), num("snrDb"),
+              str("kind"), str("team")},
              {LuaApiType::Boolean}),
         [](CommanderRuntime* rt, const LuaVariadicArgs& args) -> LuaValue {
             std::string entityId;
@@ -337,7 +345,18 @@ bool AiCommanderApiModule::registerWith(
                 || !readNumberArg(args, 2, rangeM) || !readNumberArg(args, 3, snrDb)) {
                 return false;
             }
-            return rt->reportTrack(entityId, targetEntityId, rangeM, snrDb);
+            // The two attribute arguments are read PERMISSIVELY, and the discarded returns are the
+            // point rather than an oversight. A script still on the pre-v1.8.30 four-argument form
+            // passes neither; a failed read leaves the local empty, which both parsers map to the
+            // safe member of their vocabulary. So the omission degrades to the OLD picture rather
+            // than to NO picture - and no picture would mean Stage-B B3 rejecting every targeted
+            // order, which is an outage nobody would trace back to an arity change.
+            std::string kindText;
+            std::string teamText;
+            (void)readStringArg(args, 4, kindText);
+            (void)readStringArg(args, 5, teamText);
+            return rt->reportTrack(entityId, targetEntityId, rangeM, snrDb,
+                                   parseTrackKind(kindText), parseTrackTeam(teamText));
         });
 
     // -- reportLoadout (v1.2) --------------------------------------------------------------------

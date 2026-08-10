@@ -152,6 +152,38 @@ void OrderRecorder::recordRequested(
     (void)record.setString("snapshotHash", snapshotHash);
     (void)record.setString("promptHash", promptHash);
     (void)record.setInt64("tracksReported", static_cast<std::int64_t>(snapshot.tracks.size()));
+
+    // The own-ship state the snapshot actually transmitted (AIC-DET-1, v1.8.27, C18).
+    //
+    // WHY, AND WHY THE HASH WAS NOT ENOUGH. This FR's Customer scenario has promised since v1.0 that
+    // an engineer "reads the exact order, THE SNAPSHOT THAT PRODUCED IT, and the model's stated
+    // reason" - and no record has ever carried a snapshot. `snapshotHash` cannot stand in for one:
+    // it is a digest, it answers "did the picture change?" and never "what WAS the picture?", and
+    // position moves every tick, so it changes whether or not any other field did.
+    //
+    // BOTH QUESTIONS IT WAS BUILT FOR ARE NOW ANSWERED, on the first run that carried it (v1.8.28,
+    // PRD Corrections item 44), and the block stays because that is what it is for.
+    //   - "when an order commands 1.5 m/s, did the model invent it or did the snapshot report it?"
+    //     The SNAPSHOT: own.speedMps read 1.503 with velN -0.581 and velE -1.386. And every accepted
+    //     order in that run matched own.speedMps exactly - the model copies the right field, which
+    //     REFUTES item 42(c) and closed C15.
+    //   - "does componentTransform/headingDeg track the physics pass?" It does NOT. 270.000 for
+    //     600 s on both entities while velN swung -280 to +304. courseDeg replaced it (C18).
+    //
+    // OWN-SHIP ONLY. tracks[] and loadout[] are deliberately excluded: both are already
+    // reconstructible from the Tier-1 ingress calls, and both would dominate the record's size for
+    // a question nobody has asked of them.
+    JsonValue own = JsonValue::object();
+    (void)own.setDouble("latitudeDeg", snapshot.latitudeDeg);
+    (void)own.setDouble("longitudeDeg", snapshot.longitudeDeg);
+    (void)own.setDouble("altitudeHaeM", snapshot.altitudeHaeM);
+    (void)own.setDouble("courseDeg", snapshot.courseDeg);
+    (void)own.setDouble("speedMps", snapshot.speedMps);
+    (void)own.setDouble("velN", snapshot.velNMps);
+    (void)own.setDouble("velE", snapshot.velEMps);
+    (void)own.setDouble("velD", snapshot.velDMps);
+    (void)record.set("own", own);
+
     writeLine(record.toString());
 }
 
@@ -173,12 +205,15 @@ void writeUsage(JsonValue& record, const OrderRecorder::TokenUsage& usage) {
 
 void OrderRecorder::recordAccepted(
     double publishedSimTimeS, std::int64_t frame, const Order& order, std::int64_t serial,
-    std::int64_t latencyMs, const TokenUsage& usage) {
+    std::int64_t latencyMs, const TokenUsage& usage, bool orbitRadiusRepaired) {
     JsonValue record = baseRecord(publishedSimTimeS, frame, OrderEvent::OrderAccepted);
     (void)record.setString("entityId", order.entityId);
     (void)record.setInt64("serial", serial);
     (void)record.setInt64("latencyMs", latencyMs);
     writeUsage(record, usage);
+    if (orbitRadiusRepaired) {
+        (void)record.setBool("orbitRadiusRepaired", true);
+    }
     (void)record.set("order", orderToJson(order));
     writeLine(record.toString());
 }

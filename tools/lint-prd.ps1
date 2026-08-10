@@ -266,7 +266,111 @@ if (-not $statusLine) {
 }
 
 # ---------------------------------------------------------------------------------------------
-# 7. Required sections for the Comprehensive tier
+# 7. The summary artifact must not go stale
+# ---------------------------------------------------------------------------------------------
+# docs/summary.md is the two-page front door to a 4,000-line document (PRD v1.8.30, §Corrections
+# item 46). A summary that drifts is worse than none, and this project has demonstrated twice that
+# continuously-maintained duplicate figures drift: §Success metrics' headline in-engine acceptance
+# figure was ONE RUN STALE when v1.8.30 recomputed it, sitting under a subsection about why that
+# number needed watching.
+#
+# So the summary carries a version stamp and this check pins it to the PRD's. The failure mode it
+# catches is not a typo - it is a PRD revision that changed a verdict while the summary kept quoting
+# the old one, which is exactly the failure a reader consults a summary to avoid.
+Write-Host "[Summary artifact]"
+
+$summaryPath = Join-Path (Split-Path -Parent $Path) "summary.md"
+if (-not (Test-Path $summaryPath)) {
+    Warn "docs/summary.md is missing - the PRD has no short front door (PRD v1.8.30, item 46)"
+    Check "summary artifact: absent"
+} else {
+    $summaryLines = Get-Content -Path $summaryPath
+    $stamp = @(Find-Lines $summaryLines '^\*\*PRD version:\*\*\s*(v[\d.]+)') | Select-Object -First 1
+    if (-not $stamp) {
+        Fail "docs/summary.md has no '**PRD version:** vN.N' stamp - without it nothing can tell whether it is current"
+        Check "summary artifact: unstamped"
+    } else {
+        $summaryVersion = $stamp.Match.Groups[1].Value
+        Check "summary artifact: $summaryVersion"
+        if ($statusLine -and $summaryVersion -ne $statusLine.Match.Groups[1].Value) {
+            Fail ("docs/summary.md is stamped $summaryVersion but the PRD is " `
+                + "$($statusLine.Match.Groups[1].Value) - regenerate the summary, or the front door " `
+                + "quotes a verdict the document no longer holds") $stamp.LineNumber
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------------------------
+# 8. The in-engine acceptance figure must agree across all three documents
+# ---------------------------------------------------------------------------------------------
+# C17's real cost is staleness, not disagreement. The in-engine acceptance figure has gone stale
+# FOUR times - 86.2 % -> 84.3 % -> 79.8 % -> 69.6 % - and every time the same way: a run was
+# archived, nobody recomputed, and the old number was requoted until a reader caught it
+# (PRD §Corrections items 46(f), 48, 50, 51). It is quoted in three documents that drift apart.
+#
+# This check cannot recompute the figure: the archive lives OUTSIDE the repository by design
+# (order logs carry live scenario state) and this script must run on a bare checkout with no
+# release tree. So `tools/acceptance-report.py` owns the number and prints a sentinel, and this
+# check enforces that all three documents carry the SAME sentinel. Drift fails the build; a
+# refresh is a three-line paste.
+Write-Host "[In-engine acceptance sentinel]"
+
+$sentinelPattern = '<!--\s*in-engine-acceptance:\s*([\d.]+)\s*\[([\d.]+),\s*([\d.]+)\]\s*n=(\d+)\s*runs=(\d+)\s*-->'
+$repoRootForDocs = Split-Path -Parent $Path
+$sentinelFiles = @(
+    @{ Name = "docs/prd.md";     File = $Path },
+    @{ Name = "docs/summary.md"; File = (Join-Path $repoRootForDocs "summary.md") },
+    @{ Name = "README.md";       File = (Join-Path (Split-Path -Parent $repoRootForDocs) "README.md") }
+)
+
+$found = @()
+foreach ($entry in $sentinelFiles) {
+    if (-not (Test-Path $entry.File)) {
+        Fail "$($entry.Name) not found - cannot check the acceptance sentinel"
+        continue
+    }
+    $hit = @(Find-Lines (Get-Content -Path $entry.File) $sentinelPattern) | Select-Object -First 1
+    if (-not $hit) {
+        Fail ("$($entry.Name) carries no in-engine-acceptance sentinel - run " `
+            + "``python tools/acceptance-report.py`` and paste the line it prints")
+    } else {
+        $found += [pscustomobject]@{
+            Name = $entry.Name
+            Value = $hit.Match.Groups[0].Value.Trim()
+            Point = $hit.Match.Groups[1].Value
+            N = $hit.Match.Groups[4].Value
+        }
+    }
+}
+
+if ($found.Count -eq $sentinelFiles.Count) {
+    $distinct = @($found | Select-Object -ExpandProperty Value -Unique)
+    if ($distinct.Count -ne 1) {
+        Fail "the in-engine acceptance sentinel differs across documents - they have drifted:"
+        foreach ($f in $found) { Fail "    $($f.Name): $($f.Value)" }
+    } else {
+        Check "acceptance sentinel agrees across 3 documents: $($found[0].Point) % (n = $($found[0].N))"
+    }
+}
+
+# And the figure SHALL NOT appear as a bare point estimate anywhere (PRD v1.8.30). Every interval
+# in play is 15-30 points wide; a bare decimal implies a precision the sample does not carry, and
+# it is the form in which 86.2 % survived its own successor run.
+if ($found.Count -gt 0) {
+    $point = [regex]::Escape($found[0].Point)
+    foreach ($entry in $sentinelFiles) {
+        if (-not (Test-Path $entry.File)) { continue }
+        foreach ($hit in (Find-Lines (Get-Content -Path $entry.File) "$point\s*%")) {
+            if ([regex]::IsMatch($hit.Line, "$point\s*%\s*\[")) { continue }   # carries its interval
+            if ([regex]::IsMatch($hit.Line, 'in-engine-acceptance:')) { continue }  # the sentinel
+            Warn ("$($entry.Name): in-engine acceptance quoted without its interval - " `
+                + "'$($found[0].Point) %' must be followed by [lo, hi]") $hit.LineNumber
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------------------------
+# 9. Required sections for the Comprehensive tier
 # ---------------------------------------------------------------------------------------------
 Write-Host "[Required sections]"
 

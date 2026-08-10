@@ -158,8 +158,16 @@ std::vector<PluginConfigField> toConfigFields(const CommanderConfig& config) {
     // redact here — the redaction is structural (ADR-5).
     pushText(fields, "claude.apiKeyEnvVar", config.claudeApiKeyEnvVar);
     pushText(fields, "claude.effort", config.claudeEffort);
+    // The spend ceiling and its prices (AIC-BE-2, v1.8.47, C24). Published like every other field
+    // so an operator can see the ceiling a session is running under without reading the source.
+    pushReal(fields, "claude.maxSpendUsd", config.claudeMaxSpendUsd);
+    pushReal(fields, "claude.priceInPerMTok", config.claudePriceInPerMTok);
+    pushReal(fields, "claude.priceOutPerMTok", config.claudePriceOutPerMTok);
+    pushReal(fields, "claude.priceCacheReadPerMTok", config.claudePriceCacheReadPerMTok);
+    pushReal(fields, "claude.priceCacheWritePerMTok", config.claudePriceCacheWritePerMTok);
 
     pushReal(fields, "safety.maxSpeedMps", config.maxSpeedMps);
+    pushReal(fields, "safety.minSpeedMps", config.minSpeedMps);
     pushReal(fields, "safety.minAltitudeHaeM", config.minAltitudeHaeM);
     pushReal(fields, "safety.maxAltitudeHaeM", config.maxAltitudeHaeM);
     pushReal(fields, "safety.geofenceRadiusM", config.geofenceRadiusM);
@@ -247,6 +255,31 @@ bool tryParseConfigFields(
             }
         } else if (name == "claude.apiKeyEnvVar") {
             draft.claudeApiKeyEnvVar = field.value;
+        } else if (name == "claude.maxSpendUsd") {
+            // NOT range-checked against zero here, and that is deliberate: at or below zero is a
+            // MEANINGFUL value - it disables the hosted backend - rather than an error to reject.
+            // Rejecting it would turn "operator switched egress off" into a config-load failure.
+            if (!parseReal(field.value, draft.claudeMaxSpendUsd)) {
+                return fail(name, "expected a finite number");
+            }
+        } else if (name == "claude.priceInPerMTok") {
+            if (!parseReal(field.value, draft.claudePriceInPerMTok) || draft.claudePriceInPerMTok < 0.0) {
+                return fail(name, "expected a finite number at or above zero");
+            }
+        } else if (name == "claude.priceOutPerMTok") {
+            if (!parseReal(field.value, draft.claudePriceOutPerMTok) || draft.claudePriceOutPerMTok < 0.0) {
+                return fail(name, "expected a finite number at or above zero");
+            }
+        } else if (name == "claude.priceCacheReadPerMTok") {
+            if (!parseReal(field.value, draft.claudePriceCacheReadPerMTok)
+                || draft.claudePriceCacheReadPerMTok < 0.0) {
+                return fail(name, "expected a finite number at or above zero");
+            }
+        } else if (name == "claude.priceCacheWritePerMTok") {
+            if (!parseReal(field.value, draft.claudePriceCacheWritePerMTok)
+                || draft.claudePriceCacheWritePerMTok < 0.0) {
+                return fail(name, "expected a finite number at or above zero");
+            }
         } else if (name == "claude.effort") {
             const std::string_view value = trim(field.value);
             if (!value.empty() && value != "low" && value != "medium" && value != "high") {
@@ -256,6 +289,14 @@ bool tryParseConfigFields(
         } else if (name == "safety.maxSpeedMps") {
             if (!parseReal(field.value, draft.maxSpeedMps)) return fail(name, "expected a finite number");
             if (draft.maxSpeedMps <= 0.0) return fail(name, "must be > 0");
+        } else if (name == "safety.minSpeedMps") {
+            if (!parseReal(field.value, draft.minSpeedMps)) return fail(name, "expected a finite number");
+            // Zero is legal and means "no floor" - the pre-v1.8.27 behaviour, which a rotary-wing or
+            // loitering deployment may legitimately want back. Negative is not: a speed floor below
+            // zero cannot bind on any value Stage A's A7 lets through, so it is a configuration
+            // mistake rather than a permissive setting, and a bound that silently cannot fire is
+            // exactly the failure mode this field exists to remove.
+            if (draft.minSpeedMps < 0.0) return fail(name, "must be >= 0");
         } else if (name == "safety.minAltitudeHaeM") {
             if (!parseReal(field.value, draft.minAltitudeHaeM)) return fail(name, "expected a finite number");
         } else if (name == "safety.maxAltitudeHaeM") {
@@ -282,6 +323,13 @@ bool tryParseConfigFields(
 
     if (draft.minAltitudeHaeM >= draft.maxAltitudeHaeM) {
         return fail("safety.minAltitudeHaeM", "must be < safety.maxAltitudeHaeM");
+    }
+
+    // The same rule the altitude pair has always carried, now that speed is a two-sided envelope
+    // too (v1.8.27, C19). An envelope whose ends cross accepts nothing at all, and it would present
+    // as "the model stopped producing usable orders" rather than as a configuration error.
+    if (draft.minSpeedMps >= draft.maxSpeedMps) {
+        return fail("safety.minSpeedMps", "must be < safety.maxSpeedMps");
     }
 
     // Fail-closed on the hosted backend, and deliberately NOT a silent fall back to local: a silent

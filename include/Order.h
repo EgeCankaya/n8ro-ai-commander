@@ -10,6 +10,23 @@ namespace arkheon::aicommander {
 //
 // Adding a posture means adding a row to AIC-ORD-2's mapping table first: a posture with no verb
 // mapping is an order nobody can execute.
+// The orbit radius substituted into a `hold` order that arrived without a usable one, and the
+// default for `safety.defaultOrbitRadiusM` (AIC-ORD-1, PRD v1.8.30, C14).
+//
+// It lives here, in the smallest header both consumers can include, because it has exactly two
+// consumers and they must not disagree: CommanderConfig's field default, and Stage-A's repair.
+// AIC-VAL-2 rung 2 already publishes safety.defaultOrbitRadiusM for this same field in this same
+// posture, so the repair reuses a decision rather than adding one.
+//
+// Why a repair exists at all: "a hold order requires orbitRadiusM > 0" is the only rule in the
+// order schema with the shape "greater than zero", and it is enforced by NOTHING except Stage A
+// rejecting the whole order. The local constrained decoder ignores numeric minimum/maximum in both
+// directions - measured on four models across three families - and the hosted projection strips
+// the same keywords, because pinToConst can only rescue a ZERO-WIDTH range. The other three
+// conditional rules are all forced-to-a-constant rules and those do hold. See PRD §Corrections
+// item 46(b).
+inline constexpr double kDefaultOrbitRadiusM = 8000.0;
+
 enum class Posture {
     Ingress,
     Engage,

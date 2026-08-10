@@ -269,6 +269,45 @@ AIC_TEST(ConfigRejectsUnknownBackend) {
     return true;
 }
 
+// C19 (v1.8.27). Speed is a two-sided envelope now, so it carries the cross-field rule altitude has
+// always had. An envelope whose ends cross accepts nothing at all, and it would present as "the
+// model stopped producing usable orders" rather than as the configuration error it is.
+AIC_TEST(ConfigRejectsInvertedSpeedBounds) {
+    const std::vector<PluginConfigField> inverted{
+        PluginConfigField{"safety.minSpeedMps", PluginConfigFieldType::Real, "400"},
+        PluginConfigField{"safety.maxSpeedMps", PluginConfigFieldType::Real, "50"},
+    };
+    CommanderConfig parsed;
+    std::string error;
+    AIC_EXPECT_FALSE(tryParseConfigFields(inverted, CommanderConfig{}, parsed, error),
+                     "min >= max speed must be rejected");
+    return true;
+}
+
+// The permissive setting has to stay reachable, and it is the half a naive implementation breaks by
+// requiring a positive floor. Zero means "no floor" - the pre-v1.8.27 behaviour - and a deployment
+// commanding rotary-wing or loitering platforms legitimately wants it back. A NEGATIVE floor is
+// still refused: it cannot bind on any value Stage A's A7 admits, so it is a configuration mistake
+// rather than a permission, and a bound that silently cannot fire is what C19 existed to remove.
+AIC_TEST(ConfigAcceptsAZeroSpeedFloorButNotANegativeOne) {
+    CommanderConfig parsed;
+    std::string error;
+
+    const std::vector<PluginConfigField> noFloor{
+        PluginConfigField{"safety.minSpeedMps", PluginConfigFieldType::Real, "0"},
+    };
+    AIC_EXPECT_TRUE(tryParseConfigFields(noFloor, CommanderConfig{}, parsed, error),
+                    "a zero speed floor is legal and means 'no floor': " + error);
+    AIC_EXPECT_TRUE(parsed.minSpeedMps == 0.0, "and it is the value that lands");
+
+    const std::vector<PluginConfigField> negative{
+        PluginConfigField{"safety.minSpeedMps", PluginConfigFieldType::Real, "-1"},
+    };
+    AIC_EXPECT_FALSE(tryParseConfigFields(negative, CommanderConfig{}, parsed, error),
+                     "a negative speed floor must be rejected");
+    return true;
+}
+
 // Altitude bounds must describe a non-empty interval, or every altitude check is vacuously false.
 AIC_TEST(ConfigRejectsInvertedAltitudeBounds) {
     const std::vector<PluginConfigField> inverted{

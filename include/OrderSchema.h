@@ -25,8 +25,44 @@ inline constexpr double kMaxOrbitRadiusM = 50000.0;
 // enforced in Stage B; this only catches values no configuration could mean.
 inline constexpr double kMaxCruiseSpeedMps = 1000.0;
 
+// `reason`'s bounds are ASYMMETRIC, and the asymmetry is the point (PRD v1.8.25, AIC-ORD-1,
+// §Corrections item 41(g), closing C16).
+//
+// Below the minimum an order is REJECTED. Above the maximum it is TRUNCATED and accepted.
+//
+// WHY THEY DIFFER. `reason` carries no control authority - AIC-ORD-1's field table has said "never
+// parsed" since v1.0, and no verb, posture, or Stage-B check reads it - so its LENGTH cannot make an
+// order unsafe. Rejecting on it throws away the posture, target, waypoint and ROE that do carry
+// authority, and AIC-VAL-2's ladder then holds the PREVIOUS order in force: an over-long rationale
+// does not merely lose one order, it extends a stale one. An EMPTY reason is a different signal - it
+// says the model did not answer a required field - and unlike verbosity that does not vary with
+// which model is configured.
+//
+// WHY 512 AND NOT A ROUND NUMBER. Two quantities bound it, and both are measured rather than picked.
+//   - Output tokens. `reason` is the ONLY free-text field in the order; everything else is an enum,
+//     a number, or an id, so it is the only part of the response whose length the model chooses. At
+//     the corpus-measured 3.955 bytes/token, 512 chars is ~129 tokens - approximately ONE
+//     measured-mean response (106.2 tokens). Past that the advisory field costs more than the order
+//     it explains. Worst case against the old 200 is ~$0.09 per four-ship-hour, against $0.88
+//     measured and a $1.10 target.
+//   - The record cap. OrderRecorder truncates `rawBody` at 4,096 bytes SILENTLY, with no marker
+//     (§Corrections item 26). 512 chars plus the ~300 bytes of the rest of the document is ~20 % of
+//     that, so no LEGAL reason can push a record into that silent truncation.
+//
+// The old cap was 200, which is ~51 tokens - about half a typical response - which is why a slightly
+// more verbose model ran straight into it and lost four whole orders to it in four runs.
 inline constexpr std::size_t kMinReasonChars = 1;
-inline constexpr std::size_t kMaxReasonChars = 200;
+inline constexpr std::size_t kMaxReasonChars = 512;
+
+// Appended to a truncated `reason`, INSIDE the cap rather than beyond it, so the stored value is
+// never longer than kMaxReasonChars.
+//
+// It is not decoration. §Corrections item 26 records OrderRecorder's silent truncation as a defect
+// precisely because a shortened record that does not say it was shortened is worse than a rejected
+// one, and this fix must not reproduce that defect one field over. Printable ASCII, so it survives
+// isSanitizedText and the JSONL order log unchanged.
+inline constexpr const char* kReasonTruncationMarker = "...";
+
 inline constexpr std::size_t kMaxEntityIdChars = 128;
 
 // The single embedded JSON Schema document for an order (AIC-ORD-1).

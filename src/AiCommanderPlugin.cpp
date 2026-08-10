@@ -202,6 +202,15 @@ void AiCommanderPlugin::rebuildBackend() {
             claude.effort = config.claudeEffort;
             claude.timeoutS = config.requestTimeoutS;
 
+            // The spend ceiling (AIC-BE-2, v1.8.47, C24). Carried across explicitly rather than
+            // left on the adapter's own defaults, so the ceiling a run enforces is the one the
+            // deployed config says and an operator cannot be surprised by a compiled-in value.
+            claude.maxSpendUsd = config.claudeMaxSpendUsd;
+            claude.priceInPerMTok = config.claudePriceInPerMTok;
+            claude.priceOutPerMTok = config.claudePriceOutPerMTok;
+            claude.priceCacheReadPerMTok = config.claudePriceCacheReadPerMTok;
+            claude.priceCacheWritePerMTok = config.claudePriceCacheWritePerMTok;
+
             // MANDATORY EGRESS WARNING (§Threat model). Every byte of the prompt's volatile suffix
             // — positions, ORBAT, team assignments, reported stores — leaves this machine and
             // reaches a third party from here on. That is an authorized act, and an authorized act
@@ -438,8 +447,11 @@ bool AiCommanderPlugin::buildSnapshot(
         *entityManager_, entityId, n8ro::sim::kComponentTransform, "positionGeodetic/longitudeDeg");
     const std::optional<double> alt = n8ro::sim::readComponentFieldReal(
         *entityManager_, entityId, n8ro::sim::kComponentTransform, "positionGeodetic/altitudeHaeM");
-    const std::optional<double> heading = n8ro::sim::readComponentFieldReal(
-        *entityManager_, entityId, n8ro::sim::kComponentTransform, "headingDeg");
+    // componentTransform/headingDeg is NOT read (v1.8.28, C18). The leaf exists and resolves - it is
+    // simply the authored t=0 value and does not track the physics pass, exactly as its schema
+    // description says. Measured over a 600 s run it held 270.000 on both entities across fourteen
+    // samples while velN swung -280 to +304, and at t=40.1 it reported the aircraft flying west
+    // while it flew east. Course is derived from velocityNed below instead.
 
     // Runtime columns — DOT-joined paths, owned by TransformRuntimeColumns.h. These resolve or
     // return nullopt (OQ-9), and AIC-ARCH-4 has already verified they resolve on this tree.
@@ -455,7 +467,7 @@ bool AiCommanderPlugin::buildSnapshot(
 
     // A nullopt on ANY required field aborts this entity's snapshot for the tick. Filling a hole
     // with a default would produce an order computed from a state the aircraft was never in.
-    if (!lat || !lon || !alt || !heading || !velN || !velE || !velD) {
+    if (!lat || !lon || !alt || !velN || !velE || !velD) {
         return false;
     }
 
@@ -465,10 +477,14 @@ bool AiCommanderPlugin::buildSnapshot(
     out.latitudeDeg = *lat;
     out.longitudeDeg = *lon;
     out.altitudeHaeM = *alt;
-    out.headingDeg = *heading;
     out.velNMps = *velN;
     out.velEMps = *velE;
     out.velDMps = *velD;
+    // Derived here, on the simulation thread, alongside the columns it is computed from - so the
+    // prompt renderer receives a value rather than a formula and there is one definition of what
+    // "own speed" means. See Snapshot.h for why this is not read from componentTransform/speedMps.
+    out.speedMps = groundSpeedMps(*velN, *velE, *velD);
+    out.courseDeg = courseOverGroundDeg(*velN, *velE);
     out.team = entity->getTeam();
     return true;
 }
@@ -518,6 +534,20 @@ void AiCommanderPlugin::drainCompletedOrders(double simTimeS, std::int64_t frame
             if (warning.has_value()) {
                 N8RO_LOG_WARNING(*warning, kLogCategory);
             }
+        }
+
+        // Counted BEFORE the verdict branch below, so a truncation is recorded even when a later
+        // Stage-A check rejects the order anyway. The question this counter answers - is the
+        // configured model outgrowing the cap? - does not depend on whether that particular order
+        // survived (C16, v1.8.25).
+        if (candidate->stageAReasonTruncated) {
+            runtime_.countReasonTruncation();
+        }
+        // Same placement and the same argument for the orbit-radius repair (C14, v1.8.30): the
+        // question "how often does the model omit a bound no decoder can enforce?" does not depend
+        // on whether that particular order survived a later check.
+        if (candidate->stageAOrbitRadiusRepaired) {
+            runtime_.countOrbitRadiusRepair();
         }
 
         // -- Stage A verdict, acted on here because the worker could not ---------------------------
@@ -589,7 +619,8 @@ void AiCommanderPlugin::drainCompletedOrders(double simTimeS, std::int64_t frame
         runtime_.countAcceptance(candidate->latencyMs);
         // `t` is PUBLICATION time, which is what replay keys on.
         runtime_.recorder().recordAccepted(simTimeS, frame, candidate->order,
-            candidate->snapshot.serial, candidate->latencyMs, usage);
+            candidate->snapshot.serial, candidate->latencyMs, usage,
+            candidate->stageAOrbitRadiusRepaired);
     }
 }
 
@@ -680,12 +711,17 @@ void AiCommanderPlugin::dispatchRequests(double simTimeS, std::int64_t frame) {
         // worker's to touch — and crosses as a plain integer.
         const std::size_t prefixLength = runtime_.promptRenderer().prefix().size();
 
-        auto work = [snapshot, prompt, client, slot, prefixLength]() mutable {
+        // Read here, on the simulation thread, and captured BY VALUE for the same reason as
+        // everything else the worker sees: Stage A's `hold`-radius repair needs the configured
+        // default (AIC-ORD-1, v1.8.30), and the worker may not reach the runtime to ask for it.
+        const double defaultOrbitRadiusM = runtime_.config().defaultOrbitRadiusM;
+
+        auto work = [snapshot, prompt, client, slot, prefixLength, defaultOrbitRadiusM]() mutable {
             // The verdict rides across the slot with the candidate. A Stage-A rejection must reach
             // the simulation thread both so the entity's requestInFlight flag clears — otherwise it
             // goes permanently silent — and so the rejection can be counted and recorded there.
-            (void)slot->publish(
-                CommanderRuntime::runWorkerCall(std::move(snapshot), prompt, *client, prefixLength));
+            (void)slot->publish(CommanderRuntime::runWorkerCall(
+                std::move(snapshot), prompt, *client, prefixLength, defaultOrbitRadiusM));
         };
 
         if (threadRunner_ != nullptr) {

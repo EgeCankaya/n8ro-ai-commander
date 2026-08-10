@@ -1129,3 +1129,195 @@ end
 function onShutdown(entityId)
     state[entityId] = nil
 end
+
+-- =================================================================================================
+-- C8 FLOOR PROBE APPENDIX (PRD v1.8.43, §Corrections item 59).
+--
+-- EVERYTHING ABOVE THIS LINE IS `lua/ai_commander_interceptor.lua`, BYTE FOR BYTE. That is the
+-- point of the file and `tools/run-c8-floor-probe.ps1` asserts it on every run: it compares the
+-- first N bytes of this file against the reference script and refuses to start if they differ.
+-- Clauses 7 and 8 below are therefore the SHIPPED implementation and not a re-creation of it,
+-- which is the one claim `tools/c23-hold-probe.lua` could not make -- that probe was a bare
+-- instrument implementing no AIC-ORD-2 row at all.
+--
+-- WHAT THIS APPENDIX ADDS, AND WHY IT HAS TO BE AN INJECTION.
+--
+-- Clause 8 has never fired in a commanded scenario. Across the two post-fix three-arm runs
+-- `navigation.requestHoldPosition` was called ZERO times and clause 8 fired ZERO times, because
+-- clause 7 took all 33 `hold` orders and prevented the onset (PRD §Corrections item 55(c)).
+-- That is the designed relationship between the clauses, and it is also why no number of further
+-- runs can close the gap: clause 8 is DOWNSTREAM of clause 7, nothing else in this scenario stalls
+-- an aircraft, and clause 7 working correctly is exactly what keeps clause 8 unexercised.
+--
+-- Item 51(f) hit the same wall one clause up -- "the counter-instance this row wanted cannot be
+-- obtained by running more scenarios ... it must be INJECTED" -- and `tools/c23-hold-probe.lua` is
+-- the precedent for how. This is that remedy applied to the clause below it.
+--
+-- HOW THE INJECTION WORKS, IN ONE PARAGRAPH.
+--
+-- Each tick the shipped `onTick` runs FIRST and unmodified. Then, while the injection window is
+-- open, this appendix calls `navigation.requestHoldPosition` at the aircraft's OWN position -- the
+-- one call clause 7 forbids -- LAST in the tick, so it wins. That reproduces the archived
+-- degenerate hold with a live commander in the loop. The instant the aircraft's ground speed is
+-- observed below the floor the injector LATCHES OFF PERMANENTLY, and from that tick onward the
+-- shipped clause 8 is the only thing steering. Everything after the latch is the product.
+--
+-- THE LATCH IS CHECKED BEFORE THE INJECTION AND NOT AFTER IT. On the tick the aircraft crosses
+-- below the floor, the shipped `onTick` has already issued clause 8's recovery `requestGoTo`; if
+-- this appendix then issued its hold it would overwrite the recovery and the probe would measure
+-- its own injector fighting the thing it is trying to observe.
+--
+-- ONE AIRCRAFT IS INJECTED AND THE OTHER IS NOT, which gives this probe a WITHIN-RUN control that
+-- no other instrument in this project has. `RedSu35_01` flies the shipped script untouched for the
+-- whole run; if it also goes below the floor, the injection is not what put it there.
+--
+-- WHAT THIS PROVES, AND WHAT IT DOES NOT -- written here rather than in the write-up:
+--   PROVES     clause 8 fires, takes navigation, and returns the aircraft above the floor within
+--              one cadence window WHILE A LIVE COMMANDER IS PUBLISHING ORDERS.
+--   DOES NOT   prove that any ordinary order path reaches clause 8. No such path is known in this
+--              scenario. THE STALL IS INJECTED and every quotation of this result must say so.
+--
+-- NO NETWORK BEYOND THE LOCAL BACKEND, no hosted egress, no grant, no cost.
+-- =================================================================================================
+
+local kC8ProbeEntityId   = "RedSu35_02"   -- The aircraft that stalled in 3 of 3 pre-fix runs.
+local kC8InjectStartS    = 90.0           -- Let the commander enrol and get orders in force first.
+local kC8InjectDeadlineS = 300.0          -- Give up rather than waste the whole run.
+local kC8OrbitRadiusM    = 5000.0         -- The archived order's radius.
+local kC8HoldSpeedMps    = 320.0          -- The archived order's speed.
+
+-- This script's own floor reading, deliberately a SEPARATE observation from the shipped script's.
+-- The shipped `kMinFlyingSpeedMps` is a local this appendix cannot see, and reaching into it would
+-- make the probe agree with the code under test by construction. 50.0 is the same policy value; if
+-- the two ever disagree the probe's samples say so rather than hiding it.
+local kC8FloorMps = 50.0
+
+local c8 = { injecting = false, latched = false, startedAtS = nil, nextLogS = -1.0,
+             belowFirstSeenS = nil, recoveredAtS = nil, holdCalls = 0 }
+
+local function c8log(message)
+    if mission ~= nil and mission.log ~= nil then
+        mission.log(message)
+    end
+end
+
+local function c8Position(entityId)
+    if entityControl == nil or entityControl.getPositionGeodetic == nil then
+        return nil
+    end
+    return entityControl.getPositionGeodetic(entityId)
+end
+
+local function c8Speed(entityId)
+    if entityControl == nil or entityControl.getVelocityNed == nil then
+        return nil
+    end
+    local velN, velE, velD = entityControl.getVelocityNed(entityId)
+    if velN == nil or velE == nil or velD == nil then
+        return nil
+    end
+    return math.sqrt(velN * velN + velE * velE + velD * velD), velN, velE, velD
+end
+
+local c8ShippedOnTick = onTick
+local c8ShippedOnInit = onInit
+
+function onInit(entityId)
+    if c8ShippedOnInit ~= nil then
+        c8ShippedOnInit(entityId)
+    end
+    c8log(string.format("C8PROBE init %s injected=%s", entityId,
+        tostring(entityId == kC8ProbeEntityId)))
+end
+
+function onTick(entityId, simulationTimeS, deltaTimeS)
+    -- The shipped script runs first, unmodified, on every entity. Clause 8 lives in here.
+    if c8ShippedOnTick ~= nil then
+        c8ShippedOnTick(entityId, simulationTimeS, deltaTimeS)
+    end
+
+    local speedMps, velN, velE, velD = c8Speed(entityId)
+
+    -- The un-injected aircraft is sampled and never steered. It is the within-run control.
+    if entityId ~= kC8ProbeEntityId then
+        if speedMps ~= nil and simulationTimeS >= (c8.nextLogS or -1.0) then
+            c8log(string.format("C8PROBE t=%.1f %s CONTROL speedMps=%.4f below=%s",
+                simulationTimeS, entityId, speedMps, tostring(speedMps < kC8FloorMps)))
+        end
+        return
+    end
+
+    if speedMps == nil then
+        return                      -- destroyed, or velocity unreadable; nothing to measure.
+    end
+
+    -- THE LATCH, CHECKED BEFORE THE INJECTION. See the header: on the crossing tick the shipped
+    -- clause 8 has already issued its recovery, and injecting after it would overwrite the very
+    -- thing being observed.
+    if c8.injecting and not c8.latched and speedMps < kC8FloorMps then
+        c8.latched = true
+        c8.injecting = false
+        c8.belowFirstSeenS = simulationTimeS
+        c8log(string.format(
+            "C8PROBE INJECTION-OFF t=%.1f %s speedMps=%.4f floorMps=%.1f holdCalls=%d "
+            .. "-- from here the shipped clause 8 acts alone",
+            simulationTimeS, entityId, speedMps, kC8FloorMps, c8.holdCalls))
+    end
+
+    -- Recovery, measured against the probe's own floor rather than the script's log line.
+    if c8.latched and c8.recoveredAtS == nil and speedMps >= kC8FloorMps then
+        c8.recoveredAtS = simulationTimeS
+        c8log(string.format(
+            "C8PROBE RECOVERED t=%.1f %s speedMps=%.4f elapsedS=%.1f cadenceWindowS=20.0",
+            simulationTimeS, entityId, speedMps,
+            simulationTimeS - (c8.belowFirstSeenS or simulationTimeS)))
+    end
+
+    -- Open the injection window once, and close it on the deadline whether or not it worked.
+    if not c8.latched and not c8.injecting
+       and simulationTimeS >= kC8InjectStartS and simulationTimeS < kC8InjectDeadlineS then
+        c8.injecting = true
+        c8.startedAtS = simulationTimeS
+        c8log(string.format(
+            "C8PROBE INJECTION-ON t=%.1f %s entrySpeedMps=%.4f radiusM=%.0f speedMps=%.1f "
+            .. "-- requestHoldPosition at own position, the call clause 7 forbids",
+            simulationTimeS, entityId, speedMps, kC8OrbitRadiusM, kC8HoldSpeedMps))
+    end
+    if c8.injecting and simulationTimeS >= kC8InjectDeadlineS then
+        c8.injecting = false
+        c8log(string.format(
+            "C8PROBE INJECTION-ABANDONED t=%.1f %s speedMps=%.4f holdCalls=%d "
+            .. "-- deadline reached without crossing the floor",
+            simulationTimeS, entityId, speedMps, c8.holdCalls))
+    end
+
+    -- The injection itself: LAST in the tick, so it beats whatever the posture just commanded.
+    -- Re-issued every tick, because that is what produced the archived behaviour and what the
+    -- reference script does; a probe that issued once would be measuring something else.
+    if c8.injecting then
+        local ownLat, ownLon, ownAlt = c8Position(entityId)
+        if ownLat ~= nil and navigation ~= nil and navigation.requestHoldPosition ~= nil then
+            navigation.requestHoldPosition(entityId, ownLat, ownLon, ownAlt,
+                                           kC8OrbitRadiusM, kC8HoldSpeedMps)
+            c8.holdCalls = c8.holdCalls + 1
+        end
+    end
+
+    -- One sample per simulation second, on the injected aircraft, for the whole run.
+    if simulationTimeS >= c8.nextLogS then
+        c8.nextLogS = math.floor(simulationTimeS) + 1.0
+        local phase = "pre-injection"
+        if c8.latched then
+            phase = (c8.recoveredAtS ~= nil) and "post-recovery" or "clause8-acting"
+        elseif c8.injecting then
+            phase = "injecting"
+        elseif c8.startedAtS ~= nil then
+            phase = "abandoned"
+        end
+        c8log(string.format(
+            "C8PROBE t=%.1f %s %s speedMps=%.4f velN=%.4f velE=%.4f velD=%.4f below=%s "
+            .. "holdCalls=%d",
+            simulationTimeS, entityId, phase, speedMps, velN or 0.0, velE or 0.0, velD or 0.0,
+            tostring(speedMps < kC8FloorMps), c8.holdCalls))
+    end
+end

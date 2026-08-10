@@ -88,13 +88,20 @@ AIC_TEST(FallbackLadderWalksItsLevels) {
     AIC_EXPECT_FALSE(advanceFallbackLadder(state, 100.0 + config.cadenceS + 2.0, config, position),
                      "staying at a level reports no further transition");
 
-    // Past validity: Standing. Hold, at the entity's position, weaponsTight, configured radius.
+    // Past validity: Standing. Hold, at the entity's position, weaponsFree, configured radius.
     AIC_EXPECT_TRUE(advanceFallbackLadder(state, 100.0 + config.orderValidityS + 1.0, config, position),
                     "crossing the validity boundary reports a transition");
     AIC_EXPECT_TRUE(state.level == FallbackLevel::Standing, "level is standing");
     AIC_EXPECT_TRUE(state.published.valid, "a standing order is published");
     AIC_EXPECT_TRUE(state.published.order.posture == Posture::Hold, "standing order holds");
-    AIC_EXPECT_TRUE(state.published.order.roe == Roe::WeaponsTight, "standing order is weapons tight");
+    // AIC-VAL-2 rung 2, PRD v1.8.30. This assertion pinned Roe::WeaponsTight for four revisions
+    // AFTER the specification changed, so a passing test was certifying the behaviour the document
+    // had already condemned - the rung §Corrections item 46(a) calls a state in which the entity
+    // "could neither shoot nor be permitted to choose something to shoot at". A standing order
+    // carries no target, so weaponsTight forbids every shot. See §Corrections item 50(d).
+    AIC_EXPECT_TRUE(state.published.order.roe == Roe::WeaponsFree,
+                    "standing order is weapons FREE - it carries no target, so weaponsTight would "
+                    "forbid every shot and leave the rung less capable than no commander at all");
     AIC_EXPECT_EQ(state.published.order.orbitRadiusM, config.defaultOrbitRadiusM,
                   "standing order uses the configured orbit radius");
     AIC_EXPECT_EQ(state.published.order.latitudeDeg, position.latitudeDeg,
@@ -326,6 +333,55 @@ AIC_TEST(ReplayToleratesATruncatedFinalLine) {
                     "a truncated final line must not abandon the log: " + error);
     AIC_EXPECT_EQ(replay.entryCount(), static_cast<std::size_t>(2),
                   "the two complete records must still be replayable");
+    return true;
+}
+
+// C18 (AIC-DET-1, v1.8.27). `order.requested` must carry the own-ship state the snapshot
+// transmitted, not merely a digest of it.
+//
+// THE PROPERTY THIS PROTECTS is that two questions stay distinguishable: "the model emitted 1.5 m/s"
+// and "the snapshot said 1.5 m/s". Before this block they were one unresolved observation, because
+// snapshotHash answers "did the picture change?" and never "what WAS the picture?" - and position
+// moves every tick, so the hash changes whether or not any other field did. The distinct sentinel
+// values below are what make a transposed or duplicated field visible.
+AIC_TEST(RequestedRecordCarriesTheOwnShipSnapshot) {
+    const std::filesystem::path dir = scratchDir("requested-own");
+    const std::string logPath = (dir / "orders.jsonl").string();
+
+    OrderSnapshot snapshot;
+    snapshot.entityId = "RedSu35_01";
+    snapshot.serial = 7;
+    snapshot.latitudeDeg = 13.49;
+    snapshot.longitudeDeg = 144.83;
+    snapshot.altitudeHaeM = 10000.0;
+    snapshot.courseDeg = 271.5;
+    snapshot.speedMps = 319.75;
+    snapshot.velNMps = 0.5;
+    snapshot.velEMps = -319.75;
+    snapshot.velDMps = 0.25;
+
+    {
+        OrderRecorder recorder;
+        AIC_EXPECT_TRUE(recorder.open(dir.string(), 1024 * 1024, 2), "recorder opens");
+        recorder.recordRequested(100.0, 0, snapshot, "local", "qwen2.5:7b",
+                                 "fnv1a64:aa", "fnv1a64:bb");
+    }
+
+    std::ifstream stream(logPath, std::ios::binary);
+    std::string line;
+    AIC_EXPECT_TRUE(static_cast<bool>(std::getline(stream, line)), "a record was written");
+
+    for (const char* needle : {"\"own\"", "\"courseDeg\":271.5", "\"speedMps\":319.75",
+                               "\"velN\":0.5", "\"velE\":-319.75", "\"velD\":0.25",
+                               "\"latitudeDeg\":13.49", "\"longitudeDeg\":144.83"}) {
+        AIC_EXPECT_TRUE(line.find(needle) != std::string::npos,
+                        std::string("order.requested must carry ") + needle + "; got: " + line);
+    }
+
+    // Own-ship only, deliberately: tracks and loadout are reconstructible from the Tier-1 ingress
+    // calls and would dominate the record. If someone later widens this, they should have to say so.
+    AIC_EXPECT_TRUE(line.find("\"tracks\"") == std::string::npos,
+                    "the requested record carries own-ship state only, not the track list");
     return true;
 }
 
