@@ -55,6 +55,13 @@ ARMS = {
 # anyone noticed.
 PRIMARY_PAIR = ("on", "script-only")
 
+# The first instant at which a scenario folder name is known to be real UTC. Before this,
+# tests/smoke/run-live-scenario.ps1 formatted LOCAL time and appended a literal 'Z' (C26). The
+# constant is a stamp, not a guess: it is the commit that fixed it, and folders at or after it
+# are unambiguous. Probe folders were never affected - tools/run-c*-probe.ps1 have always called
+# .ToUniversalTime() - which is why they are exempted where this is used.
+C26_FIXED_UTC = "20260810T000000"
+
 RE_SPAWN = re.compile(r"Weapon spawned: (\S+) profile \S+ owner (\S+) target (\S+)")
 RE_DET = re.compile(r"Detonation: (\S+) outcome=detonation target=(\S+)")
 RE_DMG = re.compile(
@@ -273,13 +280,27 @@ def main():
     # THE POPULATION IS AN ARGUMENT, NOT A PROPERTY OF THIS TOOL, so it is printed with the
     # verdict. The pre-registration fixes n = 4 and excludes the five planning runs in PROSE;
     # nothing here enforces either, and a pasted verdict used to carry no trace of which runs
-    # produced it. §Corrections item 68(h). NOTE that folder labels are NOT all in one time base
-    # -- run-live-scenario.ps1 stamps LOCAL time with a literal 'Z' while the probes stamp real
-    # UTC, so `--since` is a lexical comparison over mixed bases (C26, item 68(g)).
+    # produced it. §Corrections item 68(h).
     print("\n=== population (an argument to this tool, printed so a verdict carries it) ===")
     print("  archive : %s" % args.archive)
     print("  --since : %s" % (args.since or "(none - EVERY run in the archive)"))
     print("  runs    : %d  ->  %s" % (len(runs), ", ".join(r["run"][:15] for r in runs)))
+
+    # C26 IS FIXED FORWARD BUT NOT BACKWARD (PRD v1.8.53, §Corrections item 69(d)).
+    # run-live-scenario.ps1 stamped LOCAL time with a literal 'Z' until 2026-08-10 while every
+    # probe stamped real UTC, and `--since` is a LEXICAL comparison over the folder name. Names
+    # already on disk cannot be repaired: the offset they were written at is recorded nowhere.
+    # So the tool refuses to be quiet about it -- a boundary landing inside the ambiguity window
+    # of a pre-fix scenario folder is a selection nobody can check by reading the output.
+    if args.since:
+        murky = [r["run"] for r in runs
+                 if r["run"][:15] < C26_FIXED_UTC and not r["run"].endswith("-probe")]
+        if murky:
+            print("  ::warning:: %d selected run(s) predate the C26 stamp fix, so their folder"
+                  % len(murky))
+            print("              names may be LOCAL time wearing a 'Z'. A --since boundary within")
+            print("              the local-UTC offset of one of these is not decidable from the")
+            print("              name alone: %s" % ", ".join(murky))
 
     print("\n=== campaign runs (both primary arms present) ===")
     print("  comparison: %s vs %s -- NOT on vs off, which moves the script as well" % PRIMARY_PAIR)
@@ -386,13 +407,36 @@ def main():
             print("  %-12s POOLED %d of %d Blue munitions defeated, %d with a logged seeker loss"
                   % (arm, tot[arm][0], tot[arm][1], tot[arm][2]))
     print("\n  A defeated munition is one fired at a commanded aircraft that produced no damage")
-    print("  event. This is a mechanism readable off recorded values, which this project's")
-    print("  precedent (C5, C21, C22, C23) treats as the one category a small sample may close.")
-    print("  THAT PRECEDENT IS NOT A WRITTEN RULE. Earlier versions of this line cited")
-    print("  '§Scope authority rule 4', which does not exist and never has - §Corrections item")
-    print("  68(a), open as C25. And the premise it was granted on is refuted: the denominator")
-    print("  IS a sampling quantity (item 62(c)). It is NOT pooled into the primary endpoint -")
-    print("  conflating a mechanism with a rate is §Corrections item 40.")
+    print("  event. THIS IS REPORTED, NOT CLOSED, and the rule that says so is now written:")
+    print("  §Closing a row rule 3 (PRD v1.8.53) - a count whose denominator the scenario samples")
+    print("  is a rate wearing a mechanism's clothes, and rule 1 forbids closing a rate on a small")
+    print("  sample. Blue fired three munitions in run 213423, so the denominator IS sampled")
+    print("  (§Corrections item 62(c)). Earlier versions of this line cited '§Scope authority")
+    print("  rule 4' as licence to close it; that rule does not exist and never has (item 68(a),")
+    print("  C25, closed v1.8.53). It is NOT pooled into the primary endpoint - conflating a")
+    print("  mechanism with a rate is §Corrections item 40.")
+
+    # ---------------------------------------------------------------------------------------------
+    # THE SENTINEL (PRD v1.8.53, §Corrections item 69(e)).
+    # ---------------------------------------------------------------------------------------------
+    # The in-engine acceptance figure has a sentinel because it went stale FOUR times. This figure
+    # has never gone stale - it has only existed since v1.8.46 - and pinning it now rather than
+    # after the fourth time is the whole point. It is quoted in three documents, it is the most
+    # quotable number this project has produced, and until now nothing checked that the three
+    # copies said the same thing. The interval is the payload: the point estimate alone is the
+    # form in which a bounded-power result gets read as a precise one.
+    if c1 and c2 and c3:
+        verdict = "SUPPORTED"
+    else:
+        verdict = "NULL"
+    sentinel = ("<!-- outcome-damage-absorbed: %+.4f [%+.4f, %+.4f] n=%d signs=%d/%d %s -->"
+                % (mean, lo, hi, n, negatives, n, verdict))
+    print("\n=== paste this line into docs/prd.md, docs/summary.md and README.md ===")
+    print(sentinel)
+    print("\ntools/lint-prd.ps1 fails when the three copies disagree, and warns when the point")
+    print("estimate is quoted without its interval. This endpoint is a paired difference on")
+    print("n = 4 against a control arm that takes two distinct values in the whole archive;")
+    print("a bare -0.77 is a claim the design cannot carry.")
     return 0
 
 

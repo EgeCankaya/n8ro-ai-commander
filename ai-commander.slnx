@@ -4,4 +4,24 @@
     <Platform Name="x64" />
   </Configurations>
   <Project Path="ai-commander.vcxproj" Id="fd825997-dcbc-49ab-9fbd-4b471380a691" />
+  <!--
+    BOTH TEST PROJECTS ARE IN THE SOLUTION FROM PRD v1.8.53 (§Corrections item 69(g)).
+
+    They were in no solution file at all. `tests/live/` STOPPED COMPILING AT v1.8.28, when C18
+    deleted OrderSnapshot::headingDeg and this harness kept assigning it, and that went unnoticed
+    for ELEVEN revisions - while §Success metrics carried a fixture-acceptance verdict for which
+    this harness is the SOLE instrument. §Corrections item 56 is the record.
+
+    Item 56(f) called the root cause fixed because a compile step was added to CI. Item 67 found
+    that correction inert: the step lives in `ci-selfhosted.yml`, which has no registered runner
+    and has never executed. Registering one was considered and declined - one developer, one
+    machine, and the runner would execute pull-request code on a host holding a licensed install.
+
+    So the guard goes where the work actually happens. Under §Maintenance the only build that ever
+    runs is a developer opening this solution, and until now that build did not touch either test
+    project. Now it does: a type change that breaks the harness breaks the build the same day it
+    lands, on the machine that made it, with no runner, no service and no grant.
+  -->
+  <Project Path="tests/ai-commander-tests.vcxproj" Id="3f1c60a4-77d5-4c1e-9b0a-5e2d84f6c913" />
+  <Project Path="tests/live/ai-commander-live-tests.vcxproj" Id="9c4e17b2-6a35-4f80-b1d7-08e3a5f24c6b" />
 </Solution>

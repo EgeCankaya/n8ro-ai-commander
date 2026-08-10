@@ -48,14 +48,24 @@ revisit condition you can test without running anything.
 
 Everything else in the register is closed. **Two live rows.**
 
-**Gates, all green as of 2026-08-09:**
+**Gates, all green as of 2026-08-10:**
 
 | Suite | Result |
 |---|---|
-| Unit | **162 / 162** |
+| Unit | **169 / 169** |
 | Deployed-artifact smoke | **30 / 30** |
 | Live three-arm scenario smoke | **22 checks, 0 failed** (twice, 2026-08-09) |
-| `tools/lint-prd.ps1` · `tools/check-artifacts.ps1` | 11 checks, 0 errors, 0 warnings · 105 files, PASS |
+| `tools/lint-prd.ps1` · `tools/check-artifacts.ps1` | 14 checks, 0 errors, 0 warnings · 111 files, PASS |
+
+<!-- gate-figures: unit=169/169 artifact-smoke=30/30 live-smoke=22/0 tracked-files=111 -->
+
+*(v1.8.53 — **this table was wrong and had been for some time.** It said `162 / 162` and
+`105 files` under a heading asserting the figures were current; the real numbers were `169 / 169`
+and `110`, and the file count was already false on the date the table stamped itself with. It is
+the acceptance figure's staleness failure — four events, PRD §Corrections items 46(f), 48, 50, 51 —
+recurring in the one document a reader meets first. **So it is now pinned rather than retyped:**
+`tools/lint-prd.ps1` check 11 requires the sentinel above to match the PRD's copy, and it
+**computes** `tracked-files` from `git ls-files` instead of trusting either. §Corrections item 69(f).)*
 
 **Measured against the PRD's success metrics:** cost **$1.05** per four-ship
 scenario-hour against a ≤ $1.10 target (**met**); `reject.schema` **0.00 %** over 776
@@ -203,6 +213,8 @@ Stated here rather than discovered during a demo.
   build if this file, the PRD and the summary disagree.)*
 
 <!-- in-engine-acceptance: 80.8 [77.4, 83.8] n=609 runs=30 -->
+
+<!-- outcome-damage-absorbed: -0.7741 [-1.0210, -0.5272] n=4 signs=4/4 SUPPORTED -->
 - **Three kills have ever been scored**, and in **all three** the target was already `wrecked`
   by SAM hits when the Su-35's missile finished it. Two were 2026-08-08 in the script-only arm;
   the third is 2026-08-09 and is **the first in a commanded arm**. **A kill by the engine's

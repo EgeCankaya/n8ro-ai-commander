@@ -121,7 +121,18 @@ $doctrineSrc = Join-Path $repoRoot "data\doctrine.txt"
 $doctrineDst = Join-Path $ReleaseRoot "data\doctrine.txt"
 $orderLog    = Join-Path $ReleaseRoot "logs\ai-commander\orders.jsonl"
 
-$stamp   = (Get-Date -Format "yyyyMMddTHHmmssZ")
+# C26 (PRD v1.8.53, §Corrections item 69(d)). This read `(Get-Date -Format "yyyyMMddTHHmmssZ")`,
+# which formats LOCAL time and then appends a literal `Z` claiming it is UTC. Every probe under
+# `tools/` has always used `.ToUniversalTime()`, so the archive carries TWO time bases under one
+# suffix, and `tools/outcome-campaign.py --since` is a LEXICAL comparison over the folder name.
+# On this machine local is UTC+3, so a scenario folder sorts three hours LATE against a probe
+# folder, and a `--since` boundary can include or exclude a run for no reason a reader can see.
+#
+# THE FIX IS ONLY FORWARD-LOOKING. Folder names already written are permanently ambiguous - the
+# offset is not recorded anywhere in them, and nothing in the archive can recover it. What makes
+# that survivable is that the one boundary it was ever used for was checked in both bases and the
+# ordering holds either way (§Corrections item 68, review finding F11).
+$stamp   = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
 $workDir = Join-Path ([System.IO.Path]::GetTempPath()) "aic-live"
 New-Item -ItemType Directory -Force -Path $workDir | Out-Null
 

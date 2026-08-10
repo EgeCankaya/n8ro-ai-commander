@@ -370,7 +370,201 @@ if ($found.Count -gt 0) {
 }
 
 # ---------------------------------------------------------------------------------------------
-# 9. Required sections for the Comprehensive tier
+# 9. The engagement-outcome figure must agree across all three documents
+# ---------------------------------------------------------------------------------------------
+# Check 8 exists because the acceptance figure went stale four times before anyone pinned it.
+# This one is pinned BEFORE the first time. The outcome interval is the most quotable number this
+# project has produced - a single paired difference on n = 4 - and it is quoted in three
+# documents that have already drifted once (README carried no outcome section at all until
+# v1.8.52, three revisions after the result was published).
+#
+# `tools/outcome-campaign.py` owns the number, exactly as `acceptance-report.py` owns check 8's.
+# This script cannot recompute it: the archive lives outside the repository by design.
+Write-Host "[Engagement-outcome sentinel]"
+
+$outcomePattern = '<!--\s*outcome-damage-absorbed:\s*([-+][\d.]+)\s*\[([-+][\d.]+),\s*([-+][\d.]+)\]\s*n=(\d+)\s*signs=(\d+)/(\d+)\s*(\w+)\s*-->'
+$outcomeFound = @()
+foreach ($entry in $sentinelFiles) {
+    if (-not (Test-Path $entry.File)) { continue }
+    $hit = @(Find-Lines (Get-Content -Path $entry.File) $outcomePattern) | Select-Object -First 1
+    if (-not $hit) {
+        Fail ("$($entry.Name) carries no outcome-damage-absorbed sentinel - run " `
+            + "``python tools/outcome-campaign.py --since 20260809T190000Z`` and paste the line it prints")
+    } else {
+        $outcomeFound += [pscustomobject]@{
+            Name = $entry.Name
+            Value = $hit.Match.Groups[0].Value.Trim()
+            Point = $hit.Match.Groups[1].Value
+            Lo = $hit.Match.Groups[2].Value
+            Hi = $hit.Match.Groups[3].Value
+            N = $hit.Match.Groups[4].Value
+        }
+    }
+}
+
+if ($outcomeFound.Count -eq $sentinelFiles.Count) {
+    $distinct = @($outcomeFound | Select-Object -ExpandProperty Value -Unique)
+    if ($distinct.Count -ne 1) {
+        Fail "the engagement-outcome sentinel differs across documents - they have drifted:"
+        foreach ($f in $outcomeFound) { Fail "    $($f.Name): $($f.Value)" }
+    } else {
+        Check ("outcome sentinel agrees across 3 documents: $($outcomeFound[0].Point) " `
+            + "[$($outcomeFound[0].Lo), $($outcomeFound[0].Hi)] (n = $($outcomeFound[0].N))")
+    }
+}
+
+# And the point estimate SHALL NOT appear bare. This is check 8's interval rule applied to a
+# result that needs it more: n = 4, and the control arm takes two distinct values in the entire
+# archive (§Corrections item 68(b)). A bare -0.7741 reads as a precise quantity. It is not one.
+if ($outcomeFound.Count -gt 0) {
+    $pt = [regex]::Escape($outcomeFound[0].Point.TrimStart('+'))
+    foreach ($entry in $sentinelFiles) {
+        if (-not (Test-Path $entry.File)) { continue }
+        foreach ($hit in (Find-Lines (Get-Content -Path $entry.File) $pt)) {
+            if ([regex]::IsMatch($hit.Line, "$pt\s*\**\s*\[")) { continue }          # carries its interval
+            if ([regex]::IsMatch($hit.Line, 'outcome-damage-absorbed:')) { continue } # the sentinel
+            if ([regex]::IsMatch($hit.Line, '\[[-+]?[\d.]+,\s*[-+]?[\d.]+\]')) { continue } # interval on the line
+            Warn ("$($entry.Name): the outcome point estimate is quoted without its interval - " `
+                + "'$($outcomeFound[0].Point)' must carry [$($outcomeFound[0].Lo), $($outcomeFound[0].Hi)]") $hit.LineNumber
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------------------------
+# 10. Every cited NUMBERED RULE must actually exist
+# ---------------------------------------------------------------------------------------------
+# This check exists because "§Scope authority rule 4" was cited TWELVE times across the PRD, the
+# register, a Lua probe and a Python analysis tool, as the sole authority for every "closed on the
+# mechanism, explicitly not on the rate" decision - and it does not exist and never has.
+# §Scope authority is three unnumbered paragraphs about the FR contract, byte-identical from this
+# file's first commit to the revision that caught it (§Corrections item 68(a), review finding F1).
+#
+# Check 12 asserts that a required section HEADING is present. Nothing asserted that a
+# cross-reference RESOLVES, so an invented authority could be cited indefinitely and each new
+# citation made the last one look established. This check closes that: a citation of the form
+# "§<Section> rule <n>" must find a section by that name AND a numbered item <n> inside it.
+Write-Host "[Cited rules resolve]"
+
+# USE versus MENTION. A citation inside a code span is a QUOTATION of a citation somebody made -
+# `§Scope authority rule 4` in a dated history entry is the document reporting what it once said,
+# not asserting it now. Those must survive verbatim: §Corrections item 66(b) is the ruling that a
+# dated entry records what was believed on its date and is not edited afterwards. So the
+# convention this check enforces is typographic and readable: BACKTICKS MEAN MENTIONED, bare text
+# means asserted. Only bare text is required to resolve.
+# BOTH SPELLINGS. Of the twelve citations of the rule that did not exist, nine read
+# "§Scope authority rule 4" and three read "§Scope authority's fourth rule". A check that caught
+# only the first spelling would have reported nine and left three standing, which is item 66's
+# defect - a count asserted rather than counted - rebuilt into the control meant to prevent it.
+$ordinals = @{ 'first' = 1; 'second' = 2; 'third' = 3; 'fourth' = 4; 'fifth' = 5;
+               'sixth' = 6; 'seventh' = 7; 'eighth' = 8; 'ninth' = 9; 'tenth' = 10 }
+$ruleCiteRe = '§([A-Z][A-Za-z]*(?: [a-z][A-Za-z]*)*) rule (\d+)'
+$ordCiteRe = "§([A-Z][A-Za-z]*(?: [a-z][A-Za-z]*)*)'s ($($ordinals.Keys -join '|')) rule"
+# The code spans are stripped FIRST and every match is taken from the stripped text, because a
+# single line here routinely carries both a live citation and a quoted one - the in-place
+# correction markers exist to put them side by side. Matching the raw line and testing the
+# stripped one reports the wrong citation, which is a lint that names an innocent line.
+$ruleCites = @()
+for ($i = 0; $i -lt $lines.Count; $i++) {
+    $stripped = [regex]::Replace($lines[$i], '`[^`]*`', '')
+    foreach ($re in @($ruleCiteRe, $ordCiteRe)) {
+        foreach ($m in [regex]::Matches($stripped, $re)) {
+            $ruleCites += [pscustomobject]@{ LineNumber = $i + 1; Match = $m }
+        }
+    }
+}
+$ruleResolved = 0
+foreach ($cite in $ruleCites) {
+    $section = $cite.Match.Groups[1].Value
+    $raw = $cite.Match.Groups[2].Value
+    $number = if ($ordinals.ContainsKey($raw)) { $ordinals[$raw] } else { [int]$raw }
+
+    # Find the heading, then the span of body text before the next heading of the same or higher
+    # level. A heading may carry a dated suffix ("#### Closing a row, from v1.8.53") and still be
+    # the section a bare "§Closing a row" names.
+    $headingIdx = -1
+    $headingLevel = 0
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $hm = [regex]::Match($lines[$i], '^(#{2,4}) ' + [regex]::Escape($section) + '(\s*[,–—-].*)?$')
+        if ($hm.Success) { $headingIdx = $i; $headingLevel = $hm.Groups[1].Value.Length; break }
+    }
+    if ($headingIdx -lt 0) {
+        Fail ("cites '§$section rule $number' but there is no section '$section' in this " `
+            + "document - an unresolvable authority") $cite.LineNumber
+        continue
+    }
+
+    $hasNumberedItem = $false
+    for ($i = $headingIdx + 1; $i -lt $lines.Count; $i++) {
+        $nh = [regex]::Match($lines[$i], '^(#{2,4}) ')
+        if ($nh.Success -and $nh.Groups[1].Value.Length -le $headingLevel) { break }
+        if ([regex]::IsMatch($lines[$i], '^\s*(\*\*)?' + $number + '\.')) { $hasNumberedItem = $true; break }
+    }
+    if (-not $hasNumberedItem) {
+        Fail ("cites '§$section rule $number', and §$section exists but has no numbered item " `
+            + "$number - the rule does not exist") $cite.LineNumber
+    } else {
+        $ruleResolved++
+    }
+}
+Check "cited numbered rules resolve: $ruleResolved of $($ruleCites.Count)"
+
+# ---------------------------------------------------------------------------------------------
+# 11. The published gate figures must agree, and the file count must be true
+# ---------------------------------------------------------------------------------------------
+# README's gate table claimed "105 files" and "162 / 162" under a heading asserting the figures
+# were current. The real numbers were 110 and 169/169 - the file count had been false since before
+# the date the table stamps itself with (§Corrections item 69(f)). It is the same defect as the
+# acceptance figure's four staleness events, in the one document a reader meets first.
+#
+# The tracked-file count is not pinned by agreement - it is COMPUTED here, so it cannot go stale.
+Write-Host "[Gate figures]"
+
+$gatePattern = '<!--\s*gate-figures:\s*unit=(\d+)/(\d+)\s+artifact-smoke=(\d+)/(\d+)\s+live-smoke=(\d+)/(\d+)\s+tracked-files=(\d+)\s*-->'
+$gateFound = @()
+foreach ($entry in @($sentinelFiles[0], $sentinelFiles[2])) {   # PRD is canonical, README quotes it
+    if (-not (Test-Path $entry.File)) { continue }
+    $hit = @(Find-Lines (Get-Content -Path $entry.File) $gatePattern) | Select-Object -First 1
+    if (-not $hit) {
+        Fail "$($entry.Name) carries no gate-figures sentinel"
+    } else {
+        $gateFound += [pscustomobject]@{
+            Name = $entry.Name
+            Value = $hit.Match.Groups[0].Value.Trim()
+            Tracked = [int]$hit.Match.Groups[7].Value
+            Unit = "$($hit.Match.Groups[1].Value)/$($hit.Match.Groups[2].Value)"
+        }
+    }
+}
+
+if ($gateFound.Count -eq 2) {
+    $distinct = @($gateFound | Select-Object -ExpandProperty Value -Unique)
+    if ($distinct.Count -ne 1) {
+        Fail "the gate-figures sentinel differs between the PRD and README - they have drifted:"
+        foreach ($f in $gateFound) { Fail "    $($f.Name): $($f.Value)" }
+    } else {
+        # The one figure that can be recomputed from a bare checkout, so it is.
+        $repoDir = Split-Path -Parent (Split-Path -Parent $Path)
+        $tracked = $null
+        try {
+            Push-Location $repoDir
+            $tracked = @(git ls-files 2>$null).Count
+        } catch { $tracked = $null } finally { Pop-Location }
+
+        if ($null -eq $tracked -or $tracked -eq 0) {
+            Warn "cannot run 'git ls-files' here - the tracked-file count went unverified"
+            Check "gate figures agree across PRD and README: unit $($gateFound[0].Unit)"
+        } elseif ($tracked -ne $gateFound[0].Tracked) {
+            Fail ("the gate-figures sentinel claims tracked-files=$($gateFound[0].Tracked) but " `
+                + "'git ls-files' counts $tracked - the published count is stale")
+        } else {
+            Check ("gate figures agree across PRD and README, and tracked-files=$tracked is " `
+                + "confirmed against git")
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------------------------
+# 12. Required sections for the Comprehensive tier
 # ---------------------------------------------------------------------------------------------
 Write-Host "[Required sections]"
 

@@ -7,7 +7,7 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # N8RO AI Entity Commander — summary
 
-**PRD version:** v1.8.52
+**PRD version:** v1.8.53
 **Date:** 2026-08-09
 **Audience:** the platform owner, and whoever picks up the next block of work.
 
@@ -203,6 +203,8 @@ headroom. Only the hosted entry of that row had ever been measured, and only the
 *Source: §Success metrics.*
 
 <!-- in-engine-acceptance: 80.8 [77.4, 83.8] n=609 runs=30 -->
+
+<!-- outcome-damage-absorbed: -0.7741 [-1.0210, -0.5272] n=4 signs=4/4 SUPPORTED -->
 
 ***(v1.8.36 — the in-engine figure now has an owner and a pin.)*** It had gone stale **four times**,
 always the same way: a run was archived, nobody recomputed, and the old number was requoted until a
