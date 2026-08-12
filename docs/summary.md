@@ -7,7 +7,7 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # N8RO AI Entity Commander — summary
 
-**PRD version:** v1.8.54
+**PRD version:** v1.8.55
 **Date:** 2026-08-12
 **Audience:** the platform owner, and whoever picks up the next block of work.
 
@@ -253,7 +253,7 @@ worth deploying?" gets no answer from this document.** The runs cost ~35 minutes
 reopening the question needs only an owner who wants it.
 
 **And one thing worth keeping straight, because confusing it is what made the work feel endless:**
-**§Corrections grows monotonically and is a history, not a backlog.** It is at 70 items and will only
+**§Corrections grows monotonically and is a history, not a backlog.** It is at 71 items and will only
 get longer. The register is the backlog, and it is now at zero.
 
 ## What is still open — and what is dormant, which is not the same thing
