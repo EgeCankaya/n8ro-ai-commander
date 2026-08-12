@@ -53,17 +53,17 @@ revisit condition you can test without running anything.
 — **thirteen revisions after the PRD closed both at v1.8.41.** Same failure as §Authorization below:
 the README lagging the PRD on a load-bearing claim, §Corrections items 68(e) and 69(f).)*
 
-**Gates, all green as of 2026-08-12 — every figure re-run for that revision, not requoted:**
+**Gates, all green as of 2026-08-12 (PRD v1.8.55) — every figure re-run for that revision, not requoted:**
 
 | Suite | Result |
 |---|---|
-| Unit | **177 / 177** |
+| Unit | **185 / 185** |
 | Deployed-artifact smoke | **30 / 30** |
 | Live three-arm scenario smoke | **22 checks, 0 failed** (twice, 2026-08-09 — *not* re-run at v1.8.54; it needs a server and a ~35 min run) |
 | `tools/lint-prd.ps1` · `tools/check-artifacts.ps1` | 15 checks, 0 errors, 0 warnings · 116 files, PASS |
 | `tools/deployment-check.ps1` | **6 checked, 0 failed**, 4 manual — against a torn-down tree |
 
-<!-- gate-figures: unit=177/177 artifact-smoke=30/30 live-smoke=22/0 tracked-files=116 -->
+<!-- gate-figures: unit=185/185 artifact-smoke=30/30 live-smoke=22/0 tracked-files=116 -->
 
 *(v1.8.53 — **this table was wrong and had been for some time.** It said `162 / 162` and
 `105 files` under a heading asserting the figures were current; the real numbers were `169 / 169`
@@ -278,11 +278,27 @@ a PRD revision **and** an `egress.md` revision, made before the next hosted requ
 ## Prerequisites
 
 This repository contains no SDK code and **cannot be built without a licensed N8RO
-release installed.** You need:
+release installed.** An Anthropic API key is neither sufficient nor the binding constraint. You need:
 
 - An N8RO release tree (the folder containing `setup.cmd`)
 - Visual Studio 2026 (v18.x) with the C++ workload
 - `Release | x64`, C++17 (`stdcpp17`)
+
+**Validated against `n8ro@2.1.144`** — `n8ro-core@0.1.90`, `n8ro-schema@1.0.43`, `n8ro-data@2.0.80`,
+`n8ro-sim@2.0.140`.
+
+**That is a pin, not a bound.** `get_plugin_signature()` returns `"N8RO_PLUGIN_V1"`, the only
+compatibility gate the host applies, and it is far too coarse to catch a schema or ABI change. On any
+other release expect to **rebuild** — the SDK interfaces pass `std::string`, `std::optional` and
+`std::function` across the DLL boundary — then check two lines in the startup log:
+
+- `runtime-column probe pass` — the AIC-ARCH-4 probe resolved all six fatal leaves the snapshot
+  depends on. A **fail** names the leaf, and the commander stays disabled by design.
+- no `probe.warning` — a warning means `componentLifecycle/health` stopped resolving, so the guard
+  that stops the commander ordering a wrecked airframe is muted. **The commander still runs:** that
+  is deliberate, not an oversight (PRD §Corrections item 71(b)).
+
+`tools/deployment-check.ps1` reports drift from the pin against the tree's own `components.xml`.
 
 ## Build
 
@@ -321,7 +337,7 @@ Expected: `create_plugin`, `destroy_plugin`, `get_plugin_signature`.
 
 | Suite | Command | Needs |
 |---|---|---|
-| **Unit (177)** | build `tests\ai-commander-tests.vcxproj`, run `tests\bin\release\ai-commander-tests.exe` **from the release root** | SDK only — **no server, no network** |
+| **Unit (185)** | build `tests\ai-commander-tests.vcxproj`, run `tests\bin\release\ai-commander-tests.exe` **from the release root** | SDK only — **no server, no network** |
 | ASan | same, with `/p:EnableASAN=true /p:IntDir=x64\asan\ /p:OutDir=bin\asan\`. Run it from a shell that has sourced `dev\setup-dev.cmd`, or the ASan runtime DLL will not resolve | SDK only |
 | **Deployed-artifact smoke (30)** | `tests\smoke\run-smoke.ps1 -ReleaseRoot C:\N8RO` | a deployed DLL |
 | **Live** gate harness | build `tests\live\ai-commander-live-tests.vcxproj`, run from the repo root: `--mode all --orders 200` | **a running inference server** |

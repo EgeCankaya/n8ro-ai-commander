@@ -409,6 +409,12 @@ void AiCommanderPlugin::runProbeIfPending() {
         + toString(report.result) + " - " + report.detail;
     if (report.result == ProbeResult::Pass) {
         N8RO_LOG_INFO(verdict, kLogCategory);
+        // A warning never changes the verdict and never disables the commander (AIC-ARCH-4,
+        // v1.8.55). It is logged separately so that "probe pass" stays literally true while the
+        // muted guard it reports does not go unannounced.
+        if (!report.warning.empty()) {
+            N8RO_LOG_WARNING(std::string("ai-commander: ") + report.warning, kLogCategory);
+        }
     } else {
         // A failed probe disables the commander. It does NOT fall back to a zero velocity: a
         // fabricated stationary own-ship would degrade every order downstream with no failing test

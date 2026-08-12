@@ -134,6 +134,47 @@ $stub = Join-Path $ReleaseRoot "data\resources\missions\stubs\aiCommander.lua"
 Item "aiCommander.lua stub present (regenerate by running the engine once)" (Test-Path $stub) `
     $stub
 
+# -- 4b. release version vs the pin ------------------------------------------------------------------
+# PRD §Dependencies pins the release this plugin was validated against (v1.8.55, §Corrections item
+# 71(d)). Before that pin existed the version appeared only inside an incident doc, so an upgrader had
+# no way to tell whether a probe warning meant "the schema moved" or "it was always like this".
+#
+# This REPORTS drift rather than failing on it. A newer tree is the expected state of an upgrade, not
+# an error, and the whole purpose of the line is to tell an upgrader what moved. What a mismatch does
+# oblige is a rebuild and an AIC-ARCH-4 probe pass: get_plugin_signature() returns "N8RO_PLUGIN_V1",
+# which is the only gate the host applies and is far too coarse to catch a schema or ABI change.
+$pinnedRelease = "2.1.144"
+$componentsXml = Join-Path $ReleaseRoot "components.xml"
+$treeRelease = $null
+if (Test-Path $componentsXml) {
+    try {
+        $xml = [xml](Get-Content -Path $componentsXml -Raw)
+        $treeRelease = @($xml.SelectNodes("//Package") |
+            Where-Object { $_.Name -eq "com.n8ro.core" } |
+            ForEach-Object { $_.Version }) | Select-Object -First 1
+        if (-not $treeRelease) {
+            # Layout differs between installer revisions; fall back to the first Version element.
+            $treeRelease = @($xml.SelectNodes("//Version") | ForEach-Object { $_.InnerText }) |
+                Select-Object -First 1
+        }
+    } catch { $treeRelease = $null }
+}
+
+if (-not $treeRelease) {
+    Write-Host "  [INFO] release version                : components.xml unreadable - version unverified"
+} elseif ($treeRelease -eq $pinnedRelease) {
+    Write-Host "  [INFO] release version                : n8ro@$treeRelease - matches the PRD pin"
+} else {
+    Write-Host "  [INFO] release version                : n8ro@$treeRelease, PIN IS n8ro@$pinnedRelease - DRIFT" `
+        -ForegroundColor Yellow
+    Write-Host "         A different release requires a rebuild (std types cross the DLL boundary) and" `
+        -ForegroundColor DarkGray
+    Write-Host "         an AIC-ARCH-4 probe pass. Check the startup log for 'runtime-column probe pass'" `
+        -ForegroundColor DarkGray
+    Write-Host "         and for any 'probe.warning' naming a leaf that stopped resolving." `
+        -ForegroundColor DarkGray
+}
+
 # -- 5. order-log directory ---------------------------------------------------------------------------
 $logDir = Join-Path $ReleaseRoot "logs\ai-commander"
 $writable = $false
