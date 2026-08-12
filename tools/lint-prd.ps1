@@ -580,6 +580,83 @@ foreach ($section in $required) {
 Check "all $($required.Count) required sections present"
 
 # ---------------------------------------------------------------------------------------------
+# 15. README's authorization section must name the standing grant
+# ---------------------------------------------------------------------------------------------
+# For six revisions README's §Authorization read "the hosted backend cannot ship" and "there is
+# therefore no authorization under which an operator other than the measurer may turn the hosted
+# backend on" - both made false by the standing grant of 2026-08-09 (PRD v1.8.48). Over the same
+# period the status table showed C23 and C17 open, thirteen revisions after both closed.
+#
+# This is the README-lags-PRD failure of §Corrections items 68(e) and 69(f), and v1.8.54 is its
+# third occurrence in the one document a reader meets first - so it stops being a rule someone has
+# to remember. The check is deliberately narrow: it does not validate the section's prose, only that
+# it still names the revision that granted what it describes, that the specific falsified sentences
+# have not come back, and that the one boundary the grant does NOT release is stated.
+Write-Host "[README authorization currency]"
+
+$readmePath = Join-Path (Split-Path -Parent $repoRootForDocs) "README.md"
+if (-not (Test-Path $readmePath)) {
+    Warn "README.md not found - the authorization-currency check went unrun"
+    Check "README authorization: unchecked"
+} else {
+    $readmeText = Get-Content -Path $readmePath -Raw
+    $authBlock = [regex]::Match($readmeText, '(?sm)^##\s+Authorization.*?(?=^##\s)')
+    $authFailures = 0
+
+    if (-not $authBlock.Success) {
+        Fail "README.md has no '## Authorization' section - the egress posture is the one thing a reader must not have to infer"
+        $authFailures++
+    } else {
+        # Dated correction markers QUOTE the sentences they retire - that is what a correction marker
+        # is for, and this project keeps superseded text in place on purpose ("the original text is
+        # kept because it is the argument that got the decision made"). Scanning them would make the
+        # honest repair fail the check and reward deleting the history instead, so they are stripped
+        # before the revoked-claim scan. Only italic parentheticals that announce themselves as
+        # corrections are removed; ordinary prose is scanned in full.
+        $block = [regex]::Replace(
+            $authBlock.Value,
+            '(?s)\*\(\s*\*\*Corrected.*?\)\*',
+            '')
+
+        # The grant actually in force. Bump both if a later grant supersedes v1.8.48.
+        if ($block -notmatch 'v1\.8\.48') {
+            Fail ("README's §Authorization does not cite the standing grant's PRD revision " `
+                + "(v1.8.48) - it went stale for six revisions once already")
+            $authFailures++
+        }
+        if ($block -notmatch '2026-08-09') {
+            Fail "README's §Authorization does not carry the standing grant's date (2026-08-09)"
+            $authFailures++
+        }
+
+        # The sentences the grant falsified, and the count it obsoleted.
+        $revoked = @(
+            'the hosted backend cannot ship',
+            'no authorization under which an operator other than the measurer',
+            'All six egress grants to date'
+        )
+        foreach ($s in $revoked) {
+            if ($block -match [regex]::Escape($s)) {
+                Fail "README's §Authorization still asserts a claim the standing grant falsified: `"$s`""
+                $authFailures++
+            }
+        }
+
+        # The one boundary the standing grant explicitly does NOT release. Anyone deciding whether to
+        # share this repository must not have to reach the PRD to find that out.
+        if ($block -notmatch 'does not authorize publication') {
+            Fail ("README's §Authorization must state that the grant does NOT authorize publication " `
+                + "of the repository - it is the boundary most likely to be assumed released")
+            $authFailures++
+        }
+    }
+
+    if ($authFailures -eq 0) {
+        Check "README authorization cites the standing grant (v1.8.48, 2026-08-09) and its publication boundary"
+    }
+}
+
+# ---------------------------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------------------------
 Write-Host ""

@@ -32,7 +32,7 @@ anything here. `docs/summary.md` carries no number that is not also in the PRD, 
 | 0 | Scaffold, repo, empty `aiCommander` namespace | **closed** |
 | 1a | Full pipeline on the `stub` / `replay` backends | **closed** |
 | 1b | `local` adapter against Ollama | **closed** — every gate item has a result |
-| 2 | `claude` adapter | **ran** — adapter complete, measured, and exercised in-engine. **Not formally closed**, and it cannot ship: see *Authorization* below |
+| 2 | `claude` adapter | **ran** — adapter complete, measured, and exercised in-engine. **Not formally closed**, but it may ship: the standing egress grant of 2026-08-09 authorizes the hosted backend as a product. See *Authorization* below |
 | 3 | Diagnostics on what Phase 2 carried | **closed** — four results, of which three are negative, null, or a refusal |
 
 **The open-item register** (PRD §Carried out of Phase 3) has three states, not two. A row that
@@ -41,23 +41,29 @@ revisit condition you can test without running anything.
 
 | # | State | Item |
 |---|---|---|
-| **C23** | **open** | The model orders every `hold` at the aircraft's own position; the aircraft stops there. **Fix specified in v1.8.36** (AIC-ORD-2 clauses 7 and 8), not yet coded |
-| **C17** | **open** | Acceptance was measured by two instruments under one name. **v1.8.36 splits the row and gives the in-engine figure a tool and a lint pin.** The bar stays on the fixtures, by owner decision |
+| ~~C27~~ | closed | *(v1.8.54 — the commander paid for four orders to an aircraft that had been `wrecked` for over a minute. **Opened and closed in one revision**; the guard is built and tested, and has not yet been observed firing in-engine)* |
+| ~~C23~~ | closed | *(v1.8.41 — AIC-ORD-2 clauses 7 and 8 coded and pinned by six offline tests, demonstrated under a commander, residual named)* |
+| ~~C17~~ | closed | *(v1.8.41 — closed as a stated position on C8's precedent; the bar stays on the fixtures, by owner decision)* |
 | ~~C8~~ | closed | *(v1.8.36 — Haiku is and will remain the default, so `maxTokens = 512` is correct. Revisit condition kept as a tripwire)* |
 | ~~C6~~ | cancelled | *(v1.8.36 — not answered; **nothing here is blocked on it**, and §Out of scope already specifies both branches)* |
 
-Everything else in the register is closed. **Two live rows.**
+**The register is empty. No open rows, no deferred rows.**
 
-**Gates, all green as of 2026-08-10:**
+*(**Corrected v1.8.54.** This table said C23 and C17 were **open** and closed with *"Two live rows"*
+— **thirteen revisions after the PRD closed both at v1.8.41.** Same failure as §Authorization below:
+the README lagging the PRD on a load-bearing claim, §Corrections items 68(e) and 69(f).)*
+
+**Gates, all green as of 2026-08-12 — every figure re-run for that revision, not requoted:**
 
 | Suite | Result |
 |---|---|
-| Unit | **169 / 169** |
+| Unit | **177 / 177** |
 | Deployed-artifact smoke | **30 / 30** |
-| Live three-arm scenario smoke | **22 checks, 0 failed** (twice, 2026-08-09) |
-| `tools/lint-prd.ps1` · `tools/check-artifacts.ps1` | 14 checks, 0 errors, 0 warnings · 111 files, PASS |
+| Live three-arm scenario smoke | **22 checks, 0 failed** (twice, 2026-08-09 — *not* re-run at v1.8.54; it needs a server and a ~35 min run) |
+| `tools/lint-prd.ps1` · `tools/check-artifacts.ps1` | 15 checks, 0 errors, 0 warnings · 116 files, PASS |
+| `tools/deployment-check.ps1` | **6 checked, 0 failed**, 4 manual — against a torn-down tree |
 
-<!-- gate-figures: unit=169/169 artifact-smoke=30/30 live-smoke=22/0 tracked-files=111 -->
+<!-- gate-figures: unit=177/177 artifact-smoke=30/30 live-smoke=22/0 tracked-files=116 -->
 
 *(v1.8.53 — **this table was wrong and had been for some time.** It said `162 / 162` and
 `105 files` under a heading asserting the figures were current; the real numbers were `169 / 169`
@@ -226,13 +232,45 @@ Stated here rather than discovered during a demo.
   refuted; nothing about the commander's value is established in either direction, and the
   script-only arm is near-deterministic so the repeat counts for less than it looks.
 
-## Authorization — the hosted backend cannot ship
+## Authorization — the hosted backend may ship, under a standing grant
 
 `commander.backend = claude` reaches the network and transmits real scenario state.
-All six egress grants to date authorize **measurement**, each scoped to named experiments,
-and a later grant does not inherit an earlier one's boundary. **There is therefore no
-authorization under which an operator other than the measurer may turn the hosted backend
-on.** `claude.enabled` defaults false and is independent of `commander.backend`.
+
+**The standing hosted-egress authorization is in force — granted by the owner 2026-08-09 and
+recorded in PRD v1.8.48.** It is the seventh egress authorization and the first that is not a
+measurement grant: the six before it each authorize a named experiment, and a later grant does not
+inherit an earlier one's boundary. This one authorizes **running the hosted backend as a product**,
+and it answers three decisions separately so any one can be withdrawn without the others:
+
+| Decision | Recorded as |
+|---|---|
+| May real scenario state from an arbitrary deployed mission leave the machine, standingly? | **Yes** |
+| One authorization for an indefinite series, or a record per run? | **Standing** — no PRD revision before a hosted run |
+| Who holds it — the owner personally, or anyone in possession of the release tree? | **The release tree.** `claude.enabled = true` in a deployed config is sufficient authorization |
+
+**It was recorded after its enforcement was built, not before.** `claude.maxSpendUsd` latches the
+hosted backend off at a configured ceiling (default **$1.00 per engine process**), fail-closed at or
+below zero. Note the units: it is **per process**, so it does not bound running the engine a hundred
+times.
+
+**Two obligations travel with the grant and are the deployer's, not the owner's.** Re-review the
+transmitted-field list against the mission **actually deployed** — the field list is a property of
+the snapshot builder, but which scenario's values fill it is a property of whoever deploys. And
+`tools/deployment-check.ps1` prints both as `[MANUAL]` rather than auto-passing them.
+
+**What the grant does not cover.** It does not change a shipped default — `commander.enabled` and
+`claude.enabled` are both `false` in the shipped config, and a standing authorization is permission
+to turn something on rather than turning it on. It does not authorize spending past the ceiling. It
+does not retroactively cover anything before 2026-08-09. And **it does not authorize publication of
+this repository**, which needs the same class of decision and has not been made.
+
+*(**Corrected v1.8.54.** This section previously read "the hosted backend cannot ship" and "there is
+therefore no authorization under which an operator other than the measurer may turn the hosted
+backend on" — **six revisions after the standing grant made both sentences false.** A reader meeting
+this project at its README was being told they may not do the thing v1.8.48's decision 3 explicitly
+permits. It is the README-lags-PRD failure of §Corrections items 68(e) and 69(f), third occurrence,
+so `tools/lint-prd.ps1` check 15 now fails the build if this section stops naming the grant's
+revision.)*
 
 `docs/egress.md` enumerates every field that leaves the machine. Any change to that set is
 a PRD revision **and** an `egress.md` revision, made before the next hosted request.
@@ -283,7 +321,7 @@ Expected: `create_plugin`, `destroy_plugin`, `get_plugin_signature`.
 
 | Suite | Command | Needs |
 |---|---|---|
-| **Unit (156)** | build `tests\ai-commander-tests.vcxproj`, run `tests\bin\release\ai-commander-tests.exe` **from the release root** | SDK only — **no server, no network** |
+| **Unit (177)** | build `tests\ai-commander-tests.vcxproj`, run `tests\bin\release\ai-commander-tests.exe` **from the release root** | SDK only — **no server, no network** |
 | ASan | same, with `/p:EnableASAN=true /p:IntDir=x64\asan\ /p:OutDir=bin\asan\`. Run it from a shell that has sourced `dev\setup-dev.cmd`, or the ASan runtime DLL will not resolve | SDK only |
 | **Deployed-artifact smoke (30)** | `tests\smoke\run-smoke.ps1 -ReleaseRoot C:\N8RO` | a deployed DLL |
 | **Live** gate harness | build `tests\live\ai-commander-live-tests.vcxproj`, run from the repo root: `--mode all --orders 200` | **a running inference server** |

@@ -7,8 +7,8 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # N8RO AI Entity Commander — summary
 
-**PRD version:** v1.8.53
-**Date:** 2026-08-09
+**PRD version:** v1.8.54
+**Date:** 2026-08-12
 **Audience:** the platform owner, and whoever picks up the next block of work.
 
 > **This document carries no number that is not also in `docs/prd.md`.** Every figure below cites the
@@ -253,23 +253,44 @@ worth deploying?" gets no answer from this document.** The runs cost ~35 minutes
 reopening the question needs only an owner who wants it.
 
 **And one thing worth keeping straight, because confusing it is what made the work feel endless:**
-**§Corrections grows monotonically and is a history, not a backlog.** It is at 57 items and will only
+**§Corrections grows monotonically and is a history, not a backlog.** It is at 70 items and will only
 get longer. The register is the backlog, and it is now at zero.
 
 ## What is still open — and what is dormant, which is not the same thing
 
-***(v1.8.33 — this list said five for several revisions and the honest answer is two.)*** The
-register recorded only **open** and **closed**, so a row nobody should touch and a live question
-looked identical. It now records **three** states, and a **DEFERRED** row must carry a revisit
-condition a reader can test without running anything. *Source: §Carried out of Phase 3;
-§Corrections item 49.*
+***(v1.8.54 — THE REGISTER IS EMPTY, AND THIS SECTION SAID OTHERWISE FOR THIRTEEN REVISIONS.*** It
+listed **C23** and **C17** as *"OPEN — two rows"* while the paragraph directly above it said the
+register *"is now at zero"* — the two claims sat four lines apart and contradicted each other. Both
+rows closed at **v1.8.41**. This is the same README/summary-lags-PRD failure as §Corrections items
+68(e) and 69(f), and v1.8.54 records it as that failure's third and fourth occurrences.)*
 
-**OPEN — two rows, and both are decisions rather than engineering.**
+**OPEN — none. DEFERRED — none. CLOSED or CANCELLED — every row.**
+
+The register records **three** states, and a **DEFERRED** row must carry a revisit condition a reader
+can test without running anything. *Source: §Carried out of Phase 3; §Corrections item 49.*
+
+**CLOSED v1.8.54 — C27, the one row opened since the phased work ended.** The commander requested,
+paid for and published **four orders to an aircraft that had been `wrecked` for over a minute**:
+`RedSu35_01` hit the tier at t+50.0 s of the 2026-08-12 run and physics did not remove it until
+t+130.0 s, and the last accepted order reasoned *"defend to break geometry and preserve aircraft"*
+about it. `wrecked` is a damage tier, not a removal — the entity keeps its transform and velocity
+columns all the way down, so every layer behaved correctly on inputs that no longer described a
+flyable aircraft, and **`OrderSnapshot` carries no health field**, so the model was never shown the
+tier. Fixed by a dispatch-loop guard at `wrecked`/`destroyed`; `disabled` deliberately still gets
+orders, being a mission kill rather than a lost airframe. **Eight offline tests, two confirmed to
+fail under deliberate mutation. Not yet observed firing in-engine.** *Source: §Corrections item 70.*
+
+**Two rows that were listed here as open, and closed thirteen revisions ago:**
 
 | # | Item |
 |---|---|
 | **C23** | **The model orders every `hold` at the aircraft's own position; the aircraft stops there**, after which every order is rejected for copying its own stopped speed. Not a new defect — the aircraft used to die before it could sit in it. *(v1.8.37 — **THE FIX IS IMPLEMENTED**: AIC-ORD-2 clauses 7 and 8, 162/162, three of six new tests falsified against the pre-fix script. **The row stays open because the offline suite asserts the command and not the achieved speed** — this archive shows a commanded 320 m/s producing a sustained ~150. Closing needs a **~5-minute run that costs nothing and is blocked on nothing**; the row also still carries the doctrine correction owed since v1.8.36 and five judgement calls for the owner. **And the onset is not what v1.8.35 said**: the aircraft flies 3.2–4.4 km out at 320 m/s and collapses on re-entering the ordered orbit radius. See `docs/c23-report.md`)* ***(v1.8.38 — the confirming run was made and both questions are answered: a distant hold stalls the aircraft too, and the recovery is achieved in **3.1 s** against clause 8's twenty. The run also caught a bad threshold in the fix. **What is left on this row is governance, not engineering.**)*** |
 | **C17** | Acceptance is measured by two instruments and only one is gated. **Owner-decided 2026-08-06: the bar stays on the fixtures.** The row stays open because the decision does not make the instruments agree |
+
+***(Both of the above CLOSED at v1.8.41** — C23 on the mechanism, demonstrated under a commander with
+its residual named; C17 as a stated position on C8's precedent. The row text is kept as written
+because it is the argument that got each decision made, but neither is open and neither has been
+since. §Corrections item 57.)*
 
 **CLOSED AND CANCELLED v1.8.36 — two owner decisions, and the register is down to two live rows.**
 
@@ -290,11 +311,14 @@ what caught it — and 11 waypoint-carrying orders support no rate at all. **It 
 forward: a bounded negative at n = 11 must never lead a summary of this project**, which is what the
 pre-v1.8.32 README did while C21 appeared nowhere in it. *Source: §Corrections items 48(e), 49(b).*
 
-**Two checklist boxes are unticked and both are governance** *(v1.8.36 — it was three; OQ-3's was
-cancelled rather than answered)*: repository visibility is confirmed private (checked 2026-08-07),
-and there is **still no standing authorization for hosted egress outside a measurement grant** — so
-`commander.backend = claude` cannot ship to anyone, which is the right posture for a project still
-measuring itself and is a decision someone has to make. *Source: §Review checklist.*
+**Every checklist box is ticked** *(v1.8.54 — this paragraph said two were unticked and both were
+governance; the second of them was **granted 2026-08-09** and recorded at v1.8.48, five revisions
+before this text was last touched)*: repository visibility is confirmed private (checked 2026-08-07),
+and the **standing hosted-egress authorization is in force** — it authorizes running the hosted
+backend as a product, is held by **the release tree** rather than by the owner personally, and was
+recorded only after `claude.maxSpendUsd` existed to enforce a ceiling. **One boundary it does not
+release: publication of this repository**, which needs the same class of decision and has not been
+made. *Source: §Review checklist; §The standing hosted-egress authorization.*
 
 ---
 
