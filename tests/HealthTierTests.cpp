@@ -77,21 +77,27 @@ AIC_TEST(HealthTierResolvesFromTheTextColumnWhenTheOrdinalColumnDoesNot) {
     return true;
 }
 
-// The ordinal column wins when both resolve. Stated as a test rather than left to reading order:
-// which column is authoritative is a decision, and a later refactor that flips it should fail here.
-AIC_TEST(HealthTierPrefersTheOrdinalColumnWhenBothResolve) {
-    int nameReads = 0;
-    const HealthNameReader countingName =
-        [&nameReads](const std::string&) -> std::optional<std::string> {
-            ++nameReads;
-            return "destroyed";
+// The TEXT column wins when both resolve, and this test was inverted deliberately on 2026-08-13.
+//
+// It previously asserted the opposite and said "a later refactor that flips it should fail here",
+// which is exactly what it did — so the flip is recorded rather than slipped through. The reason is
+// measured, not aesthetic: on the validated release the enum is a text column, and trying the int
+// accessor first makes the SDK log `DynamicStore::getInt: handle is not an int field` at ERROR on
+// every single read before the fallback succeeds. Which column is authoritative is still a decision;
+// it is now the one that does not spend an ERROR line per cadence tick to reach the same answer.
+AIC_TEST(HealthTierPrefersTheTextColumnWhenBothResolve) {
+    int ordinalReads = 0;
+    const HealthOrdinalReader countingOrdinal =
+        [&ordinalReads](const std::string&) -> std::optional<std::int64_t> {
+            ++ordinalReads;
+            return 0;   // "nominal" - deliberately disagreeing with the name below
         };
 
     const std::optional<HealthTier> tier =
-        readHealthTierWith("RedSu35_01", ordinalOf(0), countingName);
-    AIC_EXPECT_TRUE(tier.has_value() && *tier == HealthTier::Nominal,
-                    "the ordinal column is authoritative");
-    AIC_EXPECT_EQ(nameReads, 0, "the text column must not be read once the ordinal resolved");
+        readHealthTierWith("RedSu35_01", countingOrdinal, nameOf("destroyed"));
+    AIC_EXPECT_TRUE(tier.has_value() && *tier == HealthTier::Destroyed,
+                    "the text column is authoritative");
+    AIC_EXPECT_EQ(ordinalReads, 0, "the int column must not be read once the text column resolved");
     return true;
 }
 
@@ -124,20 +130,29 @@ AIC_TEST(HealthTierRejectsValuesOutsideTheSchemasDeclaredSet) {
     return true;
 }
 
-// An out-of-range ordinal must not fall through to the text column and resolve there. The ordinal
-// resolving at all means the column exists and this build cannot read it; consulting the other
-// column would report a tier on a value the schema does not declare.
-AIC_TEST(HealthTierDoesNotFallBackToTextAfterAnOutOfRangeOrdinal) {
-    int nameReads = 0;
-    const HealthNameReader countingName =
-        [&nameReads](const std::string&) -> std::optional<std::string> {
-            ++nameReads;
-            return "nominal";
+// An undeclared NAME must not fall through to the ordinal column and resolve there. The text column
+// resolving at all means it exists and this build cannot interpret its value; consulting the other
+// column would report a tier on a value the schema does not declare. This is the mirror of the rule
+// that used to guard the ordinal path, and it moved with the precedence.
+AIC_TEST(HealthTierDoesNotFallBackToTheOrdinalAfterAnUndeclaredName) {
+    int ordinalReads = 0;
+    const HealthOrdinalReader countingOrdinal =
+        [&ordinalReads](const std::string&) -> std::optional<std::int64_t> {
+            ++ordinalReads;
+            return 0;
         };
 
-    AIC_EXPECT_FALSE(readHealthTierWith("RedSu35_01", ordinalOf(7), countingName).has_value(),
-                     "an out-of-range ordinal is unknown, not a text lookup");
-    AIC_EXPECT_EQ(nameReads, 0, "the text column must not be consulted after an out-of-range ordinal");
+    AIC_EXPECT_FALSE(readHealthTierWith("RedSu35_01", countingOrdinal, nameOf("obliterated")).has_value(),
+                     "an undeclared name is unknown, not an ordinal lookup");
+    AIC_EXPECT_EQ(ordinalReads, 0, "the int column must not be consulted after an undeclared name");
+    return true;
+}
+
+// And the surviving half of the old rule: an out-of-range ORDINAL is still unknown rather than a
+// tier, on the path where the text column did not resolve at all.
+AIC_TEST(HealthTierRejectsAnOutOfRangeOrdinalWhenTextDidNotResolve) {
+    AIC_EXPECT_FALSE(readHealthTierWith("RedSu35_01", ordinalOf(7), kNoName).has_value(),
+                     "an out-of-range ordinal is unknown, whichever column reached it");
     return true;
 }
 

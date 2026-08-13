@@ -41,6 +41,37 @@ std::optional<HealthTier> readHealthTierWith(
         return std::nullopt;
     }
 
+    // TEXT FIRST, and the order is empirical rather than a preference.
+    //
+    // Both columns are still consulted, because nothing in ComponentFieldAccess.h or the schema
+    // reference specifies how an enum column is stored — that is why this seam exists. But on the
+    // validated release (n8ro@2.1.144, §Dependencies) the column is TEXT, and asking for the int
+    // column first makes the SDK emit
+    //
+    //     [ERROR] (DynamicStore) DynamicStore::getInt: handle is not an int field
+    //
+    // on EVERY read before the fallback succeeds — once per commanded entity per cadence tick, at
+    // ERROR, in the same log an operator reads to decide whether a run is healthy. Measured on the
+    // 2026-08-12 22:27Z headless run. The guard worked the whole time; it simply announced a failure
+    // each time it did, which is the muted-warning failure this project argues against wearing the
+    // opposite costume — a real ERROR line that means nothing, teaching the reader to skip ERROR.
+    //
+    // Reversing the order costs a tree whose column IS ordinal nothing: that path is still tried,
+    // one lookup later. It buys silence on the tree this plugin is pinned to and tested against.
+    if (readName) {
+        if (const std::optional<std::string> name = readName(entityId)) {
+            for (std::size_t i = 0; i < kHealthTierNames.size(); ++i) {
+                if (*name == kHealthTierNames[i]) {
+                    return static_cast<HealthTier>(i);
+                }
+            }
+            // A name the schema does not declare. The column RESOLVED, so it exists and this build
+            // cannot interpret its value; consulting the other column would report a tier for a
+            // value the schema does not declare. Unknown, and deliberately NOT read as wrecked.
+            return std::nullopt;
+        }
+    }
+
     if (readOrdinal) {
         if (const std::optional<std::int64_t> ordinal = readOrdinal(entityId)) {
             if (*ordinal < 0 || static_cast<std::size_t>(*ordinal) >= kHealthTierNames.size()) {
@@ -50,17 +81,6 @@ std::optional<HealthTier> readHealthTierWith(
                 return std::nullopt;
             }
             return static_cast<HealthTier>(static_cast<std::size_t>(*ordinal));
-        }
-    }
-
-    if (readName) {
-        if (const std::optional<std::string> name = readName(entityId)) {
-            for (std::size_t i = 0; i < kHealthTierNames.size(); ++i) {
-                if (*name == kHealthTierNames[i]) {
-                    return static_cast<HealthTier>(i);
-                }
-            }
-            // A name the schema does not declare. Same reasoning as an out-of-range ordinal.
         }
     }
 
