@@ -87,18 +87,22 @@ check 11 already computed `tracked-files` — counting `AIC_TEST(` across the .c
 **Measured against the PRD's success metrics:** cost **$1.05** per four-ship
 scenario-hour against a ≤ $1.10 target (**met**); `reject.schema` **0.00 %** over 776
 orders across two backends and three models (**met**); order acceptance **100 %** on the
-synthetic-fixture soaks and **80.8 % [77.4, 83.8]** in-engine against real scenario
-state — **90.9 % [88.2, 93.2]** once the two non-model-failure classes are removed
-*(v1.8.46 — was 71.1 % and 85.8 %; **the outcome campaign's four three-arm runs plus the
-clause 8 probe added 211 resolved orders, and the C23 stall-floor class did not grow by a
-single sample — still 58, every one of them predating the fix**)*
+synthetic-fixture soaks and **82.6 % [79.6, 85.4]** in-engine against real scenario
+state — **91.6 % [89.2, 93.7]** once the two non-model-failure classes are removed
+*(v1.8.57 — was 80.8 % and 90.9 %; regenerated over 702 resolved orders across 37 runs.
+**The C23 stall-floor class did not grow by a single sample — still 58, every one of them
+predating the fix**, now the seventh consecutive revision that prediction has held. The
+population includes three v1.8.57 verification runs, two of them 20 s — see PRD item 73(j))*
 (**two instruments, two named rows — see C17**); local 7B round-trip p95 **7,975 ms** against a
 ≤ 20 s target (**met**), hosted Haiku p95 **4,615 ms** over the 240-order soak against
 ≤ 2.5 s (**missed**, and not control-loop-binding — the 20 s cadence absorbs a p99 of
 7,099 ms). Plugin frame cost p95 **0.0059 ms**, max **0.5334 ms** over 12,001 frames
 against a 5 ms bar.
 
-Total spend across six owner-authorized egress grants: **≈$2.57 of $5**.
+Total spend across seven owner-authorized egress grants: **≈$2.63 of $5**
+*(v1.8.57 — was "six grants" and "≈$2.57". The count had been stale since the standing grant of
+2026-08-09 made it seven, which §Authorization below states correctly; the total moved by the
+≈$0.0557 of hosted verification this revision spent.)*
 
 ## The finding that matters most
 
@@ -229,7 +233,7 @@ Stated here rather than discovered during a demo.
   so `tools/acceptance-report.py` now owns the number and `tools/lint-prd.ps1` fails the
   build if this file, the PRD and the summary disagree.)*
 
-<!-- in-engine-acceptance: 80.8 [77.4, 83.8] n=609 runs=30 -->
+<!-- in-engine-acceptance: 82.6 [79.6, 85.4] n=702 runs=37 -->
 
 <!-- outcome-damage-absorbed: -0.7741 [-1.0210, -0.5272] n=4 signs=4/4 SUPPORTED -->
 - **Three kills have ever been scored**, and in **all three** the target was already `wrecked`
