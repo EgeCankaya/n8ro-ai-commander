@@ -169,8 +169,20 @@ if ($Backend -eq "claude") {
     Write-Host "               the same field set as every hosted run since v1.8.3, but drawn from"
     Write-Host "               RedSu35_01 in the shipped 'Mariana Shield' scenario rather than from"
     Write-Host "               the six synthetic LiveMain fixtures."
-    Write-Host "  authorized : PRD v1.8.11, the fifth egress grant. This boundary was held by the"
-    Write-Host "               four grants before it and released by an owner decision. C1."
+    # WHICH GRANT IS IN FORCE, not which grant came first. This cited v1.8.11 - the FIFTH grant,
+    # which authorized one named measurement (C1) and whose boundary does not extend to a later run.
+    # A later grant does not inherit an earlier one's boundary and an earlier one does not authorize
+    # a later run; naming the superseded grant tells an operator the run is covered by something
+    # that does not cover it. The standing grant is the seventh, v1.8.48, and it is held by the
+    # RELEASE TREE rather than by a person - which is what makes this script runnable at all.
+    Write-Host "  authorized : PRD v1.8.48, the seventh grant and the STANDING one - it authorizes"
+    Write-Host "               running the hosted backend as a product, and is held by the release"
+    Write-Host "               tree rather than by a person. No PRD revision is needed before this"
+    Write-Host "               run. (v1.8.11, the fifth grant, authorized C1 - the first hosted run"
+    Write-Host "               on real scenario state - and is history, not this run's authority.)"
+    Write-Host "  ceiling    : the config written below sets no claude.maxSpendUsd, so the adapter's"
+    Write-Host "               default of 1.00 USD PER ENGINE PROCESS applies, fail-closed. It does"
+    Write-Host "               not bound running this script repeatedly."
     Write-Host "  see        : docs/egress.md, 'Where those values come from'"
     Write-Host ""
 }
@@ -179,11 +191,22 @@ if (-not (Test-Path $missionPath)) { throw "No shipped mission script at $missio
 if (-not (Test-Path $scriptSrc))   { throw "No reference Tier-1 script at $scriptSrc" }
 
 Write-Host "`n-- preflight --"
-try {
-    $tags = Invoke-RestMethod -Uri "http://localhost:11434/api/tags" -TimeoutSec 8
-    Assert-That ($tags.models.Count -gt 0) "inference server is serving $($tags.models.Count) models"
-} catch {
-    Assert-That $false "inference server reachable at http://localhost:11434 ($($_.Exception.Message))"
+# ONLY THE LOCAL BACKEND NEEDS THIS. Asserted unconditionally until 2026-08-14, which meant a
+# `-Backend claude` run could never report `failed: 0` on a machine with no Ollama installed - the
+# hosted arm contacts api.anthropic.com and never touches localhost:11434. The assertion is real
+# where it is a prerequisite and absent where it is not, rather than being softened for both.
+if ($Backend -eq "local") {
+    try {
+        $tags = Invoke-RestMethod -Uri "http://localhost:11434/api/tags" -TimeoutSec 8
+        Assert-That ($tags.models.Count -gt 0) "inference server is serving $($tags.models.Count) models"
+    } catch {
+        Assert-That $false "inference server reachable at http://localhost:11434 ($($_.Exception.Message))"
+    }
+} else {
+    # The hosted path's prerequisite is the key, and it fails at request time with a configuration
+    # error rather than a transport one - which reads like a backend outage in an order log.
+    $keyPresent = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($KeyEnvVar))
+    Assert-That $keyPresent "`$$KeyEnvVar is set (the hosted backend's prerequisite; value never read here)"
 }
 
 $backup = Join-Path $workDir "oppint_red_interceptor-backup-$stamp.lua"

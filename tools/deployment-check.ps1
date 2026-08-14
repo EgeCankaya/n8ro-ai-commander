@@ -101,6 +101,10 @@ if (Test-Path $dll) {
 # a stray file was inert; the plugin now reads it itself at initialize(), so a file left behind by an
 # interrupted run silently enables the commander on every later run, interactive ones included.
 $deployedCfg = Join-Path $ReleaseRoot "data\config\plugins\ai-commander.cfg"
+# Which backend this tree is actually configured for. Read here because check 6 below needs it: an
+# inference server is a prerequisite of the LOCAL backend only, and holding a hosted-only or
+# stub-only deployment to it fails the checklist over a dependency that tree does not have.
+$deployedBackend = $null
 if (-not (Test-Path $deployedCfg)) {
     Item "data/config/plugins/ai-commander.cfg is absent, or disables the commander" $true `
         "absent - nothing enables the commander on this tree"
@@ -110,6 +114,7 @@ if (-not (Test-Path $deployedCfg)) {
     $cfg = Get-Content $deployedCfg -Raw
     $commanderOn = $cfg -match '(?m)^\s*commander\.enabled\s*=\s*true'
     $claudeOn = $cfg -match '(?m)^\s*claude\.enabled\s*=\s*true'
+    if ($cfg -match '(?m)^\s*commander\.backend\s*=\s*(\S+)') { $deployedBackend = $Matches[1].Trim() }
     Item "data/config/plugins/ai-commander.cfg is absent, or disables the commander" (-not $commanderOn) `
         $(if ($commanderOn) { "PRESENT AND ENABLES THE COMMANDER: $deployedCfg" } else { $deployedCfg })
     Item "commander.enabled = false and claude.enabled = false in the deployed default config" `
@@ -189,6 +194,12 @@ if (Test-Path $logDir) {
 Item "order-log directory exists and is writable" $writable $logDir
 
 # -- 6. inference server (local backend only) ---------------------------------------------------------
+# THE HEADING WAS TRUE AND THE CODE WAS NOT. This called Item unconditionally, so a tree with no
+# deployed config - the shipped state, and the state this checklist's own checks 2/3 above require -
+# FAILED here whenever no Ollama server happened to be running, and Item's failure path exits 1. A
+# hosted-only deployment on a machine that has never installed Ollama could therefore not pass its own
+# deployment checklist, over a dependency it does not have. The applicability test is now the deployed
+# backend, and a backend that does not use the server reports rather than asserts.
 $serverUp = $false
 $serverDetail = ""
 try {
@@ -198,7 +209,14 @@ try {
 } catch {
     $serverDetail = $_.Exception.Message
 }
-Item "inference server reachable from the sim host (local backend only)" $serverUp $serverDetail
+if ($deployedBackend -eq 'local') {
+    Item "inference server reachable from the sim host (local backend only)" $serverUp $serverDetail
+} else {
+    $why = if ($null -eq $deployedBackend) { "no deployed config, so no backend is selected" }
+           else { "deployed backend is '$deployedBackend', which does not use it" }
+    Write-Host "  [INFO] inference server (local backend only) : $(if ($serverUp) { 'reachable' } else { 'not reachable' })"
+    Write-Host "         not applicable to this tree - $why" -ForegroundColor DarkGray
+}
 
 # -- 7. safety clamps vs the target scenario ----------------------------------------------------------
 # NOT AUTOMATABLE, and saying so is the point. `safety.minSpeedMps = 50` is a policy choice that
