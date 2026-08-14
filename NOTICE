@@ -15,5 +15,16 @@ that convention governs files inside the release tree itself.
 Note on classification: this repository necessarily describes proprietary SDK
 surface -- component type strings, schema field paths, and Lua verb signatures --
 and docs/prd.md documents it in detail. Repository visibility is therefore the
-control that governs disclosure. Default to private. Publication requires
-explicit owner authorization.
+control that governs disclosure, and publication requires explicit owner
+authorization.
+
+That authorization was given on 2026-08-14 and is recorded in docs/prd.md
+v1.8.56 (Corrections item 72), which is where its boundaries are stated. In
+short: it covers this repository and nothing else. It does not extend to the
+release tree, to any part of it, or to any file carrying the Arkheon per-file
+banner. It does not cover order logs or run archives -- those hold live scenario
+state, and .gitignore plus tools/check-artifacts.ps1 keep them out of the tracked
+file list. It relicenses nothing.
+
+The contents remain proprietary. Publication releases the visibility control over
+them; it does not reclassify them.

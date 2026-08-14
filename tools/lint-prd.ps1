@@ -642,17 +642,33 @@ if (-not (Test-Path $readmePath)) {
             }
         }
 
-        # The one boundary the standing grant explicitly does NOT release. Anyone deciding whether to
-        # share this repository must not have to reach the PRD to find that out.
-        if ($block -notmatch 'does not authorize publication') {
-            Fail ("README's §Authorization must state that the grant does NOT authorize publication " `
-                + "of the repository - it is the boundary most likely to be assumed released")
+        # Publication, which is a SEPARATE grant from hosted egress and the boundary most likely to
+        # be assumed released - or assumed withheld - either way.
+        #
+        # This assertion used to require the literal sentence "does not authorize publication",
+        # written at v1.8.54 when that was true. Publication was granted at v1.8.56, and the check
+        # WOULD HAVE FAILED THE BUILD ON THE REVISION THAT GRANTED IT, because it pinned the sentence
+        # rather than the posture. The obvious repair - weakening it - retires the guard for the one
+        # event it was built to survive (§Corrections item 72(e); the same shape as items 56(f) and
+        # 67, where a guard read as a guard and was not one).
+        #
+        # So it pins the CURRENT posture: §Authorization must name the revision that decided
+        # publication and say which way it went. Bump the revision if a later one supersedes it.
+        if ($block -notmatch 'v1\.8\.56') {
+            Fail ("README's §Authorization does not cite the publication decision's PRD revision " `
+                + "(v1.8.56) - publication is a separate grant from hosted egress, and a reader " `
+                + "must not have to reach the PRD to learn which way it went")
+            $authFailures++
+        }
+        if ($block -notmatch 'authorized publication|does not authorize publication') {
+            Fail ("README's §Authorization must state the publication decision explicitly, granted " `
+                + "or withheld - silence reads as withheld to one reader and as permission to another")
             $authFailures++
         }
     }
 
     if ($authFailures -eq 0) {
-        Check "README authorization cites the standing grant (v1.8.48, 2026-08-09) and its publication boundary"
+        Check "README authorization cites the standing egress grant (v1.8.48, 2026-08-09) and the publication decision (v1.8.56)"
     }
 }
 
