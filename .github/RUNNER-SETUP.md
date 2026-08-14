@@ -91,6 +91,40 @@ contributors that is normal practice. It is worth stating anyway: this is a stan
 machine that holds a licensed install, and it is a different risk from anything else in this
 repository.
 
+> ### ⚠ PUBLICATION INVERTS THE PARAGRAPH ABOVE — read this before registering anything
+>
+> **Added PRD v1.8.58.** Everything on this page was written for a **private** repository, and the
+> sentence directly above names the premise it rests on: *"on a private repository with only trusted
+> contributors."* **Publication was authorized at PRD v1.8.56 on 2026-08-14.** The moment visibility
+> flips, that premise is false, and the conclusion it supports does not survive it.
+>
+> On a **public** repository, a self-hosted runner with a `pull_request` trigger means **any stranger
+> on the internet can propose code that executes on a machine holding a licensed N8RO install** — the
+> release tree, the SDK, the terrain and AI databases, and whatever else that box carries. This is
+> the single most consequential configuration change available in this repository, and it is
+> available by uncommenting two lines.
+>
+> **The decision therefore moves rather than merely standing.** The original reasoning — *"a runner
+> on this box automates the running, not the environment"* — was a cost-benefit argument at
+> maintenance with one developer. It did not price a public attack surface, because there wasn't one.
+>
+> **If you register a runner after publication, all three of these are required, not advisory:**
+>
+> 1. **The fork guard stays.** `ci-selfhosted.yml`'s job carries
+>    `github.event.pull_request.head.repo.full_name == github.repository`, so a fork's PR is skipped
+>    rather than run. It is already in place and inert while the triggers are commented.
+> 2. **Never add `pull_request_target` to this workflow.** It runs with repository write scope
+>    against a PR's content and is the standard way self-hosted runners get compromised.
+> 3. **Require approval for all outside contributors** — Settings → Actions → *"Require approval for
+>    all external contributors"*. The fork guard is the belt; this is the braces.
+>
+> **The safe default, and the recommendation, is narrower than any of that:** leave this workflow on
+> `workflow_dispatch` and `push: branches: [main]` only. Post-merge compilation on trusted code buys
+> most of what a runner is for here, and buys it without ever executing a proposal from a stranger.
+>
+> **Until a runner exists, the original guidance is unchanged and still correct:** do not read a
+> green `CI (hosted)` badge as evidence that anything compiles.
+
 ## Badges
 
 If a build badge is added to `README.md`, it must say which runner produced it. A green **CI

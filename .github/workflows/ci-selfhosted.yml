@@ -39,6 +39,28 @@ jobs:
   build-and-test:
     name: Build, test, smoke
     runs-on: [self-hosted, windows, n8ro-release]
+
+    # A FORK'S PULL REQUEST MUST NEVER REACH THIS RUNNER, AND THIS GUARD EXISTS BECAUSE THE
+    # REPOSITORY'S VISIBILITY CHANGED UNDER THE ASSESSMENT THAT MADE IT SAFE TO OMIT.
+    #
+    # RUNNER-SETUP.md weighed the exposure and concluded: "A self-hosted runner executes code from
+    # pull requests. On a PRIVATE repository with only trusted contributors that is normal
+    # practice." Publication was authorized at PRD v1.8.56, and that premise stops holding the
+    # moment visibility flips - at which point a stranger opening a PR would be proposing code to
+    # run on a machine holding a LICENSED N8RO INSTALL, with the release tree, the SDK and
+    # whatever else that box carries.
+    #
+    # The triggers above are still commented out, so today this guard is inert. That is exactly
+    # when to add it: step 3 of RUNNER-SETUP.md tells a future reader to uncomment them, and this
+    # makes doing so safe by default rather than dependent on that reader also remembering the
+    # visibility change. A control added at the moment it becomes load-bearing is a control that
+    # had to be remembered, which is the failure this repository keeps recording.
+    #
+    # A fork's `pull_request` carries a head repo that is not this one. Same-repo branches - the
+    # flow every PR in this project has used - are unaffected, as are push and workflow_dispatch.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     # Never abandon a half-installed plugin in the release tree if a step fails partway.
     defaults:
       run:
