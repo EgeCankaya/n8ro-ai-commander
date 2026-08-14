@@ -53,17 +53,19 @@ revisit condition you can test without running anything.
 — **thirteen revisions after the PRD closed both at v1.8.41.** Same failure as §Authorization below:
 the README lagging the PRD on a load-bearing claim, §Corrections items 68(e) and 69(f).)*
 
-**Gates, all green as of 2026-08-12 (PRD v1.8.55) — every figure re-run for that revision, not requoted:**
+**Gates as of 2026-08-14 (PRD v1.8.57). Which rows were re-run for this revision is stated per row,
+because "all green as of" over a table where one row is eleven days old is the claim that went wrong
+below:**
 
 | Suite | Result |
 |---|---|
-| Unit | **185 / 185** |
-| Deployed-artifact smoke | **30 / 30** |
-| Live three-arm scenario smoke | **22 checks, 0 failed** (twice, 2026-08-09 — *not* re-run at v1.8.54; it needs a server and a ~35 min run) |
-| `tools/lint-prd.ps1` · `tools/check-artifacts.ps1` | 15 checks, 0 errors, 0 warnings · 116 files, PASS |
-| `tools/deployment-check.ps1` | **6 checked, 0 failed**, 4 manual — against a torn-down tree |
+| Unit | **186 / 186** — re-run 2026-08-14 |
+| Deployed-artifact smoke | **30 / 30** — re-run 2026-08-14 |
+| Live three-arm scenario smoke | **22 checks, 0 failed** (twice, 2026-08-09 — *not* re-run since; it needs a server and a ~35 min run) |
+| `tools/lint-prd.ps1` · `tools/check-artifacts.ps1` | 16 checks, 0 errors, 0 warnings · 116 files, PASS — both re-run 2026-08-14 |
+| `tools/deployment-check.ps1` | **6 checked, 0 failed**, 3 manual — re-run 2026-08-14 against a torn-down tree |
 
-<!-- gate-figures: unit=185/185 artifact-smoke=30/30 live-smoke=22/0 tracked-files=116 -->
+<!-- gate-figures: unit=186/186 artifact-smoke=30/30 live-smoke=22/0 tracked-files=116 -->
 
 *(v1.8.53 — **this table was wrong and had been for some time.** It said `162 / 162` and
 `105 files` under a heading asserting the figures were current; the real numbers were `169 / 169`
@@ -72,6 +74,15 @@ the acceptance figure's staleness failure — four events, PRD §Corrections ite
 recurring in the one document a reader meets first. **So it is now pinned rather than retyped:**
 `tools/lint-prd.ps1` check 11 requires the sentinel above to match the PRD's copy, and it
 **computes** `tracked-files` from `git ls-files` instead of trusting either. §Corrections item 69(f).)*
+
+*(**v1.8.57 — and it went stale again anyway, in the half of the sentinel that was still pinned by
+agreement.** Both copies said `unit=185/185` while the PRD's own v1.8.56 entry said **186/186** two
+thousand lines away: check 11 compares the README's sentinel to the PRD's and passed, because the
+two stale copies agreed with each other. **Agreement is not verification when both writers copy from
+the same stale source.** `tools/lint-prd.ps1` check 16 now **computes** the unit figure the way
+check 11 already computed `tracked-files` — counting `AIC_TEST(` across the .cpp files the unit
+`.vcxproj` actually compiles — so the denominator is derived from the suite rather than typed.
+§Corrections item 73.)*
 
 **Measured against the PRD's success metrics:** cost **$1.05** per four-ship
 scenario-hour against a ≤ $1.10 target (**met**); `reject.schema` **0.00 %** over 776
@@ -371,7 +382,7 @@ Expected: `create_plugin`, `destroy_plugin`, `get_plugin_signature`.
 
 | Suite | Command | Needs |
 |---|---|---|
-| **Unit (185)** | build `tests\ai-commander-tests.vcxproj`, run `tests\bin\release\ai-commander-tests.exe` **from the release root** | SDK only — **no server, no network** |
+| **Unit (186)** | build `tests\ai-commander-tests.vcxproj`, run `tests\bin\release\ai-commander-tests.exe` **from the release root** | SDK only — **no server, no network** |
 | ASan | same, with `/p:EnableASAN=true /p:IntDir=x64\asan\ /p:OutDir=bin\asan\`. Run it from a shell that has sourced `dev\setup-dev.cmd`, or the ASan runtime DLL will not resolve | SDK only |
 | **Deployed-artifact smoke (30)** | `tests\smoke\run-smoke.ps1 -ReleaseRoot C:\N8RO` | a deployed DLL |
 | **Live** gate harness | build `tests\live\ai-commander-live-tests.vcxproj`, run from the repo root: `--mode all --orders 200` | **a running inference server** |
