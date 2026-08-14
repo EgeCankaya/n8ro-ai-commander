@@ -7,8 +7,8 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # N8RO AI Entity Commander — summary
 
-**PRD version:** v1.8.55
-**Date:** 2026-08-12
+**PRD version:** v1.8.56
+**Date:** 2026-08-14
 **Audience:** the platform owner, and whoever picks up the next block of work.
 
 > **This document carries no number that is not also in `docs/prd.md`.** Every figure below cites the
@@ -313,12 +313,20 @@ pre-v1.8.32 README did while C21 appeared nowhere in it. *Source: §Corrections 
 
 **Every checklist box is ticked** *(v1.8.54 — this paragraph said two were unticked and both were
 governance; the second of them was **granted 2026-08-09** and recorded at v1.8.48, five revisions
-before this text was last touched)*: repository visibility is confirmed private (checked 2026-08-07),
-and the **standing hosted-egress authorization is in force** — it authorizes running the hosted
-backend as a product, is held by **the release tree** rather than by the owner personally, and was
-recorded only after `claude.maxSpendUsd` existed to enforce a ceiling. **One boundary it does not
-release: publication of this repository**, which needs the same class of decision and has not been
-made. *Source: §Review checklist; §The standing hosted-egress authorization.*
+before this text was last touched)*: the **standing hosted-egress authorization is in force** — it
+authorizes running the hosted backend as a product, is held by **the release tree** rather than by
+the owner personally, and was recorded only after `claude.maxSpendUsd` existed to enforce a ceiling.
+
+**Publication is now separately authorized** *(v1.8.56, granted 2026-08-14, §Corrections item 72)*.
+It is the eighth authorization and the first that is not about egress: the seven before it govern
+what leaves the machine at run time, this one governs what is permanently disclosed about the
+platform. It covers **this repository and nothing else** — not the release tree, not any
+banner-carrying file, and **not order logs or run archives**, which hold live scenario state and stay
+gitignored and enforced by `check-artifacts.ps1`. The contents remain proprietary; publication
+releases the visibility control over them rather than reclassifying them. **It was recorded while the
+repository was still private**, per §Corrections item 34 — *"a grant written afterwards is a
+description, not an authorization"*. *Source: §Review checklist; §The standing hosted-egress
+authorization; §Corrections item 72.*
 
 ---
 

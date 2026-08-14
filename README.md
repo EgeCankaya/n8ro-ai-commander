@@ -261,8 +261,34 @@ the snapshot builder, but which scenario's values fill it is a property of whoev
 **What the grant does not cover.** It does not change a shipped default — `commander.enabled` and
 `claude.enabled` are both `false` in the shipped config, and a standing authorization is permission
 to turn something on rather than turning it on. It does not authorize spending past the ceiling. It
-does not retroactively cover anything before 2026-08-09. And **it does not authorize publication of
-this repository**, which needs the same class of decision and has not been made.
+does not retroactively cover anything before 2026-08-09. And it does not authorize publication of
+this repository — a **separate** decision of a different class, granted separately and recorded below.
+
+### Publication — authorized 2026-08-14, PRD v1.8.56
+
+**The owner authorized publication of this repository on 2026-08-14, recorded in PRD v1.8.56
+(§Corrections item 72).** It is the eighth authorization this project holds and the first that is not
+about egress. Keep the two apart: the seven egress grants govern **what leaves the machine at run
+time**; this one governs **what is disclosed about the platform, permanently, to everyone.**
+
+**What is disclosed.** This repository contains no Arkheon-shipped code — no SDK headers, no import
+libraries, no platform binaries, no runtime data. It does contain component type strings, schema
+field paths, Lua verb signatures, `data/doctrine.txt`, and a PRD documenting the platform's internals
+at length. **Repository visibility was the sole control over that disclosure, and this grant releases
+it. Nothing here becomes non-proprietary by being published.**
+
+**What it does not authorize:**
+
+- the release tree, any part of it, or any file carrying the Arkheon per-file banner — `NOTICE` is
+  explicit that the banner convention governs files inside the release tree, which this is not;
+- **order logs and run archives** — they carry live scenario state (positions, ORBAT, teams,
+  loadouts). `*.jsonl` is gitignored and `tools/check-artifacts.ps1` enforces that over the tracked
+  file list. **Both controls matter more after publication than they did before it;**
+- any relicensing. The terms in `NOTICE` are unchanged.
+
+**A reader without a licensed N8RO release has source they cannot build** — `bin/` is gitignored and
+the build resolves the SDK through `N8RO_RELEASE`. An Anthropic API key is neither sufficient nor the
+binding constraint.
 
 *(**Corrected v1.8.54.** This section previously read "the hosted backend cannot ship" and "there is
 therefore no authorization under which an operator other than the measurer may turn the hosted
@@ -271,6 +297,14 @@ this project at its README was being told they may not do the thing v1.8.48's de
 permits. It is the README-lags-PRD failure of §Corrections items 68(e) and 69(f), third occurrence,
 so `tools/lint-prd.ps1` check 15 now fails the build if this section stops naming the grant's
 revision.)*
+
+*(**Updated v1.8.56.** This section previously ended *"it does not authorize publication of this
+repository, which needs the same class of decision and has not been made"* — true when written and
+retired by the grant above. Check 15 pinned **that exact sentence**, so it would have failed the
+build the moment the sentence became false, and the obvious repair — weakening the check — would have
+retired the guard for the one event it was built to survive. It now pins the **current** posture:
+this section must name v1.8.56 and state the publication decision, whichever way it goes. A control
+that only holds while a decision holds is a control with an expiry date nobody wrote down.)*
 
 `docs/egress.md` enumerates every field that leaves the machine. Any change to that set is
 a PRD revision **and** an `egress.md` revision, made before the next hosted request.
