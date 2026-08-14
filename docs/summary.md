@@ -7,7 +7,7 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # N8RO AI Entity Commander — summary
 
-**PRD version:** v1.8.56
+**PRD version:** v1.8.57
 **Date:** 2026-08-14
 **Audience:** the platform owner, and whoever picks up the next block of work.
 
@@ -193,7 +193,7 @@ headroom. Only the hosted entry of that row had ever been measured, and only the
 |---|---|
 | Cost per four-ship scenario-hour | **MET** — $1.05 against ≤ $1.10 |
 | **Fixture** acceptance rate | **MET** — 100 % on the synthetic soaks. *(v1.8.36 — the row is named for its instrument now, so it cannot be read as the engine's)* |
-| **In-engine** acceptance rate | **Not gated, by owner decision.** **80.8 % [77.4, 83.8]** over 609 resolved orders — and **90.9 % [88.2, 93.2]** once the two non-model-failure classes are removed. *(v1.8.46 — was 71.1 % / 85.8 %. **The outcome campaign's four three-arm runs plus the clause 8 probe added 211 resolved orders, and the C23 stall-floor class did not grow by a single sample — still 58, every one predating the fix.**)* |
+| **In-engine** acceptance rate | **Not gated, by owner decision.** **82.6 % [79.6, 85.4]** over 702 resolved orders across 37 runs — and **91.6 % [89.2, 93.7]** once the two non-model-failure classes are removed. *(**v1.8.57 — was 80.8 % / 90.9 %**, regenerated after the live gate was re-run; the population includes three v1.8.57 verification runs, two of them 20 s. PRD item 73(j). Superseded: v1.8.46 — was 71.1 % / 85.8 %. **The outcome campaign's four three-arm runs plus the clause 8 probe added 211 resolved orders, and the C23 stall-floor class did not grow by a single sample — still 58, every one predating the fix.**)* |
 | Parse/schema rejection rate | **MET** — 0.00 % over 776 orders, two backends, three models |
 | Plugin cost per frame | **MET** |
 | Replay reproducibility | **MET** |
@@ -202,7 +202,7 @@ headroom. Only the hosted entry of that row had ever been measured, and only the
 
 *Source: §Success metrics.*
 
-<!-- in-engine-acceptance: 80.8 [77.4, 83.8] n=609 runs=30 -->
+<!-- in-engine-acceptance: 82.6 [79.6, 85.4] n=702 runs=37 -->
 
 <!-- outcome-damage-absorbed: -0.7741 [-1.0210, -0.5272] n=4 signs=4/4 SUPPORTED -->
 

@@ -35,7 +35,33 @@ import os
 import sys
 from collections import Counter
 
-DEFAULT_ARCHIVE = os.path.expanduser(r"~\Documents\N8RO AI Commander logs")
+def documents_dir():
+    r"""The real Documents folder, which is not always ~\Documents.
+
+    THE WRITER AND THE READER MUST AGREE. run-live-scenario.ps1 archives to
+    [Environment]::GetFolderPath('MyDocuments'), which FOLLOWS a redirection; expanding
+    ~\Documents here does not. OneDrive Known Folder Move relocates Documents to
+    %USERPROFILE%\OneDrive\Documents and is on by default for a Microsoft account, and a
+    localised Windows renames the folder outright. On such a machine this tool reports
+    `archive not found` against an archive that plainly exists, because it is reading a
+    path the writer never used. This tool OWNS the published acceptance figure, so the
+    failure mode is a gate that cannot be re-derived anywhere but one machine.
+    """
+    if os.name == "nt":
+        try:
+            import winreg
+            sub = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, sub) as key:
+                raw, _ = winreg.QueryValueEx(key, "Personal")
+            resolved = os.path.expandvars(raw)
+            if os.path.isdir(resolved):
+                return resolved
+        except OSError:
+            pass
+    return os.path.expanduser(os.path.join("~", "Documents"))
+
+
+DEFAULT_ARCHIVE = os.path.join(documents_dir(), "N8RO AI Commander logs")
 
 # Rejection reasons that are NOT model failures. Named rather than inferred, each with the row
 # that establishes it. This is a REPORTING split, not the normative taxonomy - that is C17's

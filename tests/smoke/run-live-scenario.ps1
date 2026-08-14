@@ -151,6 +151,26 @@ function Assert-That {
     else { Write-Host "  [FAIL] $Description" -ForegroundColor Red; $script:failures.Add($Description) }
 }
 
+# EVERY NUMBER THIS HARNESS PRINTS GOES THROUGH HERE, AND IT IS NOT COSMETIC.
+#
+# PowerShell's -f operator formats with the CURRENT culture. On a machine whose decimal separator is
+# a comma - which is most of Europe, and is the machine this was written on - the frame-cost line
+# printed "p50 0,0054 ms" while the maximum on the same line printed with a period, because the two
+# reached -f by different paths.
+#
+# The figures this harness prints are transcribed into docs/prd.md, docs/summary.md and README.md,
+# where lint-prd.ps1 pins them and every existing copy uses a period. A published gate figure whose
+# punctuation depends on the operator's Windows locale is a figure two readers can legitimately
+# disagree about, and the disagreement would be invisible to every check in this repository.
+#
+# Precision is deliberately NOT changed here - this formats the same values, it does not round them.
+function Fmt {
+    param($Value)
+    if ($null -eq $Value) { return "" }
+    try { return [string]::Format([cultureinfo]::InvariantCulture, "{0}", [double]$Value) }
+    catch { return [string]$Value }
+}
+
 Write-Host "=== AI Entity Commander - Phase 1b live scenario smoke ==="
 Write-Host "release root : $ReleaseRoot"
 Write-Host "scenario     : Mariana Shield (shipped, unmodified)"
@@ -169,8 +189,20 @@ if ($Backend -eq "claude") {
     Write-Host "               the same field set as every hosted run since v1.8.3, but drawn from"
     Write-Host "               RedSu35_01 in the shipped 'Mariana Shield' scenario rather than from"
     Write-Host "               the six synthetic LiveMain fixtures."
-    Write-Host "  authorized : PRD v1.8.11, the fifth egress grant. This boundary was held by the"
-    Write-Host "               four grants before it and released by an owner decision. C1."
+    # WHICH GRANT IS IN FORCE, not which grant came first. This cited v1.8.11 - the FIFTH grant,
+    # which authorized one named measurement (C1) and whose boundary does not extend to a later run.
+    # A later grant does not inherit an earlier one's boundary and an earlier one does not authorize
+    # a later run; naming the superseded grant tells an operator the run is covered by something
+    # that does not cover it. The standing grant is the seventh, v1.8.48, and it is held by the
+    # RELEASE TREE rather than by a person - which is what makes this script runnable at all.
+    Write-Host "  authorized : PRD v1.8.48, the seventh grant and the STANDING one - it authorizes"
+    Write-Host "               running the hosted backend as a product, and is held by the release"
+    Write-Host "               tree rather than by a person. No PRD revision is needed before this"
+    Write-Host "               run. (v1.8.11, the fifth grant, authorized C1 - the first hosted run"
+    Write-Host "               on real scenario state - and is history, not this run's authority.)"
+    Write-Host "  ceiling    : the config written below sets no claude.maxSpendUsd, so the adapter's"
+    Write-Host "               default of 1.00 USD PER ENGINE PROCESS applies, fail-closed. It does"
+    Write-Host "               not bound running this script repeatedly."
     Write-Host "  see        : docs/egress.md, 'Where those values come from'"
     Write-Host ""
 }
@@ -179,11 +211,22 @@ if (-not (Test-Path $missionPath)) { throw "No shipped mission script at $missio
 if (-not (Test-Path $scriptSrc))   { throw "No reference Tier-1 script at $scriptSrc" }
 
 Write-Host "`n-- preflight --"
-try {
-    $tags = Invoke-RestMethod -Uri "http://localhost:11434/api/tags" -TimeoutSec 8
-    Assert-That ($tags.models.Count -gt 0) "inference server is serving $($tags.models.Count) models"
-} catch {
-    Assert-That $false "inference server reachable at http://localhost:11434 ($($_.Exception.Message))"
+# ONLY THE LOCAL BACKEND NEEDS THIS. Asserted unconditionally until 2026-08-14, which meant a
+# `-Backend claude` run could never report `failed: 0` on a machine with no Ollama installed - the
+# hosted arm contacts api.anthropic.com and never touches localhost:11434. The assertion is real
+# where it is a prerequisite and absent where it is not, rather than being softened for both.
+if ($Backend -eq "local") {
+    try {
+        $tags = Invoke-RestMethod -Uri "http://localhost:11434/api/tags" -TimeoutSec 8
+        Assert-That ($tags.models.Count -gt 0) "inference server is serving $($tags.models.Count) models"
+    } catch {
+        Assert-That $false "inference server reachable at http://localhost:11434 ($($_.Exception.Message))"
+    }
+} else {
+    # The hosted path's prerequisite is the key, and it fails at request time with a configuration
+    # error rather than a transport one - which reads like a backend outage in an order log.
+    $keyPresent = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($KeyEnvVar))
+    Assert-That $keyPresent "`$$KeyEnvVar is set (the hosted backend's prerequisite; value never read here)"
 }
 
 $backup = Join-Path $workDir "oppint_red_interceptor-backup-$stamp.lua"
@@ -358,7 +401,7 @@ local.grammarEnabled=true
         $inFlight = $requested.Count - $resolved
         $rate = if ($resolved) { 100.0 * $accepted.Count / $resolved } else { 0 }
         Write-Host ("  acceptance: {0} of {1} RESOLVED ({2} %) - {3} requested, {4} still in flight at shutdown" -f `
-            $accepted.Count, $resolved, [math]::Round($rate,1), $requested.Count, $inFlight)
+            $accepted.Count, $resolved, (Fmt ([math]::Round($rate,1))), $requested.Count, $inFlight)
         Write-Host ("              REPORTED, NOT BARRED, and at n={0} it is not a rate at all - the >= 95 %" -f $resolved)
         Write-Host  "              bar lives on the 200-order soak. Do not quote this figure as one."
 
@@ -411,9 +454,9 @@ local.grammarEnabled=true
         if ($runEnd) {
             $stats = $runEnd.detail | ConvertFrom-Json
             Write-Host ("  plugin frame cost: p50 {0} ms, p95 {1} ms, max {2} ms over {3} frames" -f `
-                $stats.frame.p50Ms, $stats.frame.p95Ms, $stats.frame.maxMs, $stats.frame.frames)
+                (Fmt $stats.frame.p50Ms), (Fmt $stats.frame.p95Ms), (Fmt $stats.frame.maxMs), $stats.frame.frames)
             Assert-That ($stats.frame.maxMs -lt 5.0) `
-                "no frame exceeded 5 ms of plugin cost (max $($stats.frame.maxMs) ms)"
+                "no frame exceeded 5 ms of plugin cost (max $(Fmt $stats.frame.maxMs) ms)"
             Assert-That ($stats.timeouts -eq 0) `
                 "the plugin's own timeout counter is zero ($($stats.timeouts))"
 
@@ -424,9 +467,9 @@ local.grammarEnabled=true
             $schema = if ($stats.rejectByReason.schema) { $stats.rejectByReason.schema } else { 0 }
             $shapeRate  = if ($stats.requested) { 100.0 * $shape  / $stats.requested } else { 0 }
             $schemaRate = if ($stats.requested) { 100.0 * $schema / $stats.requested } else { 0 }
-            Write-Host ("  reject.shape : {0} of {1} requested ({2} %)" -f $shape, $stats.requested, [math]::Round($shapeRate,2))
-            Write-Host ("  reject.schema: {0} of {1} requested ({2} %)" -f $schema, $stats.requested, [math]::Round($schemaRate,2))
-            Assert-That ($schemaRate -lt 1.0) "reject.schema < 1 % (got $([math]::Round($schemaRate,2)) %)"
+            Write-Host ("  reject.shape : {0} of {1} requested ({2} %)" -f $shape, $stats.requested, (Fmt ([math]::Round($shapeRate,2))))
+            Write-Host ("  reject.schema: {0} of {1} requested ({2} %)" -f $schema, $stats.requested, (Fmt ([math]::Round($schemaRate,2))))
+            Assert-That ($schemaRate -lt 1.0) "reject.schema < 1 % (got $(Fmt ([math]::Round($schemaRate,2))) %)"
         } else {
             Assert-That $false "run-end stats record present in the order log"
         }

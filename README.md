@@ -53,17 +53,19 @@ revisit condition you can test without running anything.
 — **thirteen revisions after the PRD closed both at v1.8.41.** Same failure as §Authorization below:
 the README lagging the PRD on a load-bearing claim, §Corrections items 68(e) and 69(f).)*
 
-**Gates, all green as of 2026-08-12 (PRD v1.8.55) — every figure re-run for that revision, not requoted:**
+**Gates as of 2026-08-14 (PRD v1.8.57). Which rows were re-run for this revision is stated per row,
+because "all green as of" over a table where one row is eleven days old is the claim that went wrong
+below:**
 
 | Suite | Result |
 |---|---|
-| Unit | **185 / 185** |
-| Deployed-artifact smoke | **30 / 30** |
-| Live three-arm scenario smoke | **22 checks, 0 failed** (twice, 2026-08-09 — *not* re-run at v1.8.54; it needs a server and a ~35 min run) |
-| `tools/lint-prd.ps1` · `tools/check-artifacts.ps1` | 15 checks, 0 errors, 0 warnings · 116 files, PASS |
-| `tools/deployment-check.ps1` | **6 checked, 0 failed**, 4 manual — against a torn-down tree |
+| Unit | **186 / 186** — re-run 2026-08-14 |
+| Deployed-artifact smoke | **30 / 30** — re-run 2026-08-14 |
+| Live three-arm scenario smoke | **22 checks, 0 failed** — re-run 2026-08-14 on the shipped `qwen2.5:7b-instruct-q8_0` default (third occasion; twice before on 2026-08-09) |
+| `tools/lint-prd.ps1` · `tools/check-artifacts.ps1` | 16 checks, 0 errors, 0 warnings · 116 files, PASS — both re-run 2026-08-14 |
+| `tools/deployment-check.ps1` | **6 checked, 0 failed**, 3 manual — re-run 2026-08-14 against a torn-down tree |
 
-<!-- gate-figures: unit=185/185 artifact-smoke=30/30 live-smoke=22/0 tracked-files=116 -->
+<!-- gate-figures: unit=186/186 artifact-smoke=30/30 live-smoke=22/0 tracked-files=116 -->
 
 *(v1.8.53 — **this table was wrong and had been for some time.** It said `162 / 162` and
 `105 files` under a heading asserting the figures were current; the real numbers were `169 / 169`
@@ -73,21 +75,34 @@ recurring in the one document a reader meets first. **So it is now pinned rather
 `tools/lint-prd.ps1` check 11 requires the sentinel above to match the PRD's copy, and it
 **computes** `tracked-files` from `git ls-files` instead of trusting either. §Corrections item 69(f).)*
 
+*(**v1.8.57 — and it went stale again anyway, in the half of the sentinel that was still pinned by
+agreement.** Both copies said `unit=185/185` while the PRD's own v1.8.56 entry said **186/186** two
+thousand lines away: check 11 compares the README's sentinel to the PRD's and passed, because the
+two stale copies agreed with each other. **Agreement is not verification when both writers copy from
+the same stale source.** `tools/lint-prd.ps1` check 16 now **computes** the unit figure the way
+check 11 already computed `tracked-files` — counting `AIC_TEST(` across the .cpp files the unit
+`.vcxproj` actually compiles — so the denominator is derived from the suite rather than typed.
+§Corrections item 73.)*
+
 **Measured against the PRD's success metrics:** cost **$1.05** per four-ship
 scenario-hour against a ≤ $1.10 target (**met**); `reject.schema` **0.00 %** over 776
 orders across two backends and three models (**met**); order acceptance **100 %** on the
-synthetic-fixture soaks and **80.8 % [77.4, 83.8]** in-engine against real scenario
-state — **90.9 % [88.2, 93.2]** once the two non-model-failure classes are removed
-*(v1.8.46 — was 71.1 % and 85.8 %; **the outcome campaign's four three-arm runs plus the
-clause 8 probe added 211 resolved orders, and the C23 stall-floor class did not grow by a
-single sample — still 58, every one of them predating the fix**)*
+synthetic-fixture soaks and **82.6 % [79.6, 85.4]** in-engine against real scenario
+state — **91.6 % [89.2, 93.7]** once the two non-model-failure classes are removed
+*(v1.8.57 — was 80.8 % and 90.9 %; regenerated over 702 resolved orders across 37 runs.
+**The C23 stall-floor class did not grow by a single sample — still 58, every one of them
+predating the fix**, now the seventh consecutive revision that prediction has held. The
+population includes three v1.8.57 verification runs, two of them 20 s — see PRD item 73(j))*
 (**two instruments, two named rows — see C17**); local 7B round-trip p95 **7,975 ms** against a
 ≤ 20 s target (**met**), hosted Haiku p95 **4,615 ms** over the 240-order soak against
 ≤ 2.5 s (**missed**, and not control-loop-binding — the 20 s cadence absorbs a p99 of
 7,099 ms). Plugin frame cost p95 **0.0059 ms**, max **0.5334 ms** over 12,001 frames
 against a 5 ms bar.
 
-Total spend across six owner-authorized egress grants: **≈$2.57 of $5**.
+Total spend across seven owner-authorized egress grants: **≈$2.63 of $5**
+*(v1.8.57 — was "six grants" and "≈$2.57". The count had been stale since the standing grant of
+2026-08-09 made it seven, which §Authorization below states correctly; the total moved by the
+≈$0.0557 of hosted verification this revision spent.)*
 
 ## The finding that matters most
 
@@ -218,7 +233,7 @@ Stated here rather than discovered during a demo.
   so `tools/acceptance-report.py` now owns the number and `tools/lint-prd.ps1` fails the
   build if this file, the PRD and the summary disagree.)*
 
-<!-- in-engine-acceptance: 80.8 [77.4, 83.8] n=609 runs=30 -->
+<!-- in-engine-acceptance: 82.6 [79.6, 85.4] n=702 runs=37 -->
 
 <!-- outcome-damage-absorbed: -0.7741 [-1.0210, -0.5272] n=4 signs=4/4 SUPPORTED -->
 - **Three kills have ever been scored**, and in **all three** the target was already `wrecked`
@@ -371,7 +386,7 @@ Expected: `create_plugin`, `destroy_plugin`, `get_plugin_signature`.
 
 | Suite | Command | Needs |
 |---|---|---|
-| **Unit (185)** | build `tests\ai-commander-tests.vcxproj`, run `tests\bin\release\ai-commander-tests.exe` **from the release root** | SDK only — **no server, no network** |
+| **Unit (186)** | build `tests\ai-commander-tests.vcxproj`, run `tests\bin\release\ai-commander-tests.exe` **from the release root** | SDK only — **no server, no network** |
 | ASan | same, with `/p:EnableASAN=true /p:IntDir=x64\asan\ /p:OutDir=bin\asan\`. Run it from a shell that has sourced `dev\setup-dev.cmd`, or the ASan runtime DLL will not resolve | SDK only |
 | **Deployed-artifact smoke (30)** | `tests\smoke\run-smoke.ps1 -ReleaseRoot C:\N8RO` | a deployed DLL |
 | **Live** gate harness | build `tests\live\ai-commander-live-tests.vcxproj`, run from the repo root: `--mode all --orders 200` | **a running inference server** |
