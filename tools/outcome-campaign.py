@@ -277,12 +277,44 @@ SECONDARY_N = {
 
 MDE_80 = 0.284      # §Validation: minimum detectable paired difference at n = 4, 80 % power.
 
+# THE PRE-REGISTERED CAMPAIGN POPULATION, NAMED HERE RATHER THAN LEFT IN PROSE.
+#
+# PRD v1.8.42 item 58(d) fixed the design before the first run: "the five planning runs are NOT
+# pooled into the test; a fresh campaign of n = 4 post-fix runs is specified with its decision rule,
+# its minimum detectable effect and its null wording all fixed in advance." v1.8.46 item 62 reports
+# it over these four archives.
+#
+# Item 68(f) already recorded the gap: "the pre-registration's n = 4 lived only in prose." What that
+# costs is concrete and was demonstrated on 2026-08-14. Running this tool with DEFAULT arguments
+# pools the planning runs, the campaign runs and every later unrelated run into n = 10, prints a
+# different interval, and closes by instructing the reader to paste it into all three documents -
+# which would replace a confirmatory pre-registered result with a weaker post-hoc one, and would
+# PASS lint-prd.ps1, because check 9 only compares the three copies to each other.
+#
+# So the paste-line is now emitted for THIS population and no other. Every other population is
+# computed, printed and clearly labelled exploratory. The tool still reports; it no longer invites
+# a reader to publish a number the pre-registration excludes.
+CAMPAIGN_RUNS = (
+    "20260809T213423Z",
+    "20260809T220459Z",
+    "20260809T223532Z",
+    "20260809T230605Z",
+)
+
+
+def run_stamp(folder_name):
+    """The UTC stamp of an archive folder, without its `-local` / `-claude` backend suffix."""
+    return folder_name.split("-", 1)[0]
+
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--archive", default=DEFAULT_ARCHIVE)
     ap.add_argument("--since", default="",
                     help="skip runs whose folder name sorts before this (the campaign's start)")
+    ap.add_argument("--campaign", action="store_true",
+                    help="select exactly the four pre-registered campaign runs (PRD item 58(d)). "
+                         "This is the only population for which a paste-line is emitted.")
     args = ap.parse_args()
 
     ok, a, b = self_test()
@@ -306,10 +338,36 @@ def main():
     # verdict. The pre-registration fixes n = 4 and excludes the five planning runs in PROSE;
     # nothing here enforces either, and a pasted verdict used to carry no trace of which runs
     # produced it. §Corrections item 68(h).
+    if args.campaign:
+        wanted = set(CAMPAIGN_RUNS)
+        runs = [r for r in runs if run_stamp(r["run"]) in wanted]
+        missing = wanted - {run_stamp(r["run"]) for r in runs}
+        if missing:
+            print("\n::error:: --campaign needs all four pre-registered runs and this archive is "
+                  "missing %d: %s" % (len(missing), ", ".join(sorted(missing))))
+            print("           Refusing to compute the pre-registered test on a partial population.")
+            return 1
+
+    # IS THIS THE PRE-REGISTERED POPULATION? Decided by comparing the selected runs against the
+    # four named above, not by trusting a flag - so `--since` boundaries that happen to select
+    # exactly the campaign are recognised, and a `--campaign` run that silently lost an archive
+    # folder is not.
+    is_campaign = sorted(run_stamp(r["run"]) for r in runs) == sorted(CAMPAIGN_RUNS)
+
     print("\n=== population (an argument to this tool, printed so a verdict carries it) ===")
     print("  archive : %s" % args.archive)
     print("  --since : %s" % (args.since or "(none - EVERY run in the archive)"))
     print("  runs    : %d  ->  %s" % (len(runs), ", ".join(r["run"][:15] for r in runs)))
+    if is_campaign:
+        print("  status  : THE PRE-REGISTERED CAMPAIGN (PRD item 58(d), reported item 62).")
+        print("            This is the confirmatory test. A paste-line will be emitted.")
+    else:
+        print("  status  : EXPLORATORY - this is NOT the pre-registered population.")
+        print("            The pre-registration fixes n = 4 over %s"
+              % ", ".join(CAMPAIGN_RUNS))
+        print("            and item 58(d) excludes the planning runs explicitly. Whatever this")
+        print("            population produces is a post-hoc reading of a confirmatory design.")
+        print("            NO paste-line will be emitted. Use --campaign for the published figure.")
 
     # C26 IS FIXED FORWARD BUT NOT BACKWARD (PRD v1.8.53, §Corrections item 69(d)).
     # run-live-scenario.ps1 stamped LOCAL time with a literal 'Z' until 2026-08-10 while every
@@ -456,12 +514,30 @@ def main():
         verdict = "NULL"
     sentinel = ("<!-- outcome-damage-absorbed: %+.4f [%+.4f, %+.4f] n=%d signs=%d/%d %s -->"
                 % (mean, lo, hi, n, negatives, n, verdict))
+
+    if not is_campaign:
+        print("\n=== NO PASTE-LINE: this is not the pre-registered population ===")
+        print("  The figure above is real and it is EXPLORATORY. It is withheld from the")
+        print("  publishable form deliberately, because the three documents carry a")
+        print("  CONFIRMATORY result over the four runs named in PRD item 58(d), and pooling")
+        print("  the planning runs into it is the one thing that pre-registration forbids.")
+        print("  Publishing this would trade a design that fixed its rule in advance for one")
+        print("  that chose its population afterwards - and lint would not catch the swap,")
+        print("  because check 9 only compares the three copies to EACH OTHER.")
+        print("")
+        print("  Re-run with --campaign for the published figure.")
+        print("  If you intend to supersede the pre-registration, that is a PRD revision with")
+        print("  its own reasoning - not a paste.")
+        print("")
+        print("  (withheld) %s" % sentinel)
+        return 0
+
     print("\n=== paste this line into docs/prd.md, docs/summary.md and README.md ===")
     print(sentinel)
     print("\ntools/lint-prd.ps1 fails when the three copies disagree, and warns when the point")
     print("estimate is quoted without its interval. This endpoint is a paired difference on")
-    print("n = 4 against a control arm that takes two distinct values in the whole archive;")
-    print("a bare -0.77 is a claim the design cannot carry.")
+    print("n = %d against a control arm that takes two distinct values in the whole archive;" % n)
+    print("a bare %+.2f is a claim the design cannot carry." % mean)
     return 0
 
 
