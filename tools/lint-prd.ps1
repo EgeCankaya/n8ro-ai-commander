@@ -673,6 +673,81 @@ if (-not (Test-Path $readmePath)) {
 }
 
 # ---------------------------------------------------------------------------------------------
+# 16. The published unit-suite size must be COMPUTED, not agreed
+# ---------------------------------------------------------------------------------------------
+# Check 11 pins four figures by agreement between two documents and computes exactly one of them.
+# `unit=` went stale anyway - in BOTH copies at once, while this document's own v1.8.56 entry
+# carried the right number two thousand lines away. Two stale copies agree with each other and
+# check 11 passes, because agreement is not verification when the same hand typed both. So the
+# denominator is derived here the way tracked-files already is.
+#
+# WHAT IS DERIVED AND WHAT IS NOT. The suite's SIZE is a property of the source, so it is computed:
+# one `AIC_TEST(` per registered case (TestSupport.h), counted across the .cpp files the unit
+# .vcxproj actually compiles. Taking the file list from the project rather than from a glob is what
+# makes it honest in both directions - a test file that exists but was never added to the project
+# cannot inflate the count, and one that IS added is picked up with no edit here.
+#
+# Whether those cases PASSED is a property of a RUN and cannot be read off the source. The
+# numerator is therefore not derived; it is only held to internal consistency, since a published
+# gate figure carrying failures is not a green gate and should not be sitting in a table headed
+# "Gates".
+#
+# No SDK, no build and no test run are required - which is the whole point. The hosted runner has
+# none of the three, and the hosted runner is where the docs commit that types the figure runs.
+Write-Host "[Unit-suite size]"
+
+$repoDirForTests = Split-Path -Parent (Split-Path -Parent $Path)
+$unitProj = Join-Path (Join-Path $repoDirForTests "tests") "ai-commander-tests.vcxproj"
+
+if (-not (Test-Path $unitProj)) {
+    Warn "cannot find tests/ai-commander-tests.vcxproj - the unit figure went unverified"
+    Check "unit-suite size: unverified"
+} else {
+    # Only the test translation units. The project also compiles ..\src\*.cpp to link the code
+    # under test, and those carry no AIC_TEST(.
+    $projLines = Get-Content -Path $unitProj
+    $compiled  = @(Get-Captures $projLines 'ClCompile\s+Include="([^"]+)"')
+    $testFiles = @($compiled | Where-Object { $_ -notmatch '^\.\.' })
+
+    $declared = 0
+    $missing  = @()
+    foreach ($rel in $testFiles) {
+        # The project stores Windows separators; this script also runs on a Linux runner.
+        $leaf = $rel -replace '\\', '/'
+        $full = Join-Path (Join-Path $repoDirForTests "tests") $leaf
+        if (-not (Test-Path $full)) { $missing += $rel; continue }
+        $declared += @(Find-Lines (Get-Content -Path $full) '^AIC_TEST\(').Count
+    }
+
+    foreach ($m in $missing) {
+        Fail "tests/ai-commander-tests.vcxproj compiles '$m', which does not exist"
+    }
+
+    # Re-read the sentinel here rather than reusing check 11's, so this check still reports when
+    # check 11 bailed out.
+    $unitHit = @(Find-Lines $lines $gatePattern) | Select-Object -First 1
+    if (-not $unitHit) {
+        Warn "no gate-figures sentinel to check the computed unit size against"
+        Check "unit-suite size: $declared cases counted, nothing published to compare"
+    } else {
+        $published = [int]$unitHit.Match.Groups[1].Value
+        $total     = [int]$unitHit.Match.Groups[2].Value
+        if ($published -ne $total) {
+            Fail ("the gate-figures sentinel publishes unit=$published/$total under a heading that " `
+                + "asserts the gates are green - a suite with $($total - $published) failing case(s) " `
+                + "is not a gate that passed") $unitHit.LineNumber
+        }
+        if ($total -ne $declared) {
+            Fail ("the gate-figures sentinel claims a unit suite of $total but the .cpp files " `
+                + "tests/ai-commander-tests.vcxproj compiles declare $declared AIC_TEST cases - " `
+                + "the published figure is stale") $unitHit.LineNumber
+        } else {
+            Check "unit-suite size: published $published/$total, confirmed against $($testFiles.Count) compiled test files"
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------------------------
 Write-Host ""
