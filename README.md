@@ -61,7 +61,7 @@ below:**
 |---|---|
 | Unit | **186 / 186** — re-run 2026-08-14 |
 | Deployed-artifact smoke | **30 / 30** — re-run 2026-08-14 |
-| Live three-arm scenario smoke | **22 checks, 0 failed** (twice, 2026-08-09 — *not* re-run since; it needs a server and a ~35 min run) |
+| Live three-arm scenario smoke | **22 checks, 0 failed** — re-run 2026-08-14 on the shipped `qwen2.5:7b-instruct-q8_0` default (third occasion; twice before on 2026-08-09) |
 | `tools/lint-prd.ps1` · `tools/check-artifacts.ps1` | 16 checks, 0 errors, 0 warnings · 116 files, PASS — both re-run 2026-08-14 |
 | `tools/deployment-check.ps1` | **6 checked, 0 failed**, 3 manual — re-run 2026-08-14 against a torn-down tree |
 
