@@ -1,6 +1,7 @@
 #include "AiCommanderPlugin.h"
 
 #include "ClaudeLlmClient.h"
+#include "HealthTier.h"
 #include "LocalLlmClient.h"
 #include "PromptRenderer.h"
 #include "ReplayLlmClient.h"
@@ -408,6 +409,12 @@ void AiCommanderPlugin::runProbeIfPending() {
         + toString(report.result) + " - " + report.detail;
     if (report.result == ProbeResult::Pass) {
         N8RO_LOG_INFO(verdict, kLogCategory);
+        // A warning never changes the verdict and never disables the commander (AIC-ARCH-4,
+        // v1.8.55). It is logged separately so that "probe pass" stays literally true while the
+        // muted guard it reports does not go unannounced.
+        if (!report.warning.empty()) {
+            N8RO_LOG_WARNING(std::string("ai-commander: ") + report.warning, kLogCategory);
+        }
     } else {
         // A failed probe disables the commander. It does NOT fall back to a zero velocity: a
         // fabricated stationary own-ship would degrade every order downstream with no failing test
@@ -672,6 +679,39 @@ void AiCommanderPlugin::dispatchRequests(double simTimeS, std::int64_t frame) {
         }
         if (simTimeS - state->lastRequestSimTimeS < config.cadenceS) {
             continue;
+        }
+
+        // Never command an airframe that is no longer flyable (AIC-ARCH-1: the commander observes,
+        // it does not pretend).
+        //
+        // `wrecked` is a DAMAGE tier, not a removal. The entity keeps its transform and its velocity
+        // columns the whole way down, so buildSnapshot() keeps succeeding and nothing else in the
+        // pipeline has a reason to stop. Measured on the 2026-08-12 run: RedSu35_01 went to
+        // `state=wrecked` at t+50.0 s (cumPk 0.915953) and physics did not remove it until
+        // t+130.0 s — eighty seconds in which four more orders were requested, paid for and
+        // published to a falling wreck, the last of them at t+122.4 s reasoning "Two inbound
+        // munitions tracked; defend to break geometry and preserve aircraft" about an aircraft that
+        // had been wrecked for seventy-two seconds.
+        //
+        // The check has to live here because the model cannot make it: OrderSnapshot carries no
+        // health field, so the tier is not in the prompt and never was.
+        //
+        // An unreadable tier counts as commandable. A guard that grounds every aircraft on a tree
+        // where this leaf does not resolve would be a far worse failure than the one it prevents.
+        if (entityManager_ != nullptr) {
+            const std::optional<HealthTier> tier = readHealthTier(*entityManager_, entityId);
+            if (tier.has_value() && isUncommandable(*tier)) {
+                if (!state->loggedUncommandable) {
+                    state->loggedUncommandable = true;
+                    N8RO_LOG_INFO(
+                        std::string("ai-commander: ") + entityId + " is "
+                            + std::string(toString(*tier))
+                            + "; no further orders will be requested for it. Any published order "
+                              "stands until the entity leaves the scenario.",
+                        kLogCategory);
+                }
+                continue;
+            }
         }
 
         OrderSnapshot snapshot;

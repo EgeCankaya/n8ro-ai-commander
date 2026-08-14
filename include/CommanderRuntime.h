@@ -40,6 +40,11 @@ struct EntityCommandState {
     // for one aircraft, which is what stops a slow backend producing overlapping requests and a
     // self-inflicted slowdown.
     bool requestInFlight = false;
+
+    // Latches the one log line that says this airframe has stopped being commandable. Per entity and
+    // per run, not per frame: the tier is monotonic, so without the latch the same line would be
+    // written on every frame from the hit until the wreck reaches the surface.
+    bool loggedUncommandable = false;
     double lastRequestSimTimeS = -1.0e30;
     std::int64_t nextSerial = 1;
 

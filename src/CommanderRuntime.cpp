@@ -345,6 +345,9 @@ std::string CommanderRuntime::statsJson() const {
     (void)probe.setString("result", toString(probeReport_.result));
     (void)probe.setString("detail", probeReport_.detail);
     (void)probe.setString("entityId", probeReport_.probedEntityId);
+    // Empty when there is nothing to report. A warning is a separate axis from `result` on purpose:
+    // it names a muted guard without claiming the probe failed (AIC-ARCH-4, v1.8.55).
+    (void)probe.setString("warning", probeReport_.warning);
     (void)root.set("runtimeColumnProbe", probe);
 
     // Per-entity ladder levels: the operator-facing answer to "is the commander actually driving

@@ -23,6 +23,17 @@ constexpr std::array<std::string_view, 3> kRequiredVelocityColumns{
     n8ro::sim::kTransformColumnVelocityDown,
 };
 
+// The geodetic triple the snapshot and Stage B both depend on (v1.8.55). Unlike the velocity columns
+// above, these are authored SCHEMA leaves - slash-joined, and spelled here because no SDK header
+// owns these names. The source is the schema reference,
+// /datablocks/componentTransform/positionGeodetic/... , with the /datablocks/<componentType>/
+// prefix dropped per the field-path convention.
+constexpr std::array<std::string_view, 3> kRequiredGeodeticLeaves{
+    "positionGeodetic/latitudeDeg",
+    "positionGeodetic/longitudeDeg",
+    "positionGeodetic/altitudeHaeM",
+};
+
 } // namespace
 
 const char* toString(ProbeResult result) {
@@ -34,7 +45,8 @@ const char* toString(ProbeResult result) {
     return "notRun";
 }
 
-ProbeReport probeRuntimeColumnsWith(const std::string& entityId, const ColumnReader& read) {
+ProbeReport probeSnapshotLeavesWith(
+    const std::string& entityId, const ColumnReader& read, const HealthLeafProbe& probeHealth) {
     ProbeReport report;
     report.probedEntityId = entityId;
 
@@ -54,9 +66,34 @@ ProbeReport probeRuntimeColumnsWith(const std::string& entityId, const ColumnRea
         }
     }
 
+    for (const std::string_view leaf : kRequiredGeodeticLeaves) {
+        if (!read(entityId, leaf).has_value()) {
+            report.result = ProbeResult::Fail;
+            report.detail = "componentTransform schema leaf '" + std::string(leaf)
+                + "' did not resolve on entity '" + entityId
+                + "'; reconcile against dev/ai-coding/schema-reference/schema-reference.json";
+            return report;
+        }
+    }
+
+    // Health is checked AFTER the fatal leaves and cannot change the verdict. An unreadable tier
+    // mutes the C27 uncommandable guard, and a muted guard is worth a warning - but never worth
+    // disabling a commander that is otherwise fully able to run. See the header for the argument.
+    if (probeHealth && !probeHealth(entityId)) {
+        report.warning = "componentLifecycle/health did not resolve on entity '" + entityId
+            + "'; the commander is ENABLED and running, but the guard that stops it commanding a "
+              "wrecked airframe cannot read the tier and will treat every aircraft as commandable "
+              "(PRD C27). Reconcile against schema-reference.json";
+    }
+
     report.result = ProbeResult::Pass;
-    report.detail = "velocityNed.{x,y,z} resolved on '" + entityId + "'";
+    report.detail = "velocityNed.{x,y,z} and positionGeodetic.{lat,lon,altHae} resolved on '"
+        + entityId + "'";
     return report;
+}
+
+ProbeReport probeRuntimeColumnsWith(const std::string& entityId, const ColumnReader& read) {
+    return probeSnapshotLeavesWith(entityId, read, nullptr);
 }
 
 ProbeReport probeRuntimeColumns(const n8ro::sim::IEntityManager& manager) {
@@ -79,11 +116,19 @@ ProbeReport probeRuntimeColumns(const n8ro::sim::IEntityManager& manager) {
         return report;
     }
 
-    return probeRuntimeColumnsWith(
+    return probeSnapshotLeavesWith(
         subjectId,
         [&manager](const std::string& entityId, std::string_view fieldPath) {
             return n8ro::sim::readComponentFieldReal(
                 manager, entityId, n8ro::sim::kComponentTransform, fieldPath);
+        },
+        [&manager](const std::string& entityId) {
+            // Resolve-check only. A tier this build cannot interpret is still a tier that RESOLVED,
+            // so the question here is narrower than readHealthTier's: does the leaf exist at all?
+            return n8ro::sim::readComponentFieldInt(
+                       manager, entityId, n8ro::sim::kComponentLifecycle, "health").has_value()
+                || n8ro::sim::readComponentFieldText(
+                       manager, entityId, n8ro::sim::kComponentLifecycle, "health").has_value();
         });
 }
 
