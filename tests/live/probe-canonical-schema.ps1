@@ -25,8 +25,9 @@
 
 [CmdletBinding()]
 param(
-    [string]$CanonicalFile  = "C:\N8RO\schema-canonical.json",
-    [string]$ProjectionFile = "C:\N8RO\schema-projection.json",
+    # Resolved through N8RO_RELEASE_ROOT rather than hardcoded - see count-prefix-tokens.ps1.
+    [string]$CanonicalFile  = (Join-Path $(if ($env:N8RO_RELEASE_ROOT) { $env:N8RO_RELEASE_ROOT } else { "C:\N8RO" }) "schema-canonical.json"),
+    [string]$ProjectionFile = (Join-Path $(if ($env:N8RO_RELEASE_ROOT) { $env:N8RO_RELEASE_ROOT } else { "C:\N8RO" }) "schema-projection.json"),
     [string]$Model          = "claude-haiku-4-5",
     [string]$KeyEnvVar      = "ANTHROPIC_API_KEY",
     [string]$BaseUrl        = "https://api.anthropic.com"

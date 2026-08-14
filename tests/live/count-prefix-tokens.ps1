@@ -20,7 +20,10 @@
 
 [CmdletBinding()]
 param(
-    [string]$PrefixFile = "C:\N8RO\prefix.txt",
+    # Resolved through N8RO_RELEASE_ROOT like every other script here, rather than hardcoding a
+    # release path. These two probes were the last files in the repository naming C:\N8RO with no
+    # environment fallback (v1.8.57, item 73(k)).
+    [string]$PrefixFile = (Join-Path $(if ($env:N8RO_RELEASE_ROOT) { $env:N8RO_RELEASE_ROOT } else { "C:\N8RO" }) "prefix.txt"),
     [string]$Model = "claude-haiku-4-5",
     [string]$KeyEnvVar = "ANTHROPIC_API_KEY",
     [string]$BaseUrl = "https://api.anthropic.com",

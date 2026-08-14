@@ -36,3 +36,8 @@ logs/
 *.gguf
 *.safetensors
 .claude/
+
+# Python bytecode. tools/ holds scripts rather than a package, so this only appears when
+# something imports one of them - which py_compile and any future test harness both do.
+__pycache__/
+*.pyc

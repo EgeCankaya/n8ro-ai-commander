@@ -151,6 +151,26 @@ function Assert-That {
     else { Write-Host "  [FAIL] $Description" -ForegroundColor Red; $script:failures.Add($Description) }
 }
 
+# EVERY NUMBER THIS HARNESS PRINTS GOES THROUGH HERE, AND IT IS NOT COSMETIC.
+#
+# PowerShell's -f operator formats with the CURRENT culture. On a machine whose decimal separator is
+# a comma - which is most of Europe, and is the machine this was written on - the frame-cost line
+# printed "p50 0,0054 ms" while the maximum on the same line printed with a period, because the two
+# reached -f by different paths.
+#
+# The figures this harness prints are transcribed into docs/prd.md, docs/summary.md and README.md,
+# where lint-prd.ps1 pins them and every existing copy uses a period. A published gate figure whose
+# punctuation depends on the operator's Windows locale is a figure two readers can legitimately
+# disagree about, and the disagreement would be invisible to every check in this repository.
+#
+# Precision is deliberately NOT changed here - this formats the same values, it does not round them.
+function Fmt {
+    param($Value)
+    if ($null -eq $Value) { return "" }
+    try { return [string]::Format([cultureinfo]::InvariantCulture, "{0}", [double]$Value) }
+    catch { return [string]$Value }
+}
+
 Write-Host "=== AI Entity Commander - Phase 1b live scenario smoke ==="
 Write-Host "release root : $ReleaseRoot"
 Write-Host "scenario     : Mariana Shield (shipped, unmodified)"
@@ -381,7 +401,7 @@ local.grammarEnabled=true
         $inFlight = $requested.Count - $resolved
         $rate = if ($resolved) { 100.0 * $accepted.Count / $resolved } else { 0 }
         Write-Host ("  acceptance: {0} of {1} RESOLVED ({2} %) - {3} requested, {4} still in flight at shutdown" -f `
-            $accepted.Count, $resolved, [math]::Round($rate,1), $requested.Count, $inFlight)
+            $accepted.Count, $resolved, (Fmt ([math]::Round($rate,1))), $requested.Count, $inFlight)
         Write-Host ("              REPORTED, NOT BARRED, and at n={0} it is not a rate at all - the >= 95 %" -f $resolved)
         Write-Host  "              bar lives on the 200-order soak. Do not quote this figure as one."
 
@@ -434,9 +454,9 @@ local.grammarEnabled=true
         if ($runEnd) {
             $stats = $runEnd.detail | ConvertFrom-Json
             Write-Host ("  plugin frame cost: p50 {0} ms, p95 {1} ms, max {2} ms over {3} frames" -f `
-                $stats.frame.p50Ms, $stats.frame.p95Ms, $stats.frame.maxMs, $stats.frame.frames)
+                (Fmt $stats.frame.p50Ms), (Fmt $stats.frame.p95Ms), (Fmt $stats.frame.maxMs), $stats.frame.frames)
             Assert-That ($stats.frame.maxMs -lt 5.0) `
-                "no frame exceeded 5 ms of plugin cost (max $($stats.frame.maxMs) ms)"
+                "no frame exceeded 5 ms of plugin cost (max $(Fmt $stats.frame.maxMs) ms)"
             Assert-That ($stats.timeouts -eq 0) `
                 "the plugin's own timeout counter is zero ($($stats.timeouts))"
 
@@ -447,9 +467,9 @@ local.grammarEnabled=true
             $schema = if ($stats.rejectByReason.schema) { $stats.rejectByReason.schema } else { 0 }
             $shapeRate  = if ($stats.requested) { 100.0 * $shape  / $stats.requested } else { 0 }
             $schemaRate = if ($stats.requested) { 100.0 * $schema / $stats.requested } else { 0 }
-            Write-Host ("  reject.shape : {0} of {1} requested ({2} %)" -f $shape, $stats.requested, [math]::Round($shapeRate,2))
-            Write-Host ("  reject.schema: {0} of {1} requested ({2} %)" -f $schema, $stats.requested, [math]::Round($schemaRate,2))
-            Assert-That ($schemaRate -lt 1.0) "reject.schema < 1 % (got $([math]::Round($schemaRate,2)) %)"
+            Write-Host ("  reject.shape : {0} of {1} requested ({2} %)" -f $shape, $stats.requested, (Fmt ([math]::Round($shapeRate,2))))
+            Write-Host ("  reject.schema: {0} of {1} requested ({2} %)" -f $schema, $stats.requested, (Fmt ([math]::Round($schemaRate,2))))
+            Assert-That ($schemaRate -lt 1.0) "reject.schema < 1 % (got $(Fmt ([math]::Round($schemaRate,2))) %)"
         } else {
             Assert-That $false "run-end stats record present in the order log"
         }
