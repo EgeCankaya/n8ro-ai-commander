@@ -32,77 +32,47 @@ anything here. `docs/summary.md` carries no number that is not also in the PRD, 
 | 0 | Scaffold, repo, empty `aiCommander` namespace | **closed** |
 | 1a | Full pipeline on the `stub` / `replay` backends | **closed** |
 | 1b | `local` adapter against Ollama | **closed** — every gate item has a result |
-| 2 | `claude` adapter | **ran** — adapter complete, measured, and exercised in-engine. **Not formally closed**, but it may ship: the standing egress grant of 2026-08-09 authorizes the hosted backend as a product. See *Authorization* below |
+| 2 | `claude` adapter | **closed** — v1.8.59, 2026-08-15. Gate met except **two named misses that are recorded rather than repaired**: cost-model accuracy within ±20 %, and hosted p95 latency (4,615 ms against ≤ 2.5 s). Phase 3 explained both; neither was fixed. The standing grant of 2026-08-09 makes the backend shippable |
 | 3 | Diagnostics on what Phase 2 carried | **closed** — four results, of which three are negative, null, or a refusal |
 
-**The open-item register** (PRD §Carried out of Phase 3) has three states, not two. A row that
-nobody should touch and a live question used to look identical; a **deferred** row now carries a
-revisit condition you can test without running anything.
+**Every phase is closed and the open-item register is empty** — no open rows, no deferred rows. The
+five rows it once carried (C6, C8, C17, C23, C27) are all closed or cancelled, each with its
+reasoning, in the PRD's §Carried out of Phase 3. **Feature-complete against the PRD's FR set; the
+project is in maintenance** (owner decision, 2026-08-09).
 
-| # | State | Item |
-|---|---|---|
-| ~~C27~~ | closed | *(v1.8.54 — the commander paid for four orders to an aircraft that had been `wrecked` for over a minute. **Opened and closed in one revision**; the guard is built and tested, and has not yet been observed firing in-engine)* |
-| ~~C23~~ | closed | *(v1.8.41 — AIC-ORD-2 clauses 7 and 8 coded and pinned by six offline tests, demonstrated under a commander, residual named)* |
-| ~~C17~~ | closed | *(v1.8.41 — closed as a stated position on C8's precedent; the bar stays on the fixtures, by owner decision)* |
-| ~~C8~~ | closed | *(v1.8.36 — Haiku is and will remain the default, so `maxTokens = 512` is correct. Revisit condition kept as a tripwire)* |
-| ~~C6~~ | cancelled | *(v1.8.36 — not answered; **nothing here is blocked on it**, and §Out of scope already specifies both branches)* |
-
-**The register is empty. No open rows, no deferred rows.**
-
-*(**Corrected v1.8.54.** This table said C23 and C17 were **open** and closed with *"Two live rows"*
-— **thirteen revisions after the PRD closed both at v1.8.41.** Same failure as §Authorization below:
-the README lagging the PRD on a load-bearing claim, §Corrections items 68(e) and 69(f).)*
-
-**Gates as of 2026-08-14 (PRD v1.8.57). Which rows were re-run for this revision is stated per row,
-because "all green as of" over a table where one row is eleven days old is the claim that went wrong
-below:**
+**Gates, all re-run for PRD v1.8.59 — none requoted.** The four offline rows were re-run
+**2026-08-15**; the live three-arm scenario needs a server and ~35 minutes and was run **2026-08-14**:
 
 | Suite | Result |
 |---|---|
-| Unit | **186 / 186** — re-run 2026-08-14 |
-| Deployed-artifact smoke | **30 / 30** — re-run 2026-08-14 |
-| Live three-arm scenario smoke | **22 checks, 0 failed** — re-run 2026-08-14 on the shipped `qwen2.5:7b-instruct-q8_0` default (third occasion; twice before on 2026-08-09) |
-| `tools/lint-prd.ps1` · `tools/check-artifacts.ps1` | 16 checks, 0 errors, 0 warnings · 116 files, PASS — both re-run 2026-08-14 |
-| `tools/deployment-check.ps1` | **6 checked, 0 failed**, 3 manual — re-run 2026-08-14 against a torn-down tree |
+| Unit | **186 / 186** |
+| Deployed-artifact smoke | **30 / 30** |
+| Live three-arm scenario smoke | **22 checks, 0 failed** — on the shipped `qwen2.5:7b-instruct-q8_0` default (third occasion; twice before on 2026-08-09) |
+| `tools/lint-prd.ps1` · `tools/check-artifacts.ps1` | 16 checks, 0 errors, 0 warnings · 116 files, PASS |
+| `tools/deployment-check.ps1` | **6 checked, 0 failed**, 3 manual — against a torn-down tree |
 
 <!-- gate-figures: unit=186/186 artifact-smoke=30/30 live-smoke=22/0 tracked-files=116 -->
 
-*(v1.8.53 — **this table was wrong and had been for some time.** It said `162 / 162` and
-`105 files` under a heading asserting the figures were current; the real numbers were `169 / 169`
-and `110`, and the file count was already false on the date the table stamped itself with. It is
-the acceptance figure's staleness failure — four events, PRD §Corrections items 46(f), 48, 50, 51 —
-recurring in the one document a reader meets first. **So it is now pinned rather than retyped:**
-`tools/lint-prd.ps1` check 11 requires the sentinel above to match the PRD's copy, and it
-**computes** `tracked-files` from `git ls-files` instead of trusting either. §Corrections item 69(f).)*
-
-*(**v1.8.57 — and it went stale again anyway, in the half of the sentinel that was still pinned by
-agreement.** Both copies said `unit=185/185` while the PRD's own v1.8.56 entry said **186/186** two
-thousand lines away: check 11 compares the README's sentinel to the PRD's and passed, because the
-two stale copies agreed with each other. **Agreement is not verification when both writers copy from
-the same stale source.** `tools/lint-prd.ps1` check 16 now **computes** the unit figure the way
-check 11 already computed `tracked-files` — counting `AIC_TEST(` across the .cpp files the unit
-`.vcxproj` actually compiles — so the denominator is derived from the suite rather than typed.
-§Corrections item 73.)*
+**These figures are pinned, not retyped.** `tools/lint-prd.ps1` requires the sentinel above to match
+the PRD's copy, and it **computes** two of the four rather than trusting either document —
+`tracked-files` from `git ls-files`, and the unit denominator by counting `AIC_TEST(` across the
+`.cpp` files the unit `.vcxproj` actually compiles. Both were added after that figure went stale;
+the second went stale in *both* copies at once while the two agreed with each other, which is why
+agreement alone is not the check.
 
 **Measured against the PRD's success metrics:** cost **$1.05** per four-ship
 scenario-hour against a ≤ $1.10 target (**met**); `reject.schema` **0.00 %** over 776
 orders across two backends and three models (**met**); order acceptance **100 %** on the
 synthetic-fixture soaks and **82.6 % [79.6, 85.4]** in-engine against real scenario
-state — **91.6 % [89.2, 93.7]** once the two non-model-failure classes are removed
-*(v1.8.57 — was 80.8 % and 90.9 %; regenerated over 702 resolved orders across 37 runs.
-**The C23 stall-floor class did not grow by a single sample — still 58, every one of them
-predating the fix**, now the seventh consecutive revision that prediction has held. The
-population includes three v1.8.57 verification runs, two of them 20 s — see PRD item 73(j))*
-(**two instruments, two named rows — see C17**); local 7B round-trip p95 **7,975 ms** against a
+state — **91.6 % [89.2, 93.7]** once the two non-model-failure classes are removed, over 702
+resolved orders across 37 runs
+(**two instruments, two named rows — PRD C17**); local 7B round-trip p95 **7,975 ms** against a
 ≤ 20 s target (**met**), hosted Haiku p95 **4,615 ms** over the 240-order soak against
 ≤ 2.5 s (**missed**, and not control-loop-binding — the 20 s cadence absorbs a p99 of
 7,099 ms). Plugin frame cost p95 **0.0059 ms**, max **0.5334 ms** over 12,001 frames
 against a 5 ms bar.
 
-Total spend across seven owner-authorized egress grants: **≈$2.63 of $5**
-*(v1.8.57 — was "six grants" and "≈$2.57". The count had been stale since the standing grant of
-2026-08-09 made it seven, which §Authorization below states correctly; the total moved by the
-≈$0.0557 of hosted verification this revision spent.)*
+Total spend across seven owner-authorized egress grants: **≈$2.63 of $5**.
 
 ## The finding that matters most
 
@@ -135,36 +105,14 @@ commanding them.
 **What that does not say.** It carries a mechanism — *does the uncommanded script ever
 fire?* — and no rate.
 
-**A second complete run has since landed, and it changes two of the sentences above.**
+### And then it was measured, on one endpoint *(v1.8.46)*
 
-| run | build | ON | SCRIPT-ONLY | OFF |
-|---|---|---|---|---|
-| `095026` | old | 3 / 2 / 0 / 0 | 3 / 2 / 0 / 0 | 2 / 1 / 0 / 0 |
-| `135722` | old | 3 / 2 / 0 / 0 | **2 / 2 / 1 / 0** | 4 / 2 / 0 / 0 |
-| `185750` | new | 3 / 2 / 0 / 0 | **2 / 2 / 1 / 0** | 4 / 2 / 0 / 0 |
+**Launches, detonations, kills and losses cannot answer the question at any n anyone will run** —
+17 to 156 paired runs each, and `losses` has been degenerate since the reference-script fix. Those
+four columns are reported by `tools/analyse-outcomes.py` and are **not** the verdict.
 
-**The commanded/script-only identity does not replicate.** *"Identical on every column"* is
-a universal claim and one counter-instance disproves it, so it is **refuted rather than
-merely unsupported**.
-
-**The obvious reading of the repeat is too strong, though.** The script-only arm carries **no
-model** and is near-deterministic — its two kills are byte-identical, same munition id and
-`pk` to six decimals — so those two runs are nearer one observation than two, and
-**`095026`'s script-only row is the outlier that wants explaining**, on the same build and
-script. The commanded arm was 3 / 2 / 0 / 0 in all three runs: **the variance in this
-comparison sits in the arm without the model.** **Nothing about what the commander is worth
-is established in either direction** *— on these four columns, which is all this section had
-when it was written. See below.*
-
-### And then it was measured, on one endpoint *(v1.8.46; this section corrected v1.8.52)*
-
-**This README carried the paragraph above for six revisions after the answer existed** —
-`docs/summary.md` and the PRD were updated and this file was not, which is
-§Corrections item 68(e).
-
-The four columns above **cannot answer the question at any n anyone will run** (17 to 156 runs
-each; `losses` has been degenerate since the reference-script fix). The signal was in the graded
-`pk` the engine records on every damage line. Under a protocol written **before** the first run,
+The signal was in the graded `pk` the engine records on every damage line. Under a protocol written
+**before** the first run,
 four three-arm 600 s `local` runs at the shipped default give a paired commander-on minus
 script-only difference in **damage absorbed** of:
 
@@ -179,18 +127,17 @@ script-only difference in **damage absorbed** of:
    in either direction**.
 2. **One endpoint, one scenario, one model** — the shipped 7B default, in "Mariana Shield", with
    two commanded aircraft, on top of the reference Tier-1 script's own competence.
-3. **The control arm is near-deterministic** — the same property this section already names above.
-   Its damage-absorbed value takes **two values across all nine archived runs**, so the
-   replication against the five earlier runs is of the commanded arm alone. The interval excludes
-   zero under either control value (§Corrections item 68(b)).
+3. **The control arm is near-deterministic.** Its damage-absorbed value takes **two values across
+   all nine archived runs**, so the replication against the five earlier runs is of the commanded
+   arm alone. The interval excludes zero under either control value (§Corrections item 68(b)).
 
 *Source: PRD §Corrections items 62 and 68; §Validation, "The outcome campaign — a
 pre-registration".*
 
-**Those are the only two kills in eighteen archived runs**, both in the arm with no model in
-the loop. **The qualification belongs with the number:** two SAM hits had already left
-`BlueF16_02` `wrecked` (cumPk 0.903) before the Su-35's missile finished it. A kill by the
-engine's definition, and not an unaided one.
+**That interval is fixed by its pre-registration and does not move as runs accumulate.**
+`tools/outcome-campaign.py --campaign` reproduces it from the four named archives; run without
+`--campaign` the tool pools everything, prints a different number, and **withholds** the publishable
+form on purpose — pooling is precisely what the pre-registration forbids.
 
 ## Why the validator is not optional
 
@@ -208,12 +155,10 @@ places, on a value appearing nowhere in the prompt. Neither the schema nor the c
 decoder can catch that; **Stage B's geofence is the only thing that does**, and widening
 the bound would not have fixed it — the bound is what caught it.
 
-*(**C5**, closed as a bounded negative. It is deliberately not over-claimed and it is deliberately
-not the headline: **n = 11 waypoint-carrying orders support no rate**, and the detector looks for
-Perth specifically, so it would not see a different memorised coordinate. What the record settles is
-that the substitution **can** happen and that the geofence is the only layer that catches it. An
-earlier version of this file led with this finding while the project's largest result — C21, above —
-appeared nowhere in it.)*
+*(**C5**, closed as a bounded negative, and deliberately not over-claimed: **n = 11
+waypoint-carrying orders support no rate**, and the detector looks for Perth specifically, so it
+would not catch a different memorised coordinate. What the record settles is that the substitution
+**can** happen, and that the geofence is the only layer that catches it.)*
 
 ## Known rough edges
 
@@ -229,23 +174,23 @@ Stated here rather than discovered during a demo.
   fallback ladder is not what sustains it.)* Open. **The question has two ends — the onset and
   the failure to recover — and they are different layers.** Still an owner decision.
 - **In-engine acceptance is quoted as an interval, never as a point.** Every interval in
-  play is 15–30 points wide. *(v1.8.36 — it had gone stale four times under that rule alone,
-  so `tools/acceptance-report.py` now owns the number and `tools/lint-prd.ps1` fails the
-  build if this file, the PRD and the summary disagree.)*
+  play is 15–30 points wide. `tools/acceptance-report.py` owns the number and
+  `tools/lint-prd.ps1` fails the build if this file, the PRD and the summary disagree.
 
 <!-- in-engine-acceptance: 82.6 [79.6, 85.4] n=702 runs=37 -->
 
 <!-- outcome-damage-absorbed: -0.7741 [-1.0210, -0.5272] n=4 signs=4/4 SUPPORTED -->
-- **Three kills have ever been scored**, and in **all three** the target was already `wrecked`
-  by SAM hits when the Su-35's missile finished it. Two were 2026-08-08 in the script-only arm;
-  the third is 2026-08-09 and is **the first in a commanded arm**. **A kill by the engine's
-  definition; not an unaided one**, and no rate follows from three. *(The better result in that
-  run is not a kill at all: `RedSu35_01` took `BlueF16_01` to `wrecked` with two of its own
-  missiles and no SAM contribution — the first material damage a commanded aircraft has done
-  on its own.)*
-- **The commanded/script-only identity of the first three-arm run did not replicate.** It is
-  refuted; nothing about the commander's value is established in either direction, and the
-  script-only arm is near-deterministic so the repeat counts for less than it looks.
+- **No kill in this archive is an unaided one.** In every kill inspected, the target had already
+  been taken to `wrecked` by SAM hits before the Su-35's missile finished it — a kill by the
+  engine's definition, and not evidence the commander can finish a healthy aircraft. **The count
+  is deliberately not quoted here**, because it moves with every run and this file has twice
+  published a figure that went stale; `tools/analyse-outcomes.py` reports it per arm per run.
+  *(The better result on record is not a kill at all: `RedSu35_01` took `BlueF16_01` to `wrecked`
+  with two of its own missiles and no SAM contribution — the first material damage a commanded
+  aircraft has done on its own.)*
+- **Nothing about the commander's value is established on launches, detonations, kills or
+  losses**, in either direction. The one endpoint that could separate the arms at a feasible n
+  is damage absorbed, above, and its three limits travel with it.
 
 ## Authorization — the hosted backend may ship, under a standing grant
 
@@ -305,21 +250,9 @@ it. Nothing here becomes non-proprietary by being published.**
 the build resolves the SDK through `N8RO_RELEASE`. An Anthropic API key is neither sufficient nor the
 binding constraint.
 
-*(**Corrected v1.8.54.** This section previously read "the hosted backend cannot ship" and "there is
-therefore no authorization under which an operator other than the measurer may turn the hosted
-backend on" — **six revisions after the standing grant made both sentences false.** A reader meeting
-this project at its README was being told they may not do the thing v1.8.48's decision 3 explicitly
-permits. It is the README-lags-PRD failure of §Corrections items 68(e) and 69(f), third occurrence,
-so `tools/lint-prd.ps1` check 15 now fails the build if this section stops naming the grant's
-revision.)*
-
-*(**Updated v1.8.56.** This section previously ended *"it does not authorize publication of this
-repository, which needs the same class of decision and has not been made"* — true when written and
-retired by the grant above. Check 15 pinned **that exact sentence**, so it would have failed the
-build the moment the sentence became false, and the obvious repair — weakening the check — would have
-retired the guard for the one event it was built to survive. It now pins the **current** posture:
-this section must name v1.8.56 and state the publication decision, whichever way it goes. A control
-that only holds while a decision holds is a control with an expiry date nobody wrote down.)*
+**This section is pinned by `tools/lint-prd.ps1` check 15**, which fails the build if it stops naming
+the standing grant's revision and date or stops stating the publication decision either way. Both
+postures went stale here once, for six revisions each.
 
 `docs/egress.md` enumerates every field that leaves the machine. Any change to that set is
 a PRD revision **and** an `egress.md` revision, made before the next hosted request.
@@ -462,4 +395,7 @@ on the first run, both of which the plugin logs:
 
 ## License
 
-See [`NOTICE`](NOTICE). Private; publication requires owner authorization.
+See [`NOTICE`](NOTICE). **Publication of this repository was authorized by the owner on 2026-08-14
+(PRD v1.8.56); the terms in `NOTICE` are unchanged and nothing here became non-proprietary by being
+published.** The grant does not extend to the N8RO release tree, to any file carrying the Arkheon
+per-file banner, or to order logs and run archives — see §Authorization above.

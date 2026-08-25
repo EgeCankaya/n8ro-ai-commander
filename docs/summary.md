@@ -7,8 +7,8 @@ Unauthorized copying of this file, via any medium, is strictly prohibited.
 
 # N8RO AI Entity Commander — summary
 
-**PRD version:** v1.8.58
-**Date:** 2026-08-14
+**PRD version:** v1.8.59
+**Date:** 2026-08-15
 **Audience:** the platform owner, and whoever picks up the next block of work.
 
 > **This document carries no number that is not also in `docs/prd.md`.** Every figure below cites the
@@ -104,9 +104,12 @@ arm carries no model and is near-deterministic** — its two kills are byte-iden
 runs are nearer one observation than two, and **`095026` is the outlier that wants explaining.** The
 commanded arm was 3 / 2 / 0 / 0 in all three runs; **the variance sits in the arm without the model.**
 
-**Those kills are the only two in eighteen archived runs**, both in the arm with no model in the loop.
-**The qualification belongs with the number:** two SAM hits had already left the target `wrecked`
-before the Su-35's missile finished it. A kill by the engine's definition; not an unaided one.
+***(v1.8.59 — this read "the only two kills in eighteen archived runs" and is corrected rather than
+requoted.)*** **No kill in this archive is an unaided one**, and that is the part that has not moved:
+in every kill inspected, SAM hits had already left the target `wrecked` before the Su-35's missile
+finished it. A kill by the engine's definition; not an unaided one. **The count itself is not quoted
+here** — it moves with every run, `tools/analyse-outcomes.py` reports it per arm per run, and this
+project has now published a stale version of it three times. *Source: §Corrections item 75(e).*
 
 **And C23's mechanism was misread twice — the second time by this project's own analysis.** **All 19
 archived `hold` orders were issued at 0.0 m from the aircraft's own position:** the model echoes own
